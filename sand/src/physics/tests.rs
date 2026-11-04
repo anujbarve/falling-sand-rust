@@ -744,7 +744,7 @@ mod new_materials {
     #[test]
     fn freezer_freezes_a_sealed_water_pool() {
         // A pool on a freezer plate, walled in so it cannot slide away. A
-        // cold plate in water is slow (about a minute to the first ice).
+        // cold plate in water is slow (about 20 s to the first ice at 10x contact).
         let mut w = World::new(30, 30);
         w.fill(0, 0, 1, 30, STONE);
         w.fill(29, 0, 30, 30, STONE);
@@ -752,10 +752,10 @@ mod new_materials {
         w.fill(1, 24, 29, 29, FREEZER);
         w.fill(1, 16, 29, 24, WATER);
         let mut sim = CpuSim::new(&w);
-        for _ in 0..90 * STEPS_PER_SECOND {
+        for _ in 0..40 * STEPS_PER_SECOND {
             sim.step(&mut w);
         }
-        assert!(w.count(ICE) > 0, "a freezer plate freezes the water on it within 90 s");
+        assert!(w.count(ICE) > 0, "a freezer plate freezes the water on it within 40 s");
         assert_eq!(temp(w.cells[24 * 30 + 5]), FREEZER_T, "the plate stays at -30°C");
     }
 

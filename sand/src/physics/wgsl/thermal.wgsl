@@ -36,8 +36,11 @@ fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     if ((a == WATER && hot_b) || (b == WATER && hot_a)) {
         return BOIL_CONDUCTANCE;
     }
-    if ((a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FREEZER) && b == WATER)) {
+    if ((a == WATER && b == ICE) || (a == ICE && b == WATER)) {
         return MELT_CONDUCTANCE;
+    }
+    if ((a == WATER && b == FREEZER) || (a == FREEZER && b == WATER)) {
+        return FREEZER_CONDUCTANCE;
     }
     return series + radiation;
 }
@@ -45,6 +48,8 @@ const BOIL_CONDUCTANCE: i32 = 250000;
 const STEAM_RELAX_K: i32 = 2950;
 const BOIL_SLOWDOWN: u32 = 64u;
 const MELT_CONDUCTANCE: i32 = 7500;
+const FREEZER_CONDUCTANCE: i32 = 75000; // 10x the melting contact
+const EXHAUST_FLUX: i32 = 10;
 fn heat_rate(c: i32, conductance: i32) -> i32 {
     // Same as heat_rate in thermal.rs (c = the cell's heat capacity).
     var rate: i32;
@@ -132,6 +137,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     var touches_air = false;
     var touches_lava = false;
     var touches_fire = false;
+    var touches_exhaust = false;
     var touches_fuel = false;
     let i = y * w + x;
     let key = pcg(frame ^ EDGE_SALT);
@@ -145,6 +151,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || flame(mn);
+        touches_exhaust = touches_exhaust || mn == EXHAUST;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
         open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
@@ -159,6 +166,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || flame(mn);
+        touches_exhaust = touches_exhaust || mn == EXHAUST;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
         open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
@@ -173,6 +181,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || flame(mn);
+        touches_exhaust = touches_exhaust || mn == EXHAUST;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
         open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
@@ -187,6 +196,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || flame(mn);
+        touches_exhaust = touches_exhaust || mn == EXHAUST;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
         open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
@@ -200,7 +210,8 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     let tick = r2 % TICK_STEPS == 0u;
     // Flame flux onto a touching solid or liquid (same as heat_cell).
     if (touches_fire && condensed(m) && !flame(m)) {
-        t += FLAME_UNITS / cap(m);
+        let flux = select(FLAME_UNITS, EXHAUST_FLUX * FLAME_UNITS, touches_exhaust);
+        t += flux / cap(m);
         maybe = true;
     }
     if (condensed(m) && open_faces > 0 && t0 != AMBIENT) {

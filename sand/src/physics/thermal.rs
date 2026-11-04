@@ -77,11 +77,14 @@ pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     if (a == WATER && hot_surface(b, tb)) || (b == WATER && hot_surface(a, ta)) {
         return BOIL_CONDUCTANCE;
     }
-    // Water against ice (a melting interface), or against a freezer plate
-    // (a cold plate with the same contact coefficient, h ~ 1500 W/m²K): the
-    // freezer's wall is 5 mm of insulation, far less than the water layer.
-    if (a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FREEZER) && b == WATER) {
+    // Water against ice (a melting interface): h ~ 1500 W/m²K.
+    if (a == WATER && b == ICE) || (a == ICE && b == WATER) {
         return MELT_CONDUCTANCE;
+    }
+    // Water against a freezer plate: a cold plate at 10x the melting contact,
+    // h ~ 15000 W/m²K (forced cold, not still water).
+    if (a == WATER && b == FREEZER) || (a == FREEZER && b == WATER) {
+        return FREEZER_CONDUCTANCE;
     }
     series + radiation
 }
@@ -98,6 +101,10 @@ pub const BOIL_SLOWDOWN: u32 = 64;
 pub const BOIL_CONDUCTANCE: i32 = 250_000;
 /// Boundary conductance for water against ice: h = 1500 W/m²K times 5 mm.
 pub const MELT_CONDUCTANCE: i32 = 7_500;
+/// Freezer plate against water: 10x the melting contact (h = 15000 W/m²K times 5 mm).
+pub const FREEZER_CONDUCTANCE: i32 = 75_000;
+/// A jet's exhaust heats what it touches 10x harder than a flame does.
+pub const EXHAUST_FLUX: i32 = 10;
 
 /// Per-step rate (times 2^24) at which a cell of material `m` follows a
 /// temperature gap across an edge of the given conductance: heat crossing
@@ -226,6 +233,7 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     let mut touches_air = false;
     let mut touches_lava = false;
     let mut touches_fire = false;
+    let mut touches_exhaust = false;
     let mut touches_fuel = false; // wood or oil next door: fire can spread into it
     let mut open_faces = 0; // neighbours that are clear gas (sky for radiation)
     let key = pcg(frame ^ EDGE_SALT);
@@ -236,6 +244,7 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         touches_air |= mn == AIR;
         touches_lava |= mn == LAVA;
         touches_fire |= flame(mn);
+        touches_exhaust |= mn == EXHAUST;
         touches_fuel |= mn == WOOD || mn == OIL || mn == COAL;
         open_faces += (KIND[mn as usize] == GAS && !flame(mn)) as i32;
         if tn == t0s {
@@ -266,7 +275,8 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     // FLAME_Q (150 kW/m^2): dT/dt = q / (rho c dx), in units of 1/256 K per
     // step = 256 q / (CAP*10 * dx * 1200) = FLAME_UNITS / CAP.
     if touches_fire && condensed(m) && !flame(m) {
-        t += FLAME_UNITS / CAP[m as usize];
+        let flux = if touches_exhaust { EXHAUST_FLUX * FLAME_UNITS } else { FLAME_UNITS };
+        t += flux / CAP[m as usize];
         maybe = true;
     }
     // Hot (or cold) surfaces facing open air radiate to the surroundings.

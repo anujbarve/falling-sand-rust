@@ -279,9 +279,9 @@ if (a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FREEZER) && 
 }
 ```
 
-$7500 = 1500 \cdot 0.005 \cdot 1000$ mW/(m·K). It is about eight times the plain series value, and that is the whole difference.
+$7500 = 1500 \cdot 0.005 \cdot 1000$ mW/(m·K) for ice. The freezer plate later got ten times that contact (`FREEZER_CONDUCTANCE` = 75000, h = 15000 W/(m²·K)), so the plate cools the water about ten times faster than ice melts in it. The plain series value is 923, and that is the whole difference.
 
-Be honest about where the number comes from. $h = 1500$ W/(m²·K) is a modelling value, taken from the melting interface, not a measurement of this freezer. The test `freezer_freezes_a_sealed_water_pool` checks that the result is physically plausible: the water on the plate freezes within 90 s. With the coefficient, the first ice appeared at 45.9 s in the run that produced the scratch numbers in section 3.
+Be honest about where the number comes from. $h = 1500$ W/(m²·K) is a modelling value, taken from the melting interface, not a measurement of this freezer. The test `freezer_freezes_a_sealed_water_pool` checks that the result is physically plausible: the water on the plate freezes within 40 s. The 45.9 s figure in section 3 was measured with the older ice-level contact (7500), so the freezer now freezes much sooner than that.
 
 The pool in that test is sealed: two stone walls and a stone floor hold it, so it cannot slide away from the plate. That keeps the timing about heat and not about flow.
 
@@ -432,7 +432,7 @@ fn exp_freezer_first_ice() {
 }
 ```
 
-Run it. In the project it prints `first ice at step 55083 = 45.9 s`. Now switch off the contact clause in your copy of `pair_conductance` (`thermal.rs`), so that water and freezer use plain series conduction:
+Run it. With the older 7500 contact the project printed `first ice at step 55083 = 45.9 s`; with the freezer's 75000 contact the first ice comes much earlier. Now switch off the contact clause in your copy of `pair_conductance` (`thermal.rs`), so that water and freezer use plain series conduction:
 
 ```rust
 if false && ((a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FREEZER) && b == WATER)) {
@@ -440,7 +440,7 @@ if false && ((a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FR
 }
 ```
 
-Run it again. It prints `no ice within 300 s`. The only change is the contact value. Put the clause back, and note that the test in the project only asks for ice within 90 s.
+Run it again. It prints `no ice within 300 s`. The only change is the contact value. Put the clause back, and note that the test in the project asks for ice within 40 s.
 
 ### Step C: the metal bar, and the parity test
 
@@ -565,7 +565,8 @@ A jet faces right, and the cell it would fill is stone. What does step 0 do? Doe
 - **Anchored** cells (`FIRE`, `EXHAUST`, `JET`, `FREEZER`) never fall and never spread sideways. Exhaust still moves, by its directed rule, which gravity never sees.
 - Exhaust life is 6 bits in aux, counted down with chance 1/16 per step, for an expected 0.84 s before it becomes smoke.
 - **Jets and freezers are pinned.** Their temperatures are reset after all rules run (700°C and -30°C). They are reservoirs, and they break energy conservation on purpose.
-- A **freezer plate** uses the same boundary coefficient as ice: $h = 1500$ W/(m²·K) times 5 mm, which is 7500 mW/(m·K). Plain conduction through the water gives 923 and froze nothing in 300 s. The coefficient is a modelling choice, and the pool test checks that the result is plausible.
+- A **freezer plate** has a contact coefficient ten times the ice one: $h = 15000$ W/(m²·K) times 5 mm, which is 75000 mW/(m·K). Ice uses 7500. Plain conduction through the water gives 923 and froze nothing in 300 s. The coefficient is a modelling choice, and the pool test checks that the result is plausible.
+- An **exhaust** heats the cells it touches ten times harder than a flame does (`EXHAUST_FLUX` = 10 times `FLAME_UNITS`).
 - **Metal** conducts about 11 times faster than stone, so the same rule gives a fast metal body and a slow stone one.
 - **Coal** ignites at 350°C next to air, lava or fire, and then burns for 10.7 to 13.6 s.
 - On the GPU, the byte tables are `vec4` (16 materials), `KIND_BITS` uses all 32 bits, and the uniform fast path leaves out `EXHAUST` and `COAL` because their rules use a random number. A 600-step scene with all the new materials must match the CPU cell for cell.
