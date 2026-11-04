@@ -1,6 +1,6 @@
 # Capstone: Build the Whole Thing Yourself
 
-The lessons showed you why each piece of the project looks the way it does. This roadmap takes the lessons away. Start from an empty folder and rebuild the project, one milestone at a time, until you have a GPU engine with chunk sleeping, an honest benchmark, and physics in real units that plays in real time.
+The lessons showed you why each piece of the project looks the way it does. This roadmap takes the lessons away. Start from an empty folder and rebuild the project, one milestone at a time, until you have a GPU engine with chunk sleeping, an honest benchmark, physics in real units that plays in real time, a GPU-rendered viewer, and heat as energy with latent heat.
 
 Each milestone has the same parts:
 
@@ -31,7 +31,11 @@ graph LR
   M8 --> M9
   M9 --> M10[M10 sleeping + GPU viewer + fused kernel]
   M10 --> M11[M11 real units, velocity, world clock]
+  M11 --> M12[M12 GPU-rendered viewer + settings]
+  M11 --> M13[M13 energy, latent heat, boundary layers]
 ```
+
+M12 and M13 are independent of each other. M13's heat view needs M12's `temp_of` only if you built M12 first.
 
 ---
 
@@ -185,17 +189,50 @@ Three parts. Do them in this order and keep every earlier test green throughout.
 
 **Time:** 8-15 hours. **Review:** [[16-real-units-velocity-clock]]. **Check against:** `07fcf0b` (`sand/src/physics/clock.rs`, `mod.rs` tests `free_fall_takes_the_right_time` and `sand_sinks_slowly_through_water`).
 
-**Total:** roughly 55-95 hours. Spread it over weeks, not days.
+> [!note] M11's numbers changed later
+> The "gpu max speed" figures from `07fcf0b` (640×360 ≈ 6.8×, 4K ≈ 0.3×) predate M13's heavier heat rule. If you do M13, rerun `cargo run --release --bin bench` and expect less headroom.
+
+## M12: A GPU-rendered viewer with settings
+
+**Goal:** Stop colouring cells on the CPU. Turn the viewer into a folder (`src/bin/physics/main.rs` plus `render.rs`, `settings.rs`, `ui.rs`). Upload the readback unchanged as an RGBA8 texture (`bytemuck::cast_slice`, one cell = one texel, `FilterMode::Nearest`), and decode material, aux and temperature in a GLSL 100 fragment shader with float maths. Add three passes: `emit` (what glows) into a small render target, a separable 9-tap Gaussian `blur` (horizontal then vertical), and a `scene` pass with material colour, grain, lighting, liquid depth, black-body glow, bloom, tone mapping and vignette. Add a `Settings` struct with `Quality` presets (Low, Medium, High, Ultra, Custom), grid size, window size, fullscreen, a frame cap and a GPU budget, opened with Esc.
+
+**Done when:**
+- [ ] No per-cell loop runs on the CPU: the only per-frame CPU work on the cells is one texture upload after `latest`.
+- [ ] The shader's decoding matches `material`/`aux`/`temp` for negative temperatures (check with the heat view on ice).
+- [ ] Render targets are created only when the grid size or bloom size changes, never per frame.
+- [ ] `presets_round_trip_and_custom_is_detected` passes: picking a preset and then changing one option by hand shows "Custom".
+- [ ] The frame cap defaults to 120 fps and works even where vsync is ignored (macOS OpenGL), and the world clock still runs at real speed under any cap.
+- [ ] Changing the grid size in the settings rebuilds the GPU sim and the renderer without leaking (old resources freed on `Drop`).
+- [ ] `SAND_SCREENSHOT=out.png SAND_FRAMES=120 cargo run --release --bin physics` saves a screenshot and exits, so you can check the looks from a script.
+
+**Time:** 6-10 hours. **Review:** [[15-gpu-viewer-pipelined-readback]] ("What changed later"). **Check against:** `072327e` (`sand/src/bin/physics/render.rs`, `settings.rs`).
+
+## M13: Heat as energy, latent heat and boundary layers
+
+**Goal:** Replace M11's single diffusivity per material with energy. The heat across an edge is the two conductivities in series (plus radiation between different materials) times the gap, and each cell's temperature changes by that heat over its own heat capacity `CAP`. Round with 24 bits without overflowing an `i32` (WGSL has no `i64`: split the multiply). Then add latent heat **inside the temperature field**: water's field rises past 100°C while it absorbs its latent heat and turns to steam only when it holds all of it (or earlier, at random, as a wet parcel), steam below 100°C in its field is a wet parcel, ice above 0°C is melting. A function `sens(cell)` gives the real temperature, and every edge uses it. Water against a hot surface, and water against ice, get a boundary-layer conductance. Keep chunk sleeping exact: boiling water and steam use a random number every step, so they count as "could change", and the GPU uniform-block fast path must skip boiling water.
+
+**Done when:**
+- [ ] `phase_transition_latent_heat` passes: water at exactly 100°C stays water, water holding `LATENT` becomes steam at 100°C, freezing and melting each take their fusion heat, and a wet steam parcel stays steam until it has given back all its latent heat.
+- [ ] `boiling_water_reads_at_most_100c` passes: `sens` pins boiling water to 100°C, freezing water and melting ice to 0°C, wet steam to 100°C, and leaves superheated steam alone.
+- [ ] `ice_melts_in_hot_water` passes: an ice cell in 80°C water melts within 40 s but not in the first second.
+- [ ] `lava_at_bottom_keeps_water_boiling_through_hot_crust` passes: after the first burst, steam is present in at least 80% of the steps of the third second, and lava is still molten under its crust.
+- [ ] `heat_between_different_materials_is_conserved_on_average` passes: hot stone in cold water, energy ($\sum$ `CAP` × temperature) drifts by less than 1% over 5 s, and the water beside the stone really warms.
+- [ ] `conduction_conserves_heat` still passes *exactly* for one material, and every equivalence test still passes (CPU == GPU, rayon == one thread, sleeping == no sleeping, odd sizes).
+- [ ] If you did M12: the shader's `temp_of` clamps water, steam and ice the same way `sens` does, so the heat view shows boiling water at 100°C, not at its field value.
+
+**Time:** 10-20 hours. **Review:** [[16-real-units-velocity-clock]] ("What changed later"), [[18-heat-latent-boundary-layers]], [[13-chunk-sleeping]] ("What changed later"). **Check against:** `5ddae24` (energy, radiation, expansion), `302a475` (latent heat, boundary layers; with `c4d6aeb`), and `sand/src/physics/{thermal,materials,tests}.rs` @ `df0f4a1`.
+
+**Total:** roughly 70-125 hours. Spread it over weeks, not days.
 
 ---
 
 ## Stretch goals
 
-None of these exist in the repo (except number 7, kept as an optional exercise). Each one needs you to keep the two rules: one writer per cell, and integer-only, deterministic maths. That keeps CPU and GPU in agreement.
+None of these exist in the repo, except number 7 (kept as an optional exercise) and parts of 2 and 3, which became M13 and M12. Each one needs you to keep the two rules: one writer per cell, and integer-only, deterministic maths. That keeps CPU and GPU in agreement.
 
 1. **Water pressure.** Water in the current engine levels out slowly and can't push up a U-tube. Add a per-cell pressure value in the spare bits (or a second buffer) that builds up with depth and lets liquid move upward when pressure on the far side is higher. Test it: a U-tube filled from one side should end with equal levels.
-2. **Latent heat and heat capacity.** Right now water flips to steam the moment it crosses 100°C. Give each material a heat capacity $c$ so a temperature change is $\Delta T = Q / c$, and a latent heat $L$: a cell at its boiling point soaks up $L$ units of energy before changing phase. A pot of water should then stay at 100°C for a while as it boils. Keep `conduction_conserves_heat` passing; update it to conserve *energy*, not temperature.
-3. **Lighting and glow.** Write a fragment shader (macroquad `material` or a wgpu render pass) that makes lava and fire glow, with a blur on hot cells, and colours each cell by temperature.
+2. **Latent heat and heat capacity.** (Now M13. The repo stores latent heat in the temperature field instead of a separate counter; try the version described here and compare.) Right now water flips to steam the moment it crosses 100°C. Give each material a heat capacity $c$ so a temperature change is $\Delta T = Q / c$, and a latent heat $L$: a cell at its boiling point soaks up $L$ units of energy before changing phase. A pot of water should then stay at 100°C for a while as it boils. Keep `conduction_conserves_heat` passing; update it to conserve *energy*, not temperature.
+3. **Lighting and glow.** (Now M12, in macroquad GLSL. The wgpu render pass version is still open.) Write a fragment shader (macroquad `material` or a wgpu render pass) that makes lava and fire glow, with a blur on hot cells, and colours each cell by temperature.
 4. **Audio from material counts.** Count fire, water and lava cells each frame (on the GPU, a small reduction pass) and use `macroquad::audio` to fade loops in and out: crackling grows with the number of fire cells, hissing plays when steam appears.
 5. **Render straight from GPU buffers.** Swap macroquad for `winit` + `wgpu` in the viewer, and draw with a render pipeline that reads the cell storage buffer directly. The readback disappears, so "gpu + readback" should become "gpu". Measure it.
 6. **Indirect dispatch of awake chunks.** Instead of launching a workgroup for every chunk and letting sleepers return at once, build a list of awake chunk ids on the GPU and use `dispatch_workgroups_indirect`. A settled 4K scene should then cost close to nothing.

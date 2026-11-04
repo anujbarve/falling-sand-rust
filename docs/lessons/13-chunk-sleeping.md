@@ -8,6 +8,8 @@
 > This lesson teaches commit `1157366`, where the GPU still ran **two passes** (heat, then move) and a whole workgroup slept or ran together. Two later commits touch the sleeping code:
 > - `6c1cebc` merged sleeping into the fused one-dispatch kernel of [[14-gpu-perf-fused-kernel]]. Each GPU thread now checks the chunks of its own 4 cells, and activity is stamped with atomics.
 > - `07fcf0b` ([[16-real-units-velocity-clock]]) added random rounding to the heat pass. "Did the heat pass change the cell?" is no longer enough: a chunk is now active when a heat update **could change for some random number**. `heat_cell` returns `(u32, bool)`.
+> - `c4d6aeb` and `302a475` ([[18-heat-latent-boundary-layers]]) store latent heat in the temperature field. Boiling water and wet steam now use a random number every step (bubbling, steam relaxation), so `heat_cell`'s `maybe` flag is set for them, and the GPU's uniform-block fast path excludes boiling water.
+> - `4fb8971` split `mod.rs` into modules and `sim.wgsl` into parts: the sleeping rule is in `physics/chunks.rs`, `heat_cell` in `physics/thermal.rs`, the shader in `physics/wgsl/*.wgsl`.
 >
 > The rule and the proof in this lesson still hold. See "What changed later" at the end for the current code.
 
@@ -986,7 +988,7 @@ Why slicing from row `o` works: chunk row `cy` owns blocks with top-left rows `c
 
 ## What changed later
 
-The rule ("a chunk runs if it or a neighbour was active in the last two steps") and the proof did not change. What changed is **how the GPU applies it** (`6c1cebc`) and **what counts as active in the heat pass** (`07fcf0b`).
+The rule ("a chunk runs if it or a neighbour was active in the last two steps") and the proof did not change. What changed is **how the GPU applies it** (`6c1cebc`) and **what counts as active in the heat pass** (`07fcf0b`, then `c4d6aeb`/`302a475` for boiling water and steam).
 
 ### 1. "Could change", not "did change" (`07fcf0b`)
 
@@ -1065,3 +1067,40 @@ The `wake` pass is still a separate small dispatch after `step`, unchanged from 
 The CPU engine is unchanged in `6c1cebc`: it still runs heat and move as two chunk-row passes, as in this lesson.
 
 **Numbers after the merge** (Apple M5, 3840×2160): the settled world costs **0.557 ms** per GPU step with 471 / 8160 chunks awake. The busy scene costs about 30% more with sleeping than the fused kernel alone, because every thread pays for the awake checks and the stamps. Lesson 14's "What changed later" has the full table.
+
+### 3. Latent heat: boiling water is never "settled" (`c4d6aeb`, `302a475`)
+
+The latent heat model of [[18-heat-latent-boundary-layers]] stores heat *inside the temperature field*: water whose field is above 100°C is boiling and holds part of its latent heat, and a steam cell whose field is below 100°C is a wet parcel that is still giving its latent heat back. That adds two more sources of randomness to the heat pass, so `heat_cell` sets `maybe` for them too. From `sand/src/physics/thermal.rs` @ `df0f4a1` (after the module split of `4fb8971`, `heat_cell` lives there, and the sleeping rule's comment lives in `chunks.rs`):
+
+```rust
+// Boiling water releases a steam parcel at random, more likely the more it holds.
+let stored = t - celsius(100);
+let boils_now = m == WATER
+    && stored > 0
+    && pcg(r ^ 0xB011_B011) % (LATENT as u32 * BOIL_SLOWDOWN) < stored as u32;
+if m == WATER && stored > 0 {
+    maybe = true;
+}
+```
+
+and for gases relaxing toward the room:
+
+```rust
+let (k, tg) = if m == STEAM { (STEAM_RELAX_K, t0s) } else { (RELAX_K, t0) };
+t += ((AMBIENT - tg) * k + (r & 0xF_FFFF) as i32) >> 20;
+maybe |= tg != AMBIENT || m == STEAM;
+```
+
+- **Boiling water** (field above 100°C) rolls a random number every step to decide whether a bubble (a steam parcel) leaves. A pot of boiling water that happens not to bubble for two steps is unlucky, not settled, so it must stay awake.
+- **Steam** always counts as `maybe`. It relaxes toward 20°C with random rounding, measured from its *real* temperature `sens()` (at least 100°C), so a parcel never sits at a fixed point.
+- **Edges use `sens()`, not the raw field.** The "no gap, no random number" skip is now `if tn == t0s { return; }` where both sides are real temperatures. Boiling water at field 130°C next to boiling water at field 110°C has no gap (both read 100°C), so no heat flows between them and no random number is needed for that edge.
+
+The GPU's uniform-block fast path from [[14-gpu-perf-fused-kernel]] has the same exclusion. It may only skip the per-cell work when no random number can matter, so boiling water joins the list (`wgsl/step.wgsl` @ `df0f4a1`):
+
+```wgsl
+// Boiling water (field above 100°C) uses its random number to bubble.
+let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT)
+    && !(m == WATER && temp(v) > celsius(100));
+```
+
+The rule and the proof are untouched. Sleeping is still exact, and `sleeping_gives_identical_world_to_no_sleeping` and `settled_scene_sleeps_on_cpu_and_gpu` still pass. Only the list of "things that use a random number" grew, which is exactly what the proof asks you to keep complete.

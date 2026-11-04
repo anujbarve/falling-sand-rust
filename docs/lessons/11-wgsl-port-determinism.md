@@ -8,9 +8,16 @@
 >
 > See "What changed later (07fcf0b)" at the end of this lesson, and [[16-real-units-velocity-clock]].
 
+> [!note] And again, up to `df0f4a1`
+> - Commit `4fb8971` split `sim.wgsl` into `sand/src/physics/wgsl/{common,thermal,motion,step,wake}.wgsl`, one file per Rust module, and `gpu.rs` joins them with `concat!(include_str!(...))` (lesson 06's last section). The Rust rules are now in `thermal.rs` (`heat_cell`) and `motion.rs` (`move_block`).
+> - The energy-based heat model (commit `5ddae24`, [[18-heat-latent-boundary-layers]]) brought more `switch` tables (`cond`, `cap`, `expansion`, `base_density`). It also brought `flow_24` and the `/8` split in `heat_rate`, two ways to avoid needing 64-bit integers, which WGSL does not have.
+> - Two real CPU-vs-GPU mismatches were found and fixed in the kernel's shortcuts. The fast path must **exclude boiling water**, because it bubbles at random (`302a475`). The `may_move` filter must **let same-material liquids through**, because their density now depends on temperature (`5ddae24`).
+>
+> See "What changed later (to df0f4a1)" at the end of this lesson.
+
 > Source for this lesson: commit `31aed2d`. Read the two files side by side:
-> `git show 31aed2d:sand/src/physics/mod.rs` (the Rust rules) and
-> `git show 31aed2d:sand/src/physics/sim.wgsl` (the GPU copy).
+> `git show 31aed2d:sand/src/physics/mod.rs` (the Rust rules; now in `thermal.rs`/`motion.rs`/`materials.rs`) and
+> `git show 31aed2d:sand/src/physics/sim.wgsl` (the GPU copy; now `sand/src/physics/wgsl/*.wgsl`).
 
 ## 1. What you will build
 
@@ -362,7 +369,7 @@ Design choices worth copying:
 
 #### The maintenance risk
 
-The material tables (`KIND`, `DENSITY`, `FLOW`, `COND` at `31aed2d`; `HEAT_K`, `VT_LIQUID`, `VT_GAS` and more since `07fcf0b`), the constants (`T_SCALE`, `AMBIENT`, `T_MIN/T_MAX`), the bit layout and every rule now exist **twice**: once in Rust and once in WGSL. Nothing in the compiler connects them. Change `DENSITY[OIL]` in `mod.rs` and forget `sim.wgsl`, and both files still compile and the game still looks plausible. Both files carry a warning comment ("keep the two in sync"), but the real protection is `gpu_gives_identical_world_to_cpu`. Run `cargo test` after every rule change. (Exercise 6 shows a way to generate the WGSL tables from Rust so they cannot drift.)
+The material tables (`KIND`, `DENSITY`, `FLOW`, `COND` at `31aed2d`; `HEAT_K`, `VT_LIQUID`, `VT_GAS` and more since `07fcf0b`), the constants (`T_SCALE`, `AMBIENT`, `T_MIN/T_MAX`), the bit layout and every rule now exist **twice**: once in Rust and once in WGSL. Nothing in the compiler connects them. Change `DENSITY[OIL]` in `mod.rs` (now `materials.rs`) and forget `sim.wgsl` (now `wgsl/common.wgsl`), and both files still compile and the game still looks plausible. Both files carry a warning comment ("keep the two in sync"), but the real protection is `gpu_gives_identical_world_to_cpu`. Run `cargo test` after every rule change. (Exercise 6 shows a way to generate the WGSL tables from Rust so they cannot drift.)
 
 ---
 
@@ -772,7 +779,7 @@ cargo test --release gpu_gives_identical_world_to_cpu -- --nocapture
 cargo test --release single_thread_and_rayon_give_identical_worlds
 ```
 
-The second test applies the same idea one level down: single-threaded vs rayon must be identical too. You can try example A in the project by editing `sand/src/physics/sim.wgsl` in a scratch branch, and you will get a message like `N cells differ between CPU and GPU`.
+The second test applies the same idea one level down: single-threaded vs rayon must be identical too. You can try example A in the project by editing `sand/src/physics/sim.wgsl` (now `sand/src/physics/wgsl/*.wgsl`) in a scratch branch, and you will get a message like `N cells differ between CPU and GPU`.
 
 ---
 
@@ -907,6 +914,112 @@ if (same && fixed) { /* compute heat once */ }
 At `6c1cebc` the condition was only `m != WOOD && m != OIL && m != FIRE`.
 
 **The tests still demand equality.** `gpu_gives_identical_world_to_cpu` (200 steps on the busy scene), the odd-size variants, and the sleeping tests (9000 steps, CPU with sleeping = CPU without = GPU, cell for cell) all pass at `07fcf0b` (`cargo test --release --lib`: 18 passed). The two hand-maintained copies grew by a few hundred lines each, and the equality test is still the only thing that keeps them in sync.
+
+---
+
+## What changed later (to df0f4a1)
+
+The rules of this lesson still hold. Every operation is an integer operation, it is done in the same order on both sides, and `gpu_gives_identical_world_to_cpu` (plus the odd-size and sleeping variants in `sand/src/physics/tests.rs`) demands equality cell for cell. Three things changed around them.
+
+### 1. One shader, five files
+
+Commit `4fb8971` split `mod.rs` into per-system Rust modules, and `sim.wgsl` into matching WGSL files, each headed with the module it copies:
+
+| WGSL file (`sand/src/physics/wgsl/`) | Copy of | Holds |
+|---|---|---|
+| `common.wgsl` | `materials.rs`, `rng.rs` | bindings, bit layout (`material`, `aux`, `temp`, `sens`, `pack`), tables, `pcg`, `hash3` |
+| `thermal.wgsl` | `thermal.rs` | `edge_roll`, `flow_24`, `pair_conductance`, `heat_rate`, `density`, `sinks`, `HeatOut`, `heat` |
+| `motion.wgsl` | `motion.rs` | `pair_chance`, `block_can_move`, `may_move`, `displace`, `move_block` |
+| `step.wgsl` | `cpu.rs`'s loop | the fused `step` entry point (one thread per 2x2 block) |
+| `wake.wgsl` | `chunks.rs` | the chunk wake pass |
+
+WGSL has no `import`, so `gpu.rs` concatenates them into one source string at compile time (`const SHADER: &str = concat!(include_str!("wgsl/common.wgsl"), ...)`). WGSL allows declarations in any order, so `thermal.wgsl` can call `material()` from `common.wgsl`. Now you can review a rule change file against file: `thermal.rs` against `thermal.wgsl`, `motion.rs` against `motion.wgsl`.
+
+`HeatOut` is unchanged and now lives in `thermal.wgsl`. `heat` still ends with `return HeatOut(new_cell, maybe || new_cell != me);`.
+
+### 2. More tables as `switch`, and two tricks to avoid 64-bit integers
+
+The energy-based heat model (`5ddae24`, then latent heat in `c4d6aeb`/`302a475`; see [[18-heat-latent-boundary-layers]]) replaced `HEAT_K` with conductivity and heat capacity. Neither fits in a byte, so both are `switch` functions, like `base_density`:
+
+```wgsl
+// sand/src/physics/wgsl/common.wgsl @ df0f4a1
+// Thermal conductivity, mW/(m K). Copy of COND in mod.rs.
+fn cond(m: u32) -> i32 {
+    switch m {
+        case 0u: { return 26; }
+        case 1u: { return 2500; }
+        // ... one case per material ...
+        default: { return 26; }
+    }
+}
+// cap(m) and expansion(m) follow the same pattern.
+```
+
+(The comment still says `mod.rs`. The Rust array is now in `materials.rs`.)
+
+The new heat rule needs products that overflow an `i32`. In Rust you could reach for `i64`, but WGSL has no 64-bit integers, and the CPU must do *exactly* what the GPU does. So the Rust side avoids `i64` too, with two exact rewrites:
+
+```wgsl
+// sand/src/physics/wgsl/thermal.wgsl @ df0f4a1
+// floor((d * rate + roll) / 2^24) without overflow. Copy of flow_24.
+// (& on a negative i32 works on its two's complement bits, like Rust.)
+fn flow_24(d: i32, rate: i32, roll: i32) -> i32 {
+    let hi = d >> 12u;
+    let lo = d & 4095;
+    return (hi * rate + ((lo * rate + roll) >> 12u)) >> 12u;
+}
+fn heat_rate(c: i32, conductance: i32) -> i32 {
+    var rate: i32;
+    if (conductance <= 37000) {
+        rate = conductance * RATE_SCALE / c;
+    } else {
+        // boundary layers (250000 * 55924 would overflow): water's CAP is a multiple of 8, so this is exact
+        rate = (conductance / 8) * RATE_SCALE / max(c / 8, 1);
+    }
+    return min(rate, RATE_MAX);
+}
+```
+
+`flow_24` replaces `07fcf0b`'s `edge_flow` (`>> 20`). It relies on rule 3 of section 2.3 (`>>` on an `i32` is an arithmetic shift, so a floor, in both languages) and on `&` acting on the same two's-complement bits of a negative `i32` in both. `heat_rate` relies on rule 2: integer `/` truncates toward zero in both languages.
+
+### 3. Two shortcuts that broke equality
+
+The kernel has two shortcuts that skip work when "nothing can happen". Each is a claim about the rules, and twice the rules changed under the claim. The equality tests caught both.
+
+**The fast path must exclude boiling water.** When a block and its 8 neighbours all hold one identical value `v`, the kernel computes `heat` once and writes the result to all 4 cells. That is only valid if no per-cell random number can matter, because `heat` was evaluated for cell `(ux, uy)` only. Since `302a475`, water whose field is above 100 °C holds latent heat and releases a steam parcel with a chance drawn from **its own** random number `r = pcg(i ^ pcg(frame ^ CELL_SALT))` (`boils_now`). In a uniform pot of boiling water the CPU bubbled cell by cell, while the GPU copied one cell's outcome to all four. The fix adds one clause:
+
+```wgsl
+// sand/src/physics/wgsl/step.wgsl @ df0f4a1
+// Boiling water (field above 100°C) uses its random number to bubble.
+let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT)
+    && !(m == WATER && temp(v) > celsius(100));
+if (same && fixed) { /* compute heat once, copy to the 4 cells */ }
+```
+
+**`may_move` must let same-material liquids through.** Before calling `block_can_move` and `move_block`, the kernel runs a cheap filter: a block of four cells of one material whose density cannot change can never move. At `07fcf0b` the filter returned `false` for every non-gas block of one material, because only gases had a temperature-dependent density. Commit `5ddae24` made liquids expand when hot, so a hot water cell under a cold one *does* swap on the CPU (`sinks` compares `density()`). The GPU skipped those blocks, and convection was missing on the GPU only. The fix narrows the filter to materials whose density really is fixed:
+
+```wgsl
+// sand/src/physics/wgsl/motion.wgsl @ df0f4a1
+// Cheap first filter: four cells of one material whose density is fixed
+// (solids, powders, fire), or four identical cells, can never move
+// (block_can_move would say no). Gases and liquids of one material can:
+// their density depends on temperature, so hot under cold swaps.
+fn may_move(c: array<u32, 4>) -> bool {
+    let m = material(c[0]);
+    if (material(c[1]) != m || material(c[2]) != m || material(c[3]) != m) {
+        return true;
+    }
+    let k = kind(m);
+    if (k == SOLID || k == POWDER || m == FIRE) {   // was: kind(m) != GAS || m == FIRE
+        return false;
+    }
+    return !(c[1] == c[0] && c[2] == c[0] && c[3] == c[0]);
+}
+```
+
+(Solids are still filtered out even though they can fall now (lesson 08). Four cells of one solid in a block cannot swap with each other, and a solid falls only into a different material, which takes the first `return true`.)
+
+The lesson from both bugs: **a shortcut on one side is a second copy of a rule**, just like the tables. When the CPU rules change, read every GPU shortcut that claims "this can't happen", and run the equality tests on a scene that exercises the new behaviour. Uniform regions are where shortcuts fire, so test those too: a full pot of boiling water, a tank heated from below.
 
 ---
 

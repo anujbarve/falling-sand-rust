@@ -8,7 +8,15 @@
 >
 > See "What changed later (07fcf0b)" at the end of this lesson, and [[16-real-units-velocity-clock]].
 
-> Sources: commit `31aed2d`, files `sand/src/physics/mod.rs` (`pcg`, `hash3`, `move_block`, `block_offset`) and `sand/src/physics/cpu.rs` (`CpuSim::step`). The original engine is in `sand/src/main.rs` at `8da72fa`.
+> [!note] And again, up to `df0f4a1`
+> - Commit `4fb8971` split `mod.rs`. `pcg` and `hash3` are now in `sand/src/physics/rng.rs`. `move_block`, `block_offset`, `displace` and `spread_chance` are in `motion.rs`. `sinks`, `density` and the gravity speed-up are in `thermal.rs`. The tests are in `tests.rs`.
+> - Unsupported **solids fall** (commit `20d89dd`). `STONE`, `WOOD` and `ICE` now store a speed in `aux` too, and `sinks` lets a solid drop into air or liquid (never into another solid or a powder).
+> - **Flames are anchored** (commits `20d89dd`, `97d45da`). `FIRE` is excluded from `sinks` and from `spread_chance`, so a flame neither drifts off its fuel nor mixes sideways into air.
+> - Liquids now expand with heat (commit `5ddae24`), so a hot water cell under a cold one can swap with it: same-material pairs can move now (convection). The heat side of this is in [[18-heat-latent-boundary-layers]].
+>
+> See "What changed later (to df0f4a1)" at the end of this lesson.
+
+> Sources: commit `31aed2d`, files `sand/src/physics/mod.rs` (`pcg`, `hash3`, `move_block`, `block_offset`; now in `rng.rs` and `motion.rs`) and `sand/src/physics/cpu.rs` (`CpuSim::step`). The original engine is in `sand/src/main.rs` at `8da72fa`.
 
 ---
 
@@ -244,7 +252,7 @@ A **pure function** gives the same output for the same input and changes nothing
 
 - **parallel**: no shared `&mut rng` that every task would need to borrow,
 - **deterministic**: the same start world produces the same world after $N$ steps, every time, on every machine,
-- **testable**: `assert_eq!(single_thread_world, rayon_world)` and later `assert_eq!(cpu_world, gpu_world)` are real tests in `mod.rs`.
+- **testable**: `assert_eq!(single_thread_world, rayon_world)` and later `assert_eq!(cpu_world, gpu_world)` are real tests in `mod.rs` (now in `sand/src/physics/tests.rs`).
 
 Why nest the calls (`pcg(a ^ pcg(b ^ pcg(c)))`) instead of computing `pcg(a ^ b ^ c)`? Because XOR is symmetric: `a ^ b ^ c` gives the same value for `(1, 2, 0)` and `(2, 1, 0)`, so those two blocks would always roll the same dice. Scrambling between the XORs makes every input take part separately.
 
@@ -859,6 +867,79 @@ fn displace(cells: &mut [u32; 4], mover: usize, pushed: usize) {
 Gravity and diagonal slides use `displace`. Sideways spreading still uses a plain `swap`, and it, like the diagonal slide, only happens for cells at rest (`speed == 0`, see `can_slide` and `spread_chance`): a falling drop does not also spread. `FLOW` is now a speed level too (water 42 = 1 m/s) and is still used as a roll threshold out of 256.
 
 **The rolls.** `move_block` slices `r` exactly as in the table of section 2.4 (bits 0-15 gravity per column, 16-31 slides, `r2 = pcg(r)` for spreading); only the threshold changed from a density fraction to `pair_chance`. The per-cell pass has its own number, `r = pcg(i ^ pcg(frame ^ CELL_SALT))`: the low 20 bits round gas relaxation, bits 20-27 round the gravity speed-up, `r & 127` / `r & 31` give fire and smoke lives, and `pcg(r) % 64 == 0` is the life tick. Heat conduction uses a separate hash per grid edge (lesson 07's last section).
+
+---
+
+## What changed later (to df0f4a1)
+
+The Margolus machinery is still exactly as taught: 2x2 blocks, `block_offset(frame)`, `hash3(bx, by, frame)` for the block's dice, the move pass in place, and the heat pass double-buffered. `4fb8971` only moved the code into separate files. `pcg`/`hash3` went to `sand/src/physics/rng.rs`, the block rules (`move_block`, `block_offset`, `pair_chance`, `can_slide`, `spread_chance`, `displace`) to `motion.rs`, and `sinks`, `density` and `accelerate` to `thermal.rs`. The rules inside a block changed in three ways.
+
+**1. Solids can fall.** At `07fcf0b`, `sinks` said "solids never move", so a stone bridge whose support burned away hung in the air. Commit `20d89dd` gives stone, wood and ice a speed and lets them fall into anything that is not solid or powder:
+
+```rust
+// sand/src/physics/materials.rs @ df0f4a1
+/// Materials that store a speed in their aux byte. (Fire and smoke use
+/// aux for their remaining life instead.)
+pub const fn has_speed(m: u32) -> bool {
+    matches!(m, SAND | WATER | OIL | LAVA | STEAM | STONE | WOOD | ICE)
+}
+
+// sand/src/physics/thermal.rs @ df0f4a1
+pub fn sinks(top: u32, bottom: u32) -> bool {
+    let mb = material(bottom) as usize;
+    // A flame is anchored where it burns: it does not drift off its fuel.
+    if material(top) == FIRE || material(bottom) == FIRE {
+        return false;
+    }
+    // A solid can fall into air or liquid (unsupported stone, wood, ice);
+    // it still cannot be pushed into another solid or into powder.
+    KIND[mb] != SOLID && KIND[mb] != POWDER && density(top) > density(bottom)
+}
+```
+
+A stone wall resting on the floor stays put, because every cell sits on another solid. A falling solid uses the same speed machinery as sand (`accelerate` in the heat pass, `move_chance` in the block). Solids never slide or spread: `can_slide` only accepts powders and liquids, and `spread_chance` only fluids. Wood (600) floats on water (10000) and ice (9170) does too, because `sinks` compares densities.
+
+**2. Flames are anchored.** A flame is a gas lighter than air. With the rules of `07fcf0b` it rose away from its log, or swapped sideways with air and went out, so fires died early. Commit `20d89dd` took `FIRE` out of `sinks` (above), and `97d45da` took it out of sideways spreading:
+
+```rust
+// sand/src/physics/motion.rs @ df0f4a1
+pub(crate) fn spread_chance(left: u32, right: u32) -> u32 {
+    let (ml, mr) = (material(left), material(right));
+    let fluid = |m: u32| KIND[m as usize] == GAS || KIND[m as usize] == LIQUID;
+    // A flame is anchored: it does not mix sideways into air and die out.
+    if ml != mr && ml != FIRE && mr != FIRE && fluid(ml) && fluid(mr) && speed(left) == 0 && speed(right) == 0 {
+        FLOW[ml as usize].min(FLOW[mr as usize])
+    } else {
+        0
+    }
+}
+```
+
+Fire still *spreads*, but by igniting its neighbours in the heat pass (wood or oil at ignition temperature next to a flame), not by moving. The flame lasts as long as fuel is next to it. Smoke, which is not anchored, still rises.
+
+**3. Same-material swaps happen: convection.** `density()` now makes hot liquids lighter (`EXPANSION`, commit `5ddae24`), just as hot gases already were. So `sinks(cold_water, hot_water)` is true, and `pair_chance` lets the cold cell sink through the hot one at its own speed. In a pot heated from below, water turns over (`water_heated_from_below_turns_over`). For this lesson, that means **a block of four cells of one material is not necessarily static** if the material is a liquid or a gas. That matters for any "skip this block" shortcut (lesson 11's last section has the GPU bug it caused).
+
+**`move_block` now**, for reference (step 2 also lets a *moving* powder deflect down a slope and keep half its speed, and lets trapped steam vent diagonally):
+
+```rust
+// sand/src/physics/motion.rs @ df0f4a1 (abridged)
+pub fn move_block(cells: &mut [u32; 4], r: u32) {
+    let r2 = pcg(r);
+    let mut fell = [false; 2];
+    for col in 0..2 {
+        let (top, bottom) = (col, col + 2);
+        if ((r >> (col * 8)) & 255) < pair_chance(cells[top], cells[bottom]) {
+            let (mover, pushed) = if sinker(material(cells[top])) { (top, bottom) } else { (bottom, top) };
+            displace(cells, mover, pushed);
+            fell[col] = true;
+        }
+    }
+    // 2. slides: can_slide(..) && roll < slide_chance(top); or can_steam_vent(..)
+    // 3. if nothing moved: rows spread with r2 and spread_chance(left, right)
+}
+```
+
+`CpuSim::step` in `cpu.rs` was not touched by any of this. It still does the double-buffered heat pass, then the in-place block pass over `block_offset(frame)`.
 
 ---
 

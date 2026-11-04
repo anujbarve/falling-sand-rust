@@ -8,6 +8,9 @@
 > [!note] The viewer's step count changed later
 > This lesson teaches `d94ade6`, where the viewer ran a fixed `steps_per_frame` (keys `-` / `=`, 1 to 64). In `07fcf0b` ([[16-real-units-velocity-clock]]) a world-time `Clock` replaced it: the viewer runs as many steps as the chosen speed needs (real time by default), within a budget computed from the GPU timestamps of this lesson. New keys: `,` slower, `.` faster, `/` real time. The HUD shows world time and the speed actually reached. The readback pipeline, epochs and `write_cells` are unchanged. In between, `6c1cebc` swapped the GPU step for the fused kernel ([[14-gpu-perf-fused-kernel]]), which `GpuSim`'s API hides from the viewer. See "What changed later" at the end.
 
+> [!note] The drawing half was rewritten in `072327e`
+> §2.11-2.12 (the CPU loop that turns every cell into a pixel with `cell_color`/`heat_color` and `lerp`) no longer exists. Since `072327e` the viewer is a folder, `sand/src/bin/physics/{main,render,settings,ui}.rs`. The readback bytes are uploaded unchanged as an RGBA8 texture, and GLSL fragment shaders do all the colour, lighting and glow on the GPU, with bloom, tone mapping and a settings window (Esc). The pipelined readback of this lesson is still what feeds it. See "What changed later", section 4.
+
 ---
 
 ## 1. What you will build
@@ -1208,8 +1211,169 @@ format!(
 ),
 ```
 
-`clock.achieved` is a smoothed "world seconds per wall second". When the budget cuts steps, `clock.behind` is true and the HUD says so. In the real 640×360 viewer on an Apple M5 the GPU step costs about 0.12 ms at `07fcf0b`, so real time (1200 steps per second) fits easily. At 4K it would not (about 0.3×). The bottom right of the window also has a 10 cm scale bar (20 cells, since a cell is 5 mm).
+`clock.achieved` is a smoothed "world seconds per wall second". When the budget cuts steps, `clock.behind` is true and the HUD says so. In the real 640×360 viewer on an Apple M5 the GPU step costs about 0.12 ms at `07fcf0b`, so real time (1200 steps per second) fits easily. At 4K it would not (about 0.3×). Those figures predate the energy-based heat of `5ddae24`; rerun `cargo run --release --bin bench` for current ones. The bottom right of the window also has a 10 cm scale bar (20 cells, since a cell is 5 mm).
 
 ### 3. What did not change
 
 `Readback`, the `FREE → PENDING → READY` slots, epochs, `latest`, `write_cells` with its run merging and `wake_all`, and the timestamp machinery are the same at `07fcf0b` as at `d94ade6`. In `6c1cebc` only the GPU step behind `step_and_readback` changed, from two passes to the fused kernel with sleeping ([[14-gpu-perf-fused-kernel]]).
+
+The readback half of this lesson (slots, epochs, `latest`, `write_cells`, timestamps) is still unchanged at `df0f4a1`. The drawing half is not: see the next section.
+
+### 4. Drawing moved to the GPU (`072327e`)
+
+At `d94ade6` every frame ran a CPU loop over all cells: decode the cell, pick a colour with `cell_color` (or `heat_color`), write 4 bytes into an `Image`, then `texture.update(&image)`. At 640×360 that is 230 400 cells of CPU work per frame, and every look (glow, lighting) had to be paid for in that loop. In `072327e` the viewer became a folder:
+
+| file | job |
+|---|---|
+| `sand/src/bin/physics/main.rs` | the loop: input, painting, clock, `step_and_readback`, `latest`, frame cap |
+| `sand/src/bin/physics/render.rs` | `Renderer`: the cell texture, three GLSL shaders, render targets |
+| `sand/src/bin/physics/settings.rs` | `Settings`, `Graphics`, `Quality` presets, grid/window/fps tables |
+| `sand/src/bin/physics/ui.rs` | the toolbar and the settings window |
+
+A binary with several files works because Cargo treats `src/bin/<name>/main.rs` as the binary `<name>`. `main.rs` declares the others with `mod render; mod settings; mod ui;`, exactly like modules in a library.
+
+**The cells go up as they are.** A cell is a `u32`, and an RGBA8 texel is 4 bytes, so the readback *is* a texture already. No per-pixel CPU work is left (`render.rs` @ `df0f4a1`):
+
+```rust
+/// Upload a new frame of cells. `bytemuck` reinterprets the u32s as
+/// bytes without copying them first; the GPU upload is the only copy.
+pub fn upload(&mut self, cells: &[u32]) {
+    debug_assert_eq!(cells.len(), self.grid.0 * self.grid.1);
+    self.cells.update_from_bytes(self.grid.0 as u32, self.grid.1 as u32, bytemuck::cast_slice(cells));
+}
+```
+
+In `main.rs` it sits right after `latest`, the same place the old pixel loop was:
+
+```rust
+if sim.gpu.latest(&mut sim.world) {
+    sim.renderer.upload(&sim.world.cells); // drawn next frame
+}
+```
+
+The texture uses `FilterMode::Nearest`, because blending two packed cells would produce nonsense bits.
+
+**Decoding the bits in GLSL.** macroquad's shaders are GLSL 100 (OpenGL ES 2), which has no integer bit operations. So the shader rebuilds the fields from the 4 bytes with float maths. Each byte arrives as a float in $[0,1]$; `* 255.0 + 0.5` and `floor` turn it back into an exact integer. Every value involved is below $2^{24}$, which a highp float holds exactly:
+
+```glsl
+vec4 cell_at(vec2 c) {
+    c = clamp(c, vec2(0.0), GridSize - 1.0);
+    return floor(texture2D(Texture, (c + 0.5) / GridSize) * 255.0 + 0.5);
+}
+float mat_of(vec4 c) { return mod(c.r, 16.0); }                          // bits 0-3
+float aux_of(vec4 c) { return floor(c.r / 16.0) + mod(c.g, 16.0) * 16.0; } // bits 4-11
+// The raw temperature field in °C (includes stored latent heat).
+float temp_raw(vec4 c) {
+    float t = floor(c.g / 16.0) + c.b * 16.0 + c.a * 4096.0;             // bits 12-31
+    if (t >= 524288.0) { t -= 1048576.0; }                                 // sign extend 20 bits
+    return t / 256.0;                                                      // T_SCALE
+}
+```
+
+This is lesson 06's `(cell as i32) >> 12` done by hand: $2^{19} = 524288$ is the sign bit of the 20-bit field, and subtracting $2^{20}$ is sign extension.
+
+**`temp_of`: the real temperature, not the field.** Since `c4d6aeb`/`302a475` ([[18-heat-latent-boundary-layers]]) the temperature field also stores **latent heat**. Water whose field reads 130°C is not at 130°C: it is boiling water at 100°C that has absorbed 30 K worth of its latent heat. Steam whose field reads 60°C is a wet parcel still at 100°C, and ice whose field reads +40°C is melting ice at 0°C. The physics has a function for this, `sens()` in `materials.rs`, and the shader mirrors it:
+
+```glsl
+// The real temperature in °C.
+float temp_of(vec4 c) {
+    float t = temp_raw(c);
+    // Water's field also stores latent heat (boiling above 100, freezing below
+    // 0): its real temperature is pinned to 0..100°C (sens() in materials.rs).
+    if (abs(mod(c.r, 16.0) - 3.0) < 0.5) { t = clamp(t, 0.0, 100.0); }
+    if (abs(mod(c.r, 16.0) - 6.0) < 0.5) { t = max(t, 100.0); } // wet steam parcel
+    if (abs(mod(c.r, 16.0) - 9.0) < 0.5) { t = min(t, 0.0); }   // melting ice
+    return t;
+}
+```
+
+Without the clamp the heat view (H) would paint boiling water red-hot and melting ice warm, which is exactly the "the field is energy, not temperature" confusion lesson 18 is about. `temp_raw` is still used where the stored energy matters for the look: steam is drawn thinner the wetter its parcel is.
+
+**Three passes per frame.** `Renderer::draw` runs:
+
+1. **`emit`** into a small render target (1/2, 1/4 or 1/8 of the grid): how much each cell glows by itself (lava, flames, solids above 500°C with a black-body tint, hot air). It averages 4 cells per texel so single sparks don't flicker.
+2. **`blur`**, a 9-tap Gaussian, run twice: horizontally into the second target, then vertically back. A 2D Gaussian is **separable**, $G(x,y) = g(x)\,g(y)$, so two 1D passes of 9 samples give the same result as one 2D pass of 81.
+3. **`scene`** at window resolution: material colour, per-grain noise (a hash of the cell position, so it doesn't shimmer), surface lighting from the upper left and contact shadows, darker liquid with depth, then `+ bloom`, tone mapping and vignette.
+
+```rust
+if bloom {
+    self.emit.set_uniform("GridSize", grid);
+    self.emit.set_uniform("Params", vec4(g.incandescence as u8 as f32, g.bloom_divisor as f32, 0.0, 0.0));
+    pass(&self.emit, &self.cells, &self.glow[0]);
+    let size = vec2(self.glow[0].texture.width(), self.glow[0].texture.height());
+    self.blur.set_uniform("Step", vec2(1.0 / size.x, 0.0));
+    let src = self.glow[0].texture.clone();
+    pass(&self.blur, &src, &self.glow[1]);
+    self.blur.set_uniform("Step", vec2(0.0, 1.0 / size.y));
+    let src = self.glow[1].texture.clone();
+    pass(&self.blur, &src, &self.glow[0]);
+}
+```
+
+The tone mapping is a soft knee: below 0.8 nothing changes, above it the excess is squashed with an exponential so bright glow saturates instead of clipping:
+
+```glsl
+col *= Flags2.y; // exposure
+vec3 over = max(col - 0.8, 0.0);
+col = min(col, 0.8) + 0.2 * (1.0 - exp(-over * 5.0));
+```
+
+The two render targets are made once, and re-created only when the grid size or the bloom size changes, never per frame. On/off options travel as floats packed four to a `vec4` (`Flags` = shading, depth, grain, incandescence; `Flags2` = bloom strength, exposure, vignette, heat view), set with `flag(b) = b as u8 as f32` and tested in the shader with `> 0.5`.
+
+**Settings.** `settings.rs` is one plain struct of everything the user can change, plus `Quality` presets that fill in the graphics part:
+
+```rust
+pub fn preset(q: Quality) -> Graphics {
+    let base = Graphics {
+        bloom: true,
+        bloom_divisor: 4,
+        bloom_strength: 1.0,
+        shading: true,
+        depth: true,
+        grain: true,
+        incandescence: true,
+        exposure: 1.0,
+        vignette: true,
+    };
+    match q {
+        Quality::Low => Graphics { bloom: false, shading: false, depth: false, vignette: false, ..base },
+        Quality::Medium => Graphics { bloom_divisor: 8, depth: false, ..base },
+        Quality::High | Quality::Custom => base,
+        Quality::Ultra => Graphics { bloom_divisor: 2, bloom_strength: 1.2, ..base },
+    }
+}
+```
+
+Struct update syntax (`..base`, §2.11) makes each preset a list of *differences* from High. Changing an option by hand calls `refresh_quality`, which compares the graphics against every preset with `PartialEq` (that is why `Graphics` derives it) and falls back to `Custom`. The test `presets_round_trip_and_custom_is_detected` checks that.
+
+`Settings` also holds the grid size (320×180 up to 1280×720, default 640×360), window size, fullscreen, the frame cap, sleeping on/off, heat view, and `gpu_budget_ms` (default 10). The budget replaces the hard-coded 12 ms of section 1:
+
+```rust
+let budget = match sim.gpu.gpu_time_ms() {
+    Some(ms) if ms > 0.0 => (settings.gpu_budget_ms as f64 / ms).clamp(1.0, 20_000.0) as u32,
+    _ => 2_000,
+};
+```
+
+**The frame cap.** `window_conf` asks for vsync (`swap_interval: Some(1)`), but that is only a hint, and macOS's OpenGL ignores it. Without a cap the viewer draws frames the display never shows, which only burns battery. So the default is a sleep-based cap of 120 fps (`FPS_CAPS = [None, Some(30), Some(60), Some(120)]`, `fps_cap: 3`):
+
+```rust
+if let Some(fps) = settings::FPS_CAPS[settings.fps_cap] {
+    let target = std::time::Duration::from_secs_f64(1.0 / fps as f64);
+    if let Some(rest) = target.checked_sub(frame_start.elapsed()) {
+        std::thread::sleep(rest);
+    }
+}
+```
+
+`checked_sub` returns `None` when the frame already took longer than the target, so a slow frame never sleeps. The world clock measures wall time, so capping the frame rate doesn't slow the world down: each frame simply runs more steps.
+
+**Toolbar and settings window.** `ui.rs` draws an always-visible toolbar (material buttons in their own colour, drawn with macroquad shapes) and the settings window (macroquad's immediate-mode `root_ui()` widgets). Neither keeps state of its own: they read and write `Settings` and return what the user asked for as a `Vec<Action>` (`SetGrid`, `SetWindow`, `SetFullscreen`, `SetSleeping`, `NextScene`, ...), which `main` carries out. Keys push the same actions, so Esc, Tab/arrows, R, C, Space, F11 and the buttons all go through one path. Changing the grid size rebuilds `Sim` (world, `GpuSim`, `Renderer`) in one go.
+
+**Screenshots without a person.** `SAND_SCREENSHOT=out.png SAND_FRAMES=120` runs that many frames, saves the screen with `get_screen_data().export_png(path)` and exits. `SAND_SCENE`, `SAND_MENU=1` and `SAND_HEAT=1` choose the scene, open the settings window, or turn on the heat view first. It is how the looks were checked from a script:
+
+```bash
+SAND_SCREENSHOT=/tmp/lava.png SAND_FRAMES=240 SAND_SCENE=1 cargo run --release --bin physics
+```
+
+What this means for this lesson: the GPU → CPU → GPU round trip of §2.11 is still there (wgpu and macroquad's OpenGL don't share buffers), but the CPU part shrank to one `memcpy` into a texture. Rendering straight from the wgpu storage buffer is still stretch goal 5 in [[17-capstone-roadmap]].

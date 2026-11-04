@@ -4,6 +4,14 @@
 > Files: `sand/src/physics/mod.rs` (units, tables, rules), `sand/src/physics/clock.rs` (new), `sand/src/bin/physics.rs` (keys, budget, HUD), `sand/src/physics/sim.wgsl` (the GPU mirror), `cpu.rs` (one-line change for sleeping).
 > Read any of them with `git show 07fcf0b:sand/src/physics/clock.rs`, and the whole change with `git diff 6c1cebc 07fcf0b`.
 
+> [!note] The heat model changed after this lesson
+> This lesson teaches `07fcf0b`, where heat moved by **diffusivity**: one rate $k = \alpha\,\Delta t/\Delta x^2$ per material, with 20-bit stochastic rounding. Later commits replaced that:
+> - `5ddae24`: heat is **energy-based**. An edge carries heat by the two conductivities in series, and each cell's temperature changes by that heat over its own heat capacity (`COND`, `CAP`). Radiation, liquid expansion and realistic lava temperatures came in too. Rounding became 24-bit (`flow_24`), with an overflow-safe split multiply because WGSL has no `i64`.
+> - `c4d6aeb`, `302a475`: **latent heat** stored in the temperature field (boiling plateau at 100°C, wet steam parcels, melting ice), `sens()` for the real temperature, and boundary-layer conductances for water against hot surfaces and ice.
+> - `4fb8971`: `mod.rs` and `sim.wgsl` were split into modules (`thermal.rs`, `motion.rs`, `chunks.rs`, ...) and `wgsl/*.wgsl`. The viewer is now the folder `src/bin/physics/` (`072327e`).
+>
+> Units, gravity with stored speed, the move chance, edge naming for exact conservation, "could change" sleeping and the `Clock` are all still as taught here. §2.9-2.11 describe the old heat rule; see "What changed later" at the end and [[18-heat-latent-boundary-layers]] for the current one. The cost numbers in §2.12 were measured at `07fcf0b` and are out of date.
+
 ---
 
 ## 1. What you will build
@@ -397,6 +405,9 @@ Twenty steps a frame is 5× the old default, and each step now does more work. M
 | 3840×2160 (4K) | 2.87 | 0.3× |
 
 The default viewer world is 640×360, so it has plenty of headroom. 4K cannot run in real time, and the clock (section 2.14) handles that honestly.
+
+> [!note] These numbers are from `07fcf0b`
+> The energy-based heat of `5ddae24` and the latent heat of `302a475` do more work per cell (two conductivities, two heat capacities, radiation, boundary layers, `sens()` on every edge), so the GPU cost per step and the max real-time factor have changed since. The repo README still quotes the `07fcf0b` figures (640×360 ≈ 6.8×). For the current numbers on your machine, rerun `cargo run --release --bin bench` and read its "gpu max speed" column.
 
 **The first version was 2.6× slower than this.** It used `hash3(x, y, frame)` for every edge roll: three `pcg` calls, for each of the 4 edges, for every cell, so 12 hashes per cell per step, on top of everything else. Two changes fixed it:
 
@@ -899,7 +910,7 @@ cargo run --release --bin physics
 
 - Watch the HUD: `world time ... | speed 1x (reaching 1.00x) | 20 steps/frame`. Count seconds on a clock: world time should keep pace.
 - Press `,` a few times down to 0.05×. Drop sand (key `1`, click near the top). Each frame now runs 1 step; the HUD's steps/frame flickers between 0 and 1. You can see the grain accelerate.
-- Press `.` up to 16×. At 640×360 the GPU can reach about 6.8×, so the HUD switches to `(GPU too slow: reaching 6.xx x)`.
+- Press `.` up to 16×. At 640×360 the GPU could reach about 6.8× at `07fcf0b` (less since the heat model changed; see the bench), so the HUD switches to `(GPU too slow: reaching 6.xx x)`.
 - Press `/` to return to real time. Pause with `Space` and press `N`: each press is 1/60 s of world time.
 - Find the 10 cm scale bar at the bottom right. Paint water (`2`) and sand into it: sand sinks visibly slower in water.
 
@@ -1081,7 +1092,46 @@ The list becomes `[0, 0, 0, 0, 0, 1, 0, 0, 0, 0]` (sum 1, assertion fails): the 
 - Heat uses $k = \alpha\,\Delta t/\Delta x^2$ from real diffusivities. That makes conduction slow (~23 s per cell in granite) and the rates tiny, so flows are stochastically rounded. Naming each edge by its left/upper cell and negating on the other side keeps heat **exactly** conserved.
 - Chunk sleeping now asks whether a cell **could** change for some random number; `heat_cell` returns `(u32, bool)`.
 - `Clock` is a fixed-timestep accumulator: debt, carried fraction, clamped frames, a budget from GPU timestamps, dropped backlog, and a smoothed achieved speed. A $10^{-9}$ epsilon fixes $0.2 \times 5 \ne 1$.
-- Cost: 0.123 ms/step at 640×360 (6.8× real time max) up to 2.87 ms at 4K (0.3×), after cutting edge hashing from `hash3` to one `pcg` per edge and skipping equal temperatures (the first version was 2.6× slower).
+- Cost at `07fcf0b`: 0.123 ms/step at 640×360 (6.8× real time max) up to 2.87 ms at 4K (0.3×), after cutting edge hashing from `hash3` to one `pcg` per edge and skipping equal temperatures (the first version was 2.6× slower).
 - Realistic physics changes time scales, and old tests must be re-read in seconds: the free heap creeps for 20+ s, so the settling test now uses a walled bin.
 
 Next, lesson 17 ties the whole project together into a capstone roadmap for rebuilding it yourself.
+
+---
+
+## What changed later
+
+### 1. Heat became energy, not diffusivity (`5ddae24`)
+
+§2.9 gave each material one diffusivity $\alpha$ and moved temperature by $k(T_j - T_i)$. That is only right between two cells of the *same* material. Between water and air it is badly wrong: the heat that leaves the water must be the heat that enters the air, but a litre of air needs about 3500× less energy than a litre of water to warm by 1 K. So `5ddae24` splits the rule in two:
+
+1. **How much heat crosses the edge.** Conductivities in series (the harmonic mean), plus radiation between different materials: `pair_conductance(a, b, ta, tb)` in `sand/src/physics/thermal.rs` @ `df0f4a1`.
+2. **What that heat does to each side.** Each cell divides it by its own volumetric heat capacity `CAP[m]`: `heat_rate(cap, conductance)`.
+
+$$\Delta T_i = \frac{\Delta t}{\rho c_i\,\Delta x^2}\; G_{ij}\,(T_j - T_i)$$
+
+The per-edge random number is still shared by both cells, so between two cells of the same material heat is still conserved exactly. Between different materials the two sides divide by different capacities, so energy is conserved **on average** (test `heat_between_different_materials_is_conserved_on_average`). The rounding is now 24-bit, and since WGSL has no 64-bit integers the product is split so it never overflows an `i32`:
+
+```rust
+/// floor((d * rate + roll) / 2^24) without overflowing an i32, for
+/// |d| <= 2^20, 0 <= rate <= RATE_MAX and roll < 2^24.
+pub fn flow_24(d: i32, rate: i32, roll: i32) -> i32 {
+    let (hi, lo) = (d >> 12, d & 4095);
+    (hi * rate + ((lo * rate + roll) >> 12)) >> 12
+}
+```
+
+The same commit added radiation (hot surfaces facing open air radiate, which is how lava crusts over), thermal expansion of liquids (water heated from below turns over) and realistic lava temperatures (erupts at 1150°C, sets below 1000°C, rock melts at 1200°C).
+
+### 2. Latent heat and boundary layers (`c4d6aeb`, `302a475`)
+
+Water no longer flips to steam the moment it reaches 100°C. The temperature field of a water cell keeps rising past 100°C, and the excess *is* the latent heat it has absorbed (541 K worth, `LATENT_K`). Its real temperature, `sens()`, stays at 100°C, and that is what the edges use, so a pot really boils at a plateau. Steam below 100°C in its field is a wet parcel, ice above 0°C is melting ice. Water against a hot surface or against ice gets a **boundary-layer** conductance, because a 5 mm cell is far thicker than the real thin layer that carries that heat. All of this is lesson [[18-heat-latent-boundary-layers]].
+
+### 3. What it means for this lesson
+
+- §2.9's table of diffusivities is gone. `COND` (mW/(m·K)) and `CAP` (volumetric heat capacity) in `materials.rs` replace it.
+- §2.11's edge naming (`edge_roll(edge_cell, down, key)`, one `pcg` per edge, negate on the other side) is unchanged, and it is still what makes same-material conduction exact.
+- §2.13's `maybe` list grew: radiation, flames heating a surface, boiling water (random bubbling) and steam (relaxation measured from `sens()`) all set it. See lesson 13's "What changed later".
+- §2.12's numbers changed. Rerun `cargo run --release --bin bench`.
+- The tests named in this lesson (`free_fall_takes_the_right_time`, `sand_sinks_slowly_through_water`, `conduction_conserves_heat`) are in `sand/src/physics/tests.rs` since `4fb8971`.
+

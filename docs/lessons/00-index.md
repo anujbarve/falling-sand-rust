@@ -80,11 +80,15 @@ Where your code differs, ask which version is clearer and why. Both can be right
 
 **[[15-gpu-viewer-pipelined-readback]]**: A GPU-only viewer, three staging buffers in rotation so the CPU never waits, epoch-based discarding of stale readbacks, GPU timestamp queries, release LTO.
 *Concepts:* `Option` state machines, `Arc<AtomicU8>` to share a buffer's state with a `map_async` callback, Cargo profiles (`lto`, `codegen-units`, `panic = "abort"`).
+*Later (`072327e`):* the viewer became the folder `src/bin/physics/`, drawing with GLSL shaders (cells uploaded as an RGBA8 texture, bloom, tone mapping) and a settings window. Covered in the lesson's "What changed later".
 
 ### Part 4: real physics
 
 **[[16-real-units-velocity-clock]]**: Real units (1 cell = 5 mm, 1 step = 1/1200 s), gravity that accelerates a stored speed per cell, real heat diffusivities with stochastic rounding that still conserves heat exactly, and a world-time `Clock` with slow motion (0.01x) to fast forward (16x). Tests compare free fall and sinking with real physics.
 *Concepts:* fixed-timestep loops (wall time vs world time, carrying fractions), units as `const` values, `const fn` with `f64`, stochastic rounding, tests against physics formulas.
+
+**[[18-heat-latent-boundary-layers]]**: Heat as energy: conductivities in series and per-material heat capacity, radiation, latent heat stored in the temperature field (boiling plateau, wet steam parcels, melting ice), `sens()` for the real temperature, boundary-layer conductances for water at hot surfaces and ice, and 24-bit stochastic rounding without overflowing an `i32`.
+*Concepts:* enthalpy encoding (one field holds temperature *and* phase energy), boundary layers, overflow-safe fixed point, conservation exact vs on average, tests against physical behaviour.
 
 **[[17-capstone-roadmap]]**: Build the whole thing yourself, milestone by milestone, with acceptance criteria and stretch goals.
 
@@ -109,13 +113,18 @@ Where your code differs, ask which version is clearer and why. Both can be right
 | Physical units in integer code | 16 |
 | Stochastic rounding (exact on average, conserved exactly) | 16 |
 | Bit manipulation | 06, 13 |
-| Testing (`#[test]`, `cargo test`, equivalence tests) | 05, 11, 13, 14, 15, 16 |
+| Testing (`#[test]`, `cargo test`, equivalence tests) | 05, 11, 13, 14, 15, 16, 18 |
 | Async (`async fn`, `.await`, `block_on`) | 01, 10 |
 | Threads, `Send`/`Sync`, rayon | 09 |
 | Safe GPU interop with `bytemuck` (no `unsafe`) | 10 |
 | `Drop` and RAII | 10 |
 | Shared state across callbacks | 15 |
 | Measuring performance | 12, 13, 14, 15, 16 |
+| Enthalpy encoding (latent heat stored in the temperature field) | 18 |
+| Boundary layers (sub-cell physics as an interface coefficient) | 18 |
+| Overflow-safe fixed point (split multiply, no `i64` in WGSL) | 16, 18 |
+| GLSL render pipeline (texture upload, bloom, tone mapping) | 15 |
+| Multi-file binaries (`src/bin/<name>/main.rs`) | 15 |
 
 ## Lesson dependencies
 
@@ -140,35 +149,39 @@ graph TD
   L13 --> L15[15 GPU viewer, pipelined readback]
   L14 --> L16[16 real units, velocity, world clock]
   L15 --> L16
-  L16 --> L17[17 capstone]
+  L16 --> L18[18 heat, latent heat, boundary layers]
+  L18 --> L17[17 capstone]
 ```
 
-Lessons 09 and 10 are independent of each other: both rely only on lesson 08's "every cell has exactly one writer" rule.
+Lessons 09 and 10 are independent of each other: both rely only on lesson 08's "every cell has exactly one writer" rule. Lesson 18 comes after 16 (it replaces 16's heat rule) and before the capstone, which has milestones for it.
 
 ## Project architecture
 
-The repo holds two engines. The old one is a single file. The new one is a library with two front ends.
+The repo holds two engines. The old one is a single file. The new one is a library with two front ends. Since `4fb8971` the physics is split into one module per system and the shader into WGSL parts, and since `072327e` the viewer is a folder with its own GLSL renderer.
 
 ```mermaid
 graph LR
   subgraph old["Old engine (lessons 01-05)"]
     MAIN["src/main.rs<br/>Cell enum, Grid, particles,<br/>scenes, macroquad UI, tests"]
   end
-  subgraph lib["Library crate (lessons 06-16)"]
+  subgraph lib["Library crate (lessons 06-18)"]
     LIBRS["src/lib.rs<br/>pub mod physics"]
-    MOD["physics/mod.rs<br/>materials, pack/unpack, World,<br/>heat_cell, move_block, scenes, tests"]
+    MOD["physics/mod.rs<br/>module list + re-exports"]
+    RULES["physics/<br/>materials.rs (tables, pack, sens)<br/>rng.rs (pcg, hash3)<br/>world.rs (World)<br/>thermal.rs (heat_cell)<br/>motion.rs (move_block)<br/>chunks.rs (sleeping)<br/>scenes.rs, tests.rs"]
     CPU["physics/cpu.rs<br/>CpuSim: step, step_parallel"]
     GPU["physics/gpu.rs<br/>GpuSim: wgpu setup, step,<br/>readback, timestamps"]
-    WGSL["physics/sim.wgsl<br/>compute shader"]
+    WGSL["physics/wgsl/<br/>common, thermal, motion,<br/>step, wake .wgsl"]
     CLOCK["physics/clock.rs<br/>Clock: world time vs wall time"]
     LIBRS --> MOD
+    MOD --> RULES
     MOD --> CLOCK
     MOD --> CPU
     MOD --> GPU
-    GPU -- include_str! --> WGSL
+    CPU --> RULES
+    GPU -- "concat!(include_str!(..))" --> WGSL
   end
   subgraph bins["Binaries"]
-    VIEW["src/bin/physics.rs<br/>viewer (macroquad)"]
+    VIEW["src/bin/physics/<br/>main.rs (loop, clock, paint)<br/>render.rs (GLSL: emit, blur, scene)<br/>settings.rs, ui.rs"]
     BENCH["src/bin/bench.rs<br/>CPU vs GPU timing"]
   end
   VIEW --> GPU
@@ -176,6 +189,8 @@ graph LR
   BENCH --> CPU
   BENCH --> GPU
 ```
+
+Before `4fb8971` everything in `RULES` lived in `physics/mod.rs` and the shader was one file, `physics/sim.wgsl`. Before `072327e` the viewer was one file, `src/bin/physics.rs`. Lessons that teach older commits use those older paths.
 
 `cargo run` starts the old engine (`default-run = "sand"`). `cargo run --release --bin physics` starts the viewer and `cargo run --release --bin bench` runs the benchmark.
 
@@ -192,6 +207,11 @@ graph LR
 | `9b8dd55` | Fused single-dispatch GPU kernel as a standalone experiment (side branch; its parent `0df358e` imports the engine *without* chunk sleeping). **Local only**: kept as branch `fused-kernel-standalone`, not pushed to GitHub, so a fresh clone won't have it | 14 |
 | `6c1cebc` | Fused kernel merged by hand with chunk sleeping: per-cell awake checks, owner-chunk move gate, atomic activity stamps, separate `wake` pass | 13, 14 |
 | `07fcf0b` | Real units, gravity with stored speed, stochastic heat rounding, world-time `Clock` (`physics/clock.rs`), viewer keys `,` `.` `/`, "gpu max speed" bench column; chunk sleeping counts "could change for some random number" | 16 (and the "What changed later" sections of 13, 14, 15) |
+| `5ddae24` | Energy-based heat (conductivities in series + heat capacity), 24-bit overflow-safe rounding, radiation, liquid expansion, realistic lava temperatures | 18 (and "What changed later" in 16) |
+| `072327e` | GPU-rendered viewer: `src/bin/physics/{main,render,settings,ui}.rs`, cells as an RGBA8 texture, GLSL lighting, bloom, tone mapping, settings window, frame cap, `SAND_SCREENSHOT` | "What changed later" in 15 |
+| `4fb8971` | Physics split into modules (`materials`, `rng`, `world`, `thermal`, `motion`, `chunks`, `scenes`, `tests`) and WGSL parts (`physics/wgsl/*.wgsl`) | 06 (and paths in 13, 16, 18) |
+| `97d45da` | Fire fixes: flames anchored to fuel, no sideways mixing into air (with `20d89dd`: ignition fixes, unsupported solids fall) | 18 |
+| `302a475` | Latent heat in the temperature field (with `c4d6aeb`): boiling plateau, wet steam, melting ice, `sens()`, boundary-layer conductances, stochastic boiling; sleeping and the GPU fast path account for boiling water | 18 (and "What changed later" in 13, 15, 16) |
 
 Lesson 06 teaches bit packing together with the module split, though in history it came one commit later (`31aed2d`). If you want to see the unpacked first version, read `2fbcad6`.
 

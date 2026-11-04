@@ -8,7 +8,15 @@
 >
 > See "What changed later (07fcf0b)" at the end of this lesson, and [[16-real-units-velocity-clock]] for the full story.
 
-> Source for this lesson: commit `31aed2d`, file `sand/src/physics/mod.rs`.
+> [!note] And again, up to `df0f4a1`: the heat model is energy-based now
+> - Commit `5ddae24` removed the diffusivity table `HEAT_K` and its harmonic mean (`pair_k`). Heat now uses two tables: conductivity `COND` (mW/(m K)) and heat capacity `CAP`. An edge's conductance is the two conductivities in series (`pair_conductance`). Each cell divides the flow by **its own** capacity (`heat_rate`), and `flow_24` does the rounding without overflowing an `i32`.
+> - Radiation was added in the same commit: between touching surfaces of different materials, from flames onto surfaces, and from hot surfaces into open air (`sky_rate`). Liquids expand when hot (`EXPANSION`), and lava erupts at 1150 °C, sets into stone below 1000 °C and stone melts at 1200 °C.
+> - Commits `c4d6aeb` and `302a475` store **latent heat in the temperature field**. Boiling water above 100 °C in its field is still really at 100 °C (`sens()`). Steam below 100 °C is a wet parcel. Ice above 0 °C is melting. They also add boundary-layer conductances for water on hot surfaces and water on ice.
+> - The phase-change `match` with guards from section 2.6 is still the same pattern, but with these new temperatures and rules. Its code (now in `sand/src/physics/thermal.rs`) and the full heat model are taught in [[18-heat-latent-boundary-layers]].
+>
+> See "What changed later (to df0f4a1)" at the end of this lesson.
+
+> Source for this lesson: commit `31aed2d`, file `sand/src/physics/mod.rs` (now split: tables in `materials.rs`, `heat_cell` and `density` in `thermal.rs`, tests in `tests.rs`).
 > To read it without touching your working tree: `git show 31aed2d:sand/src/physics/mod.rs`
 
 ## 1. What you will build in this lesson
@@ -957,3 +965,94 @@ Air at 100 °C becomes $\lfloor 12 \cdot 293/373 \rfloor = 9$, so it still rises
 **Life in ticks.** `aux` for fire and smoke now counts ticks of 64 steps (53 ms): each step the life drops by one with chance 1/64 (`pcg(r) % TICK_STEPS == 0`). A wood flame starts with `120 + (r & 127)` ticks, 6 to 13 s of burning.
 
 **The tests now take seconds of world time.** Real heat is slow at 5 mm per cell. `lava_boils_water_and_turns_to_stone` runs `12 * STEPS_PER_SECOND` steps (the lava falls in, then takes a few seconds to boil water), where 600 steps used to be enough. `oil_floats_on_water` runs 10 s. In `conduction_conserves_heat`, granite only warms about one cell (5 mm) in 1 s, so the test checks that the neighbour of the hot block warmed by more than 5 °C and that a cell 15 cells away is still exactly at 20 °C. `hot_fire_ignites_wood` became `lava_ignites_wood` (35 s): a painted flame no longer lasts long enough to light a plank, which is true of real wood too.
+
+---
+
+## What changed later (to df0f4a1)
+
+The fixed-point *techniques* of this lesson are all still in use: temperatures in 1/256 °C, integer-only maths, a mutating closure over the 4 edges, a `match` with guards for phase changes, and one shared random number per edge. What changed is the **model** behind the numbers. `07fcf0b` used one diffusivity per material (`HEAT_K`) and took the harmonic mean of the two. That treats water and air as if they stored the same heat per degree, but water holds about 3500 times more per volume. So air next to hot water could cool the water as fast as it warmed itself. Commit `5ddae24` replaced it with an **energy** model, and `c4d6aeb`/`302a475` added latent heat. All of it is now in `sand/src/physics/thermal.rs` (tables in `materials.rs`). The full lesson is [[18-heat-latent-boundary-layers]]. Here is the outline.
+
+**Two tables instead of one.** Conductivity says how easily heat crosses a boundary, and heat capacity says how much heat a cell needs to warm by 1 K:
+
+```rust
+// sand/src/physics/materials.rs @ df0f4a1
+//                                            air stone sand water oil lava steam wood fire ice smoke
+pub const COND: [i32; MATERIAL_COUNT] = [26, 2500, 300, 600, 150, 1500, 25, 150, 80, 2200, 26]; // mW/(m K)
+pub const CAP: [i32; MATERIAL_COUNT] = [120, 210000, 130000, 418000, 170000, 300000, 120, 102000, 35, 190000, 120]; // 10 J/(m^3 K)
+```
+
+**Per-edge conductance, per-cell rate.** Both cells of an edge agree on how much heat crosses it (the series conductance, plus radiation, or a boundary-layer value). Each cell then divides by **its own** capacity:
+
+```rust
+// sand/src/physics/thermal.rs @ df0f4a1 (abridged)
+pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
+    let (ka, kb) = (COND[a as usize], COND[b as usize]);
+    let series = 2 * ka * kb / (ka + kb);
+    // + radiation_k(ta, tb) between two different condensed materials (a third of it from a flame),
+    // or BOIL_CONDUCTANCE / MELT_CONDUCTANCE for water on a hot surface / on ice
+    series + radiation
+}
+
+pub fn heat_rate(cap: i32, conductance: i32) -> i32 {
+    let rate = if conductance <= 37_000 {
+        conductance * RATE_SCALE / cap
+    } else {
+        (conductance / 8) * RATE_SCALE / (cap / 8).max(1) // boundary layers: /8 keeps it in i32
+    };
+    rate.min(RATE_MAX)
+}
+```
+
+The harmonic mean survives as `series` (two half-cells in series, like resistors in series), but it is now applied to conductivities, not diffusivities. Air on hot stone is now limited by **air's** tiny conductivity. And because air's capacity is tiny too, the air itself warms within a fraction of a second.
+
+**`flow_24`: stochastic rounding without 64-bit integers.** The rate is now scaled by $2^{24}$, not $2^{20}$, and `gap * rate` can overflow an `i32`. WGSL has no `i64`, so both sides split the gap $d = 4096\,hi + lo$ and shift twice:
+
+```rust
+// sand/src/physics/thermal.rs @ df0f4a1
+pub fn flow_24(d: i32, rate: i32, roll: i32) -> i32 {
+    let (hi, lo) = (d >> 12, d & 4095);
+    (hi * rate + ((lo * rate + roll) >> 12)) >> 12
+}
+```
+
+$$\left\lfloor \frac{d\,r + u}{2^{24}} \right\rfloor = \left\lfloor \frac{hi\cdot r + \lfloor (lo\cdot r + u)/2^{12}\rfloor}{2^{12}} \right\rfloor$$
+
+The identity is exact because $\lfloor (a + \lfloor b/n \rfloor)/n \rfloor = \lfloor (a\,n + b)/n^2 \rfloor$ for integers. `RATE_MAX` $= 2^{18}-1$ keeps both products in range for $|d| \le 2^{20}$.
+
+**Conservation: exact within one material, on average across two.** The edge loop is the same shape as in `07fcf0b`, but the gap is now measured with `sens` and the rate comes from `heat_rate(my_cap, ...)`:
+
+```rust
+// sand/src/physics/thermal.rs @ df0f4a1, inside heat_cell
+let (tn, mn) = (sens(other), material(other));
+if tn == t0s {
+    return; // no gap, no flow (and no need for a random number)
+}
+maybe = true;
+let rate = heat_rate(my_cap, pair_conductance(m, mn, t0s, tn));
+let roll = edge_roll(edge_cell, down, key);
+t += if ours { flow_24(tn - t0s, rate, roll) } else { -flow_24(t0s - tn, rate, roll) };
+```
+
+Two stone cells compute the same `rate` and the same `roll`, so their changes cancel bit for bit: `conduction_conserves_heat` still asserts `before == after` over 1 s. Water next to air uses two different rates, so *temperature* is not conserved there, and should not be. *Energy* (temperature times `CAP`) is conserved on average, which `heat_between_different_materials_is_conserved_on_average` checks.
+
+**Latent heat lives in the temperature field.** Water above 100 °C in its field is still boiling. The extra amount is stored latent heat (up to `LATENT_K = 541` K, which is $2.26\ \text{MJ/kg} \div 4.18\ \text{kJ/(kg K)}$). So conduction and density use `sens()`, the cell's *real* temperature:
+
+```rust
+// sand/src/physics/materials.rs @ df0f4a1 (abridged)
+pub fn sens(cell: u32) -> i32 {
+    let t = temp(cell);
+    match material(cell) {
+        WATER => t.clamp(0, celsius(100)), // boiling or freezing water is at 100 / 0 °C
+        STEAM => t.max(celsius(100)),      // a wet parcel stays at 100 °C until it has condensed
+        ICE => t.min(0),                   // melting ice (field 0..80 K) is still at 0 °C
+        _ => t,
+    }
+}
+```
+
+This replaces section 2.7's hysteresis band (boil at 100 °C, condense below 50 °C) for water. The latent heat itself now plays the role of the gap: steam only turns back into water after it has given all 541 K back (`STEAM if t < celsius(100) - LATENT`), and freezing and melting work the same way with `LATENT_F` (80 K). Water now *plateaus* at 100 °C while it absorbs 541 K worth of heat. It releases steam parcels at random as it goes (`BOIL_SLOWDOWN`), and steam gives the heat back when it condenses (`STEAM_RELAX_K`).
+
+**Other changes to this lesson's topics:**
+- Liquids expand: `density()` subtracts `EXPANSION[m]` ppm per K above 20 °C, so water heated from below turns over (`water_heated_from_below_turns_over`).
+- Lava erupts at 1150 °C and sets below 1000 °C. Stone melts at 1200 °C, so lava can no longer remelt the stone it sits on. Section 2.8's rule changed too. Lava now turns to gravel (`SAND`) only when it cools **in water with nothing holding it up**. Otherwise it sets into stone, and stone that is left unsupported now simply falls (lesson 08's "What changed later").
+- The test `lava_boils_water_and_turns_to_stone` is now `lava_heats_water_and_turns_to_stone`, alongside new ones such as `boiling_water_reads_at_most_100c`, `ice_melts_in_hot_water` and `phase_transition_latent_heat`.

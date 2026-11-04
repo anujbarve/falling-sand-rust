@@ -1,5 +1,14 @@
 # Lesson 06: Second engine. Library + binaries, modules, bit-packing
 
+> [!note] What changed later (up to `df0f4a1`)
+> The package layout and the bit layout in this lesson still hold. The cell is still `[temp:20 | aux:8 | material:4]`, and `pack`/`unpack` work the same way. What moved:
+> - Commit `4fb8971` split `physics/mod.rs` into `materials.rs`, `rng.rs`, `world.rs`, `thermal.rs`, `motion.rs`, `chunks.rs`, `scenes.rs` and `tests.rs`. `mod.rs` now only declares them and re-exports them with `pub use x::*`, and shared helpers became `pub(crate)`. The constants, `pack` and `temp` from this lesson are now in `sand/src/physics/materials.rs`, and `World` is in `world.rs`.
+> - The same commit split `sim.wgsl` into `physics/wgsl/{common,thermal,motion,step,wake}.wgsl`. `gpu.rs` glues them back into one string with `concat!(include_str!(...), ...)`.
+> - The viewer `src/bin/physics.rs` grew into a multi-file binary: `src/bin/physics/main.rs` with `mod render; mod settings; mod ui;`.
+> - The tables grew: `COND` now means real conductivity (mW/(m K)), and there are new tables `CAP` and `EXPANSION`. See [[18-heat-latent-boundary-layers]].
+>
+> The section "What changed later (to df0f4a1)" at the end of this lesson reads the split as a lesson in Rust modules.
+
 ## 1. What you will build in this lesson
 
 Lessons 01–05 built the original game. All of it lives in one file, `sand/src/main.rs`, and a cell is a Rust `enum Cell { Empty, Sand, ..., Fire { life: u8 } }`.
@@ -691,7 +700,7 @@ Write `DENSITY[m as usize]`.
 **Logic bugs the compiler can't catch:**
 - Unpacking temperature with `(cell >> 12) as i32`. Every negative temperature comes back as a large positive one. The cast must come *before* the shift.
 - Masking the temperature after the shift (`((cell as i32) >> 12) & 0xFFFFF`). That clears the sign bits you just copied down.
-- Changing a shift amount in Rust but not in `sim.wgsl`. The CPU-vs-GPU bit-exact test exists to catch exactly this.
+- Changing a shift amount in Rust but not in `sim.wgsl` (now `physics/wgsl/common.wgsl`). The CPU-vs-GPU bit-exact test exists to catch exactly this.
 - A `match` on material ids with no `_` arm. Integer matches must be exhaustive, so the compiler forces a `_ =>`, and a new material quietly falls into it.
 
 ---
@@ -706,6 +715,123 @@ Write `DENSITY[m as usize]`.
 - Packing temperature into the cell cut each cell from 8 bytes to 4. The 4K GPU step went from 2.911 to 2.614 ms, and step + readback from 5.334 to 3.896 ms.
 
 **Next, Lesson 07: The physics model.** You will look at what the `KIND`, `DENSITY`, `FLOW` and `COND` tables mean: density and buoyancy, friction and viscosity, heat conduction, and temperature-driven phase changes. It is all done in integer fixed point (`T_SCALE = 256`), so the CPU and the GPU agree bit for bit.
+
+---
+
+## What changed later (to df0f4a1)
+
+By `e9d8745`, `physics/mod.rs` was over 1000 lines: tables, the RNG, `World`, the heat rule, the move rule, chunk sleeping, scenes and the tests, all in one file. Commit `4fb8971` split it up one file per system, and **changed no behaviour**. The same tests pass, and the CPU-vs-GPU bit-exact test still compares every cell. Three Rust tools made the split work without touching a single caller.
+
+### 1. One file per child module, glob re-exports in `mod.rs`
+
+```rust
+// sand/src/physics/mod.rs @ df0f4a1 (after the doc comment)
+pub mod clock;
+pub mod cpu;
+pub mod gpu;
+pub mod materials;
+pub use materials::*;
+pub mod rng;
+pub use rng::*;
+pub mod world;
+pub use world::*;
+pub mod thermal;
+pub use thermal::*;
+pub mod motion;
+pub use motion::*;
+pub mod chunks;
+pub use chunks::*;
+pub mod scenes;
+pub use scenes::*;
+
+#[cfg(test)]
+mod tests;
+```
+
+`pub mod materials;` loads `physics/materials.rs` (the `name.rs` rule from section 2.3). Without the re-exports, `World` would now live at `sand::physics::world::World`, and the viewer, the bench and `cpu.rs` would all break. `pub use world::*;` is a **re-export**. It puts every public item of `world` into `physics` as well, so `sand::physics::World` is still a valid path. The public API (`use sand::physics::*` in the binaries) did not change at all. That is the usual Rust pattern: organise the files however you like, and choose the public paths with `pub use`.
+
+`cpu.rs` was not edited either. It still says:
+
+```rust
+// sand/src/physics/cpu.rs @ df0f4a1
+use super::{block_can_move, block_offset, chunk_dims, hash3, heat_cell, move_block, World, CHUNK};
+```
+
+`super::` is `physics`, and thanks to the re-exports `heat_cell` (in `thermal.rs`), `move_block` (in `motion.rs`) and `hash3` (in `rng.rs`) are all reachable there.
+
+### 2. `pub(crate)`: visible to siblings, hidden from binaries
+
+The new files are siblings, so they need each other's helpers. Every new file starts with the same line:
+
+```rust
+// sand/src/physics/thermal.rs @ df0f4a1
+//! Part of the physics engine (see mod.rs).
+
+use super::*;
+```
+
+`use super::*` pulls in everything `physics` can name, and that includes what it re-exported from the other siblings. The catch is privacy. A plain `const EDGE_SALT` in `thermal.rs` is private to `thermal` (and its children), so `motion.rs` or `tests.rs` could not use it. Making it `pub` would add it to the library's public API, and the binaries do not need it. `pub(crate)` sits between the two: it is visible anywhere inside the `sand` library crate, and invisible to `src/main.rs` and `src/bin/*`, because those are separate crates.
+
+```rust
+// sand/src/physics/thermal.rs @ df0f4a1
+pub(crate) const EDGE_SALT: u32 = 0x5EED_1234;
+pub(crate) const CELL_SALT: u32 = 0xA511_E9B3;
+pub(crate) fn edge_roll(i: usize, down: u32, key: u32) -> i32 { /* ... */ }
+
+// sand/src/physics/motion.rs @ df0f4a1
+pub(crate) fn pair_chance(top: u32, bottom: u32) -> u32 { /* ... */ }
+pub(crate) fn displace(cells: &mut [u32; 4], mover: usize, pushed: usize) { /* ... */ }
+pub fn move_block(cells: &mut [u32; 4], r: u32) { /* ... */ }   // still public API
+```
+
+A glob re-export respects this. `pub use thermal::*` re-exports `heat_cell` publicly, and `EDGE_SALT` only crate-wide: a re-export can never make an item more visible than its own declaration.
+
+The tests moved out of an inline `mod tests { ... }` into their own file. `#[cfg(test)] mod tests;` loads `physics/tests.rs`, which starts with `use super::*; use cpu::CpuSim;`. A child module can see its parent's private items, so the tests still reach everything.
+
+### 3. One shader from five files: `include_str!` + `concat!`
+
+WGSL has no `mod` or `import`. `sim.wgsl` was split into five files by system anyway, and Rust glues them back together at compile time:
+
+```rust
+// sand/src/physics/gpu.rs @ df0f4a1
+/// The shader is split by system (see physics/wgsl/) and joined here: WGSL
+/// allows module-level declarations in any order.
+const SHADER: &str = concat!(
+    include_str!("wgsl/common.wgsl"),
+    include_str!("wgsl/thermal.wgsl"),
+    include_str!("wgsl/motion.wgsl"),
+    include_str!("wgsl/step.wgsl"),
+    include_str!("wgsl/wake.wgsl"),
+);
+```
+
+- `include_str!("path")` reads a file **at compile time** and expands to a `&'static str` literal holding its contents. The path is relative to the source file that contains the macro (`gpu.rs`), not to the working directory. If a file is missing, you get a compile error, not a runtime one.
+- `concat!(a, b, ...)` joins *literals* into one literal, also at compile time. It accepts `include_str!(...)` because that has already expanded to a literal. A `let s = String::new(); concat!(s, ...)` would not compile.
+- The result is a `const &str`, so the binary contains one string. There is no file I/O at run time, and `cargo build` rebuilds when any of the five files change.
+
+The order only matters for readability: WGSL lets a function call another one declared further down. `common.wgsl` holds the bit layout (`material`, `aux`, `temp` with `bitcast<i32>(cell) >> 12u`, `pack`) and the tables, so the "change a shift in Rust but not in WGSL" mistake from section 6 now means `materials.rs` vs `wgsl/common.wgsl`.
+
+### 4. A binary can be a module tree too
+
+The viewer is no longer `src/bin/physics.rs`. It is `src/bin/physics/main.rs`, which Cargo also treats as the binary `physics`, so `cargo run --bin physics` is unchanged. Inside it, `mod render; mod settings; mod ui;` load `src/bin/physics/{render,settings,ui}.rs`. These modules belong to the binary crate, not to the library, so they cannot use the library's `pub(crate)` items. They see only what `sand::physics` exports, through `use sand::physics::{clock::Clock, gpu::GpuSim, *};`.
+
+### Updated diagram
+
+```mermaid
+graph TD
+    L["library crate: src/lib.rs"] --> PM["mod physics (physics/mod.rs)<br/>declares + pub use x::*"]
+    PM --> MA["materials.rs<br/>ids, tables, pack/temp/sens"]
+    PM --> R["rng.rs<br/>pcg, hash3"]
+    PM --> W["world.rs<br/>World"]
+    PM --> T["thermal.rs<br/>heat_cell, density, sinks"]
+    PM --> MO["motion.rs<br/>move_block, block_offset"]
+    PM --> CH["chunks.rs<br/>chunk sleeping"]
+    PM --> S["scenes.rs"]
+    PM --> C["cpu.rs"]
+    PM --> G["gpu.rs<br/>SHADER = concat!(include_str!(wgsl/*.wgsl))"]
+    PM -.->|cfg test| TS["tests.rs"]
+    B1["bin: src/bin/physics/main.rs<br/>mod render, settings, ui"] -. "use sand::physics::*" .-> L
+```
 
 ---
 
