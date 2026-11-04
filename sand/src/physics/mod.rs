@@ -772,6 +772,36 @@ mod tests {
         }
     }
 
+    /// The GPU works in tiles; sizes that are odd or not a multiple of the
+    /// tile size exercise the tile and grid edges, where bugs hide.
+    #[test]
+    fn gpu_matches_cpu_on_odd_sizes() {
+        for (w, h, scene_index) in [(257, 161, 4), (100, 37, 4), (33, 18, 1), (64, 16, 2), (3, 3, 0)] {
+            let start = scene(scene_index, w, h);
+            let mut gpu = match gpu::GpuSim::new(&start) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("no GPU adapter, skipping: {e}");
+                    return;
+                }
+            };
+            let mut cpu_world = start.clone();
+            let mut gpu_world = start.clone();
+            let mut sim = CpuSim::new(&cpu_world);
+            // Check after an odd and an even number of steps (both offsets).
+            for steps in [1, 300] {
+                for _ in 0..steps {
+                    sim.step(&mut cpu_world);
+                }
+                gpu.step(steps);
+                gpu.download(&mut gpu_world);
+                assert_eq!(cpu_world.frame, gpu_world.frame);
+                let diff = (0..cpu_world.cells.len()).filter(|&i| cpu_world.cells[i] != gpu_world.cells[i]).count();
+                assert_eq!(diff, 0, "{w}x{h}: {diff} cells differ between CPU and GPU at frame {}", cpu_world.frame);
+            }
+        }
+    }
+
     #[test]
     fn conduction_conserves_heat() {
         // Only stone (no phase change below 1100°C, no gas cooling).

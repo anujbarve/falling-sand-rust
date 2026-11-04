@@ -1,11 +1,11 @@
-//! The GPU backend: the world lives in GPU buffers and each step is two
-//! compute-shader dispatches (heat, then move). The CPU only records
-//! commands; it never touches the cells until you call `download`.
+//! The GPU backend: the world lives in GPU buffers and each step is one
+//! fused compute dispatch (heat and move together, see sim.wgsl). The CPU
+//! only records commands; it never touches the cells until you read back.
 //!
-//! Chunk sleeping (rule and proof in mod.rs): every workgroup of the heat and
-//! move passes belongs to one 32x32 chunk and returns at once when that chunk
-//! is asleep. A third tiny pass, `wake`, turns the per-chunk activity stamps
-//! into next step's awake flags. Results are bit-identical to not sleeping.
+//! Chunk sleeping (rule and proof in mod.rs): threads whose cells are all in
+//! sleeping 32x32 chunks return at once. A second tiny pass, `wake`, turns
+//! the per-chunk activity stamps into next step's awake flags. Results are
+//! bit-identical to not sleeping.
 
 use super::{chunk_dims, World};
 use std::num::NonZeroU64;
@@ -17,8 +17,19 @@ use std::sync::atomic::{AtomicU8, Ordering};
 const MAX_BATCH: u32 = 256;
 /// Uniform buffer offsets must be multiples of this (WebGPU's default limit).
 const PARAMS_STRIDE: u64 = 256;
-const WORKGROUP: u32 = 16; // must match @workgroup_size in sim.wgsl
+const SHADER: &str = include_str!("sim.wgsl");
 const WAKE_WORKGROUP: u32 = 8; // must match @workgroup_size of `wake`
+
+/// Workgroup shape (threads) declared in sim.wgsl as `const GROUP_W: u32 = ..u;`.
+/// Each thread owns a 2x2 block, so a workgroup covers 2*W x 2*H cells.
+fn shader_const(name: &str) -> u32 {
+    let prefix = format!("const {name}: u32 = ");
+    SHADER
+        .lines()
+        .find_map(|l| l.strip_prefix(&prefix))
+        .and_then(|rest| rest.trim_end_matches(';').trim_end_matches('u').parse().ok())
+        .unwrap_or_else(|| panic!("sim.wgsl must declare {prefix}<n>u;"))
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -32,8 +43,8 @@ struct Params {
 pub struct GpuSim {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    heat: wgpu::ComputePipeline,
-    moves: wgpu::ComputePipeline,
+    step: wgpu::ComputePipeline,
+    tile: (u32, u32), // cells covered by one workgroup of `step`
     wake: wgpu::ComputePipeline,
     params: wgpu::Buffer,
     // Two copies of the grid. The heat pass reads one and writes the other.
@@ -97,7 +108,7 @@ impl GpuSim {
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("sim.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("sim.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
 
         let storage = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
@@ -145,8 +156,8 @@ impl GpuSim {
                 cache: None,
             })
         };
-        let heat = pipeline("heat");
-        let moves = pipeline("move_blocks");
+        let step = pipeline("step");
+        let tile = (2 * shader_const("GROUP_W"), 2 * shader_const("GROUP_H"));
         let wake = pipeline("wake");
 
         let cell_count = (world.width * world.height) as u64;
@@ -208,8 +219,8 @@ impl GpuSim {
         let mut sim = GpuSim {
             device,
             queue,
-            heat,
-            moves,
+            step,
+            tile,
             wake,
             params,
             cells,
@@ -306,18 +317,18 @@ impl GpuSim {
                     label: None,
                     timestamp_writes: self.timestamp_writes(timing, steps + batch == total, steps == 0),
                 });
-                let cells = (self.width.div_ceil(WORKGROUP), self.height.div_ceil(WORKGROUP));
-                let blocks = ((self.width / 2).div_ceil(WORKGROUP), (self.height / 2).div_ceil(WORKGROUP));
                 for s in 0..batch {
                     let offset = [(s as u64 * PARAMS_STRIDE) as u32];
                     let group = &self.groups[self.current];
                     // wgpu puts a barrier between dispatches that touch the same
                     // buffers, so each dispatch sees the previous one's writes.
                     pass.set_bind_group(0, group, &offset);
-                    pass.set_pipeline(&self.heat);
-                    pass.dispatch_workgroups(cells.0, cells.1, 1);
-                    pass.set_pipeline(&self.moves);
-                    pass.dispatch_workgroups(blocks.0, blocks.1, 1);
+                    // When the block offset o is 1, threads start one cell before
+                    // the grid (see sim.wgsl), so one more cell must be covered.
+                    let o = self.frame.wrapping_add(s) & 1;
+                    let groups = ((self.width + o).div_ceil(self.tile.0), (self.height + o).div_ceil(self.tile.1));
+                    pass.set_pipeline(&self.step);
+                    pass.dispatch_workgroups(groups.0, groups.1, 1);
                     if self.sleeping {
                         pass.set_pipeline(&self.wake);
                         pass.dispatch_workgroups(
