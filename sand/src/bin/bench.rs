@@ -8,6 +8,9 @@
 //! - cpu 1 thread   `CpuSim::step`
 //! - cpu all cores  `CpuSim::step_parallel` (rayon)
 //! - gpu            many steps queued back to back, the GPU never waits for us
+//! - gpu (timestamps) the same run, timed by the GPU's own clock (timestamp
+//!                  queries): no CPU-side submit/wait overhead. n/a if the
+//!                  adapter has no `TIMESTAMP_QUERY`.
 //! - gpu + readback one step, then copy the grid back to the CPU, every time.
 //!                  This is what a game that draws on the CPU pays per frame.
 //!
@@ -64,7 +67,11 @@ fn main() {
 
     let probe = GpuSim::new(&World::new(8, 8));
     let gpu_name = match &probe {
-        Ok(g) => g.adapter_name.clone(),
+        Ok(g) => format!(
+            "{}, timestamp queries {}",
+            g.adapter_name,
+            if g.has_timestamps() { "supported" } else { "NOT supported" }
+        ),
         Err(e) => format!("none ({e})"),
     };
     drop(probe);
@@ -76,10 +83,10 @@ fn main() {
     }
 
     println!(
-        "{:>11} | {:>9} | {:>11} | {:>11} | {:>11} | {:>15} | {:>12} | {:>11}",
-        "grid", "cells", "cpu 1 thr", "cpu all", "gpu", "gpu + readback", "gpu vs 1 thr", "gpu vs all"
+        "{:>11} | {:>9} | {:>11} | {:>11} | {:>11} | {:>16} | {:>15} | {:>12} | {:>11}",
+        "grid", "cells", "cpu 1 thr", "cpu all", "gpu", "gpu (timestamps)", "gpu + readback", "gpu vs 1 thr", "gpu vs all"
     );
-    println!("{}", "-".repeat(113));
+    println!("{}", "-".repeat(132));
     for (w, h) in SIZES {
         let start = scene(BENCH_SCENE, w, h);
         let mut sim = CpuSim::new(&start);
@@ -95,34 +102,41 @@ fn main() {
             1
         });
 
-        let (gpu, readback) = match GpuSim::new(&start) {
+        let (gpu, gpu_ts, readback) = match GpuSim::new(&start) {
             Ok(mut g) => {
                 // Queue 32 steps, then wait for them: measures GPU throughput.
+                // Also collect the GPU's own timestamps for each batch.
+                let mut stamps = Vec::new();
                 let gpu = time_it(budget, || {
                     g.step(32);
                     g.wait();
+                    stamps.extend(g.gpu_time_ms());
                     32
                 });
+                let skip = stamps.len().min(3); // warm-up calls
+                let gpu_ts = (stamps.len() > skip)
+                    .then(|| stamps[skip..].iter().sum::<f64>() / (stamps.len() - skip) as f64);
                 let mut world = start.clone();
                 let readback = time_it(budget, || {
                     g.step(1);
                     g.download(&mut world);
                     1
                 });
-                (Some(gpu), Some(readback))
+                (Some(gpu), gpu_ts, Some(readback))
             }
-            Err(_) => (None, None),
+            Err(_) => (None, None, None),
         };
 
         let ms = |v: Option<f64>| v.map_or("n/a".to_string(), |v| format!("{v:.3} ms"));
         let x = |v: Option<f64>, base: f64| v.map_or("n/a".to_string(), |v| format!("{:.1}x", base / v));
         println!(
-            "{:>11} | {:>8.2}M | {:>11} | {:>11} | {:>11} | {:>15} | {:>12} | {:>11}",
+            "{:>11} | {:>8.2}M | {:>11} | {:>11} | {:>11} | {:>16} | {:>15} | {:>12} | {:>11}",
             format!("{w}x{h}"),
             (w * h) as f64 / 1e6,
             ms(Some(single)),
             ms(Some(multi)),
             ms(gpu),
+            ms(gpu_ts),
             ms(readback),
             x(gpu, single),
             x(gpu, multi),

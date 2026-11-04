@@ -1,31 +1,15 @@
-//! Window for the physics engine in `src/physics`. Switch between the CPU
-//! and GPU backends with G while it runs and watch the timing change.
+//! Window for the physics engine in `src/physics`, running on the GPU.
+//! Each frame it queues the steps plus a copy of the grid and draws the
+//! newest copy that has come back, without waiting for the GPU.
 //!
 //!     cargo run --release --bin physics
 
 use macroquad::prelude::*;
-use sand::physics::{cpu::CpuSim, gpu::GpuSim, *};
+use sand::physics::{gpu::GpuSim, *};
 
 const W: usize = 640;
 const H: usize = 360;
 const SCALE: f32 = 2.0;
-
-#[derive(Clone, Copy, PartialEq)]
-enum Backend {
-    CpuOneThread,
-    CpuAllCores,
-    Gpu,
-}
-
-impl Backend {
-    fn name(self) -> &'static str {
-        match self {
-            Backend::CpuOneThread => "cpu, 1 thread",
-            Backend::CpuAllCores => "cpu, all cores (rayon)",
-            Backend::Gpu => "gpu (wgpu compute)",
-        }
-    }
-}
 
 fn window_conf() -> Conf {
     Conf {
@@ -40,24 +24,23 @@ fn window_conf() -> Conf {
 #[macroquad::main(window_conf)]
 async fn main() {
     let mut scene_index = 0;
+    // `world` is the CPU's copy, only used for drawing: the GPU owns the
+    // real state, and readbacks refresh this copy.
     let mut world = scene(scene_index, W, H);
-    let mut cpu = CpuSim::new(&world);
-    // No GPU? The viewer still runs, with the GPU backend missing.
     let mut gpu = match GpuSim::new(&world) {
-        Ok(g) => Some(g),
+        Ok(g) => g,
         Err(e) => {
-            eprintln!("GPU backend unavailable: {e}");
-            None
+            eprintln!("no usable GPU: {e}");
+            std::process::exit(1);
         }
     };
-    let mut backend = Backend::CpuAllCores;
-    let mut gpu_stale = true; // the world changed on the CPU side: upload before stepping
     let mut brush = SAND;
     let mut brush_size = 6;
     let mut steps_per_frame = 4u32;
     let mut paused = false;
     let mut heat_view = false;
-    let mut ms_per_step = 0.0f64; // smoothed
+    let mut cpu_ms = 0.0f64; // smoothed CPU time per frame spent submitting + collecting readbacks
+    let mut edits = Vec::new();
 
     let mut image = Image::gen_image_color(W as u16, H as u16, BLACK);
     let texture = Texture2D::from_image(&image);
@@ -74,22 +57,17 @@ async fn main() {
             scene_index = (scene_index + SCENES.len() - 1) % SCENES.len();
             reload = true;
         }
+        let mut replaced = false;
         if reload {
             world = scene(scene_index, W, H);
-            gpu_stale = true;
+            replaced = true;
         }
         if is_key_pressed(KeyCode::C) {
             world = World::new(W, H);
-            gpu_stale = true;
+            replaced = true;
         }
-        if is_key_pressed(KeyCode::G) {
-            backend = match backend {
-                Backend::CpuOneThread => Backend::CpuAllCores,
-                Backend::CpuAllCores if gpu.is_some() => Backend::Gpu,
-                _ => Backend::CpuOneThread,
-            };
-            gpu_stale = true;
-            ms_per_step = 0.0;
+        if replaced {
+            gpu.upload(&world); // also drops readbacks of the old world still in flight
         }
         if is_key_pressed(KeyCode::H) {
             heat_view = !heat_view;
@@ -111,7 +89,14 @@ async fn main() {
         if is_key_pressed(KeyCode::LeftBracket) || wheel < 0.0 {
             brush_size = (brush_size - 1).max(1);
         }
-        gpu_stale |= paint(&mut world, brush, brush_size);
+        // Paint goes straight into the GPU's grid and shows up with the next
+        // readback (about a frame later). Painting into `world` instead would
+        // flicker: readbacks already in flight do not have the paint yet.
+        edits.clear();
+        paint(&world, brush, brush_size, &mut edits);
+        if !edits.is_empty() {
+            gpu.write_cells(&edits);
+        }
 
         // --- simulate ---
         let steps = if !paused {
@@ -121,23 +106,13 @@ async fn main() {
         } else {
             0
         };
-        if steps > 0 {
-            let start = std::time::Instant::now();
-            match (backend, gpu.as_mut()) {
-                (Backend::Gpu, Some(g)) => {
-                    if gpu_stale {
-                        g.upload(&world);
-                        gpu_stale = false;
-                    }
-                    g.step(steps);
-                    g.download(&mut world); // waits for the GPU, then copies the grid back to draw it
-                }
-                (Backend::CpuOneThread, _) => (0..steps).for_each(|_| cpu.step(&mut world)),
-                _ => (0..steps).for_each(|_| cpu.step_parallel(&mut world)),
-            }
-            let now = start.elapsed().as_secs_f64() * 1000.0 / steps as f64;
-            ms_per_step = if ms_per_step == 0.0 { now } else { ms_per_step * 0.95 + now * 0.05 };
+        let start = std::time::Instant::now();
+        if steps > 0 || !edits.is_empty() {
+            gpu.step_and_readback(steps); // returns at once; the GPU works in the background
         }
+        gpu.latest(&mut world); // the newest readback that has arrived, if any; does not wait
+        let now = start.elapsed().as_secs_f64() * 1000.0;
+        cpu_ms = if cpu_ms == 0.0 { now } else { cpu_ms * 0.95 + now * 0.05 };
 
         // --- draw ---
         for i in 0..W * H {
@@ -166,23 +141,30 @@ async fn main() {
                 temp(world.cells[i]) as f32 / T_SCALE as f32
             )
         });
+        let gpu_ms = match gpu.gpu_time_ms() {
+            Some(ms) => format!("gpu {ms:.3} ms/step"),
+            None if gpu.has_timestamps() => "gpu ... ms/step".to_string(),
+            None => "gpu ms/step n/a (no timestamps)".to_string(),
+        };
         let (name, about) = SCENES[scene_index];
         let lines = [
             format!("scene {}/{}: {name} - {about}", scene_index + 1, SCENES.len()),
             format!(
-                "{} | {} steps/frame | {:.3} ms/step | {} fps | {}{}",
-                backend.name(),
+                "{} | {} steps/frame | {gpu_ms} | cpu {:.2} ms/frame | frame {:.1} ms, {} fps",
+                gpu.adapter_name,
                 steps_per_frame,
-                ms_per_step,
+                cpu_ms,
+                get_frame_time() * 1000.0,
                 get_fps(),
-                if paused { "PAUSED (N = step) | " } else { "" },
-                probe
             ),
             format!(
-                "brush: {} size {} | 1 sand 2 water 3 stone 4 erase 5 wood 6 fire 7 oil 8 lava 9 ice 0 steam",
-                NAMES[brush as usize], brush_size
+                "{}brush: {} size {} | 1 sand 2 water 3 stone 4 erase 5 wood 6 fire 7 oil 8 lava 9 ice 0 steam | {}",
+                if paused { "PAUSED (N = step) | " } else { "" },
+                NAMES[brush as usize],
+                brush_size,
+                probe
             ),
-            "G backend | H heat view | - = steps/frame | [ ] size | Tab scene | R reset | C clear | Space pause".to_string(),
+            "H heat view | - = steps/frame | [ ] size | Tab scene | R reset | C clear | Space pause".to_string(),
         ];
         draw_rectangle(0.0, 0.0, W as f32 * SCALE, 102.0, Color::new(0.0, 0.0, 0.0, 0.6));
         for (i, text) in lines.iter().enumerate() {
@@ -213,18 +195,20 @@ fn pick_brush(brush: &mut u32) {
     }
 }
 
-/// Left mouse paints, right mouse erases. Returns true if anything changed.
-fn paint(world: &mut World, brush: u32, size: i32) -> bool {
+/// Left mouse paints, right mouse erases. Pushes `(cell index, new cell)`
+/// onto `edits`, in index order, ready for `GpuSim::write_cells`.
+fn paint(world: &World, brush: u32, size: i32, edits: &mut Vec<(usize, u32)>) {
     let m = if is_mouse_button_down(MouseButton::Left) {
         brush
     } else if is_mouse_button_down(MouseButton::Right) {
         AIR
     } else {
-        return false;
+        return;
     };
     let (mx, my) = mouse_position();
     let (cx, cy) = ((mx / SCALE) as i32, (my / SCALE) as i32);
     let loose = KIND[m as usize] != SOLID;
+    let cell = pack(m, default_aux(m), default_temp(m));
     for dy in -size..=size {
         for dx in -size..=size {
             if dx * dx + dy * dy > size * size {
@@ -234,10 +218,11 @@ fn paint(world: &mut World, brush: u32, size: i32) -> bool {
             if loose && m != AIR && rand::gen_range(0, 3) != 0 {
                 continue;
             }
-            world.set(cx + dx, cy + dy, m);
+            if let Some(i) = world.index(cx + dx, cy + dy) {
+                edits.push((i, cell));
+            }
         }
     }
-    true
 }
 
 fn lerp(a: [u8; 3], b: [u8; 3], f: f32) -> [u8; 3] {

@@ -718,6 +718,61 @@ mod tests {
     }
 
     #[test]
+    fn pipelined_readback_and_paint_match_cpu() {
+        let mut cpu_world = scene(4, 256, 160);
+        let mut shown = cpu_world.clone();
+        let mut gpu = match gpu::GpuSim::new(&cpu_world) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU adapter, skipping: {e}");
+                return;
+            }
+        };
+        let mut sim = CpuSim::new(&cpu_world);
+        for round in 0..20u32 {
+            // Paint the same cells on both sides: a stripe of fire on row 10.
+            if round == 7 {
+                let edits: Vec<(usize, u32)> =
+                    (40..60).map(|x| (10 * 256 + x, pack(FIRE, default_aux(FIRE), default_temp(FIRE)))).collect();
+                for &(i, c) in &edits {
+                    cpu_world.cells[i] = c;
+                }
+                gpu.write_cells(&edits);
+            }
+            for _ in 0..5 {
+                sim.step(&mut cpu_world);
+            }
+            gpu.step_and_readback(5);
+            gpu.latest(&mut shown); // may or may not have something new: never blocks
+            assert!(shown.frame <= cpu_world.frame);
+        }
+        gpu.wait();
+        assert!(gpu.latest(&mut shown), "the last readback should have arrived");
+        assert_eq!(shown.frame, cpu_world.frame);
+        assert_eq!(shown, cpu_world);
+
+        // An upload makes readbacks still in flight stale: they must not show.
+        gpu.step_and_readback(3);
+        let fresh = scene(0, 256, 160);
+        gpu.upload(&fresh);
+        gpu.wait();
+        let before = shown.clone();
+        assert!(!gpu.latest(&mut shown), "a readback from before the upload was shown");
+        assert_eq!(shown, before);
+        gpu.step_and_readback(0);
+        gpu.wait();
+        assert!(gpu.latest(&mut shown));
+        assert_eq!(shown, fresh);
+
+        if gpu.has_timestamps() {
+            gpu.step(10);
+            gpu.wait();
+            let ms = gpu.gpu_time_ms().expect("timestamps should come back after a wait");
+            assert!(ms > 0.0 && ms < 1000.0, "implausible GPU time {ms} ms/step");
+        }
+    }
+
+    #[test]
     fn conduction_conserves_heat() {
         // Only stone (no phase change below 1100°C, no gas cooling).
         let mut world = World::new(64, 64);
