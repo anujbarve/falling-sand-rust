@@ -99,14 +99,14 @@ const FLOW_T = vec3<u32>(
     21u | (0u << 8u) | (12u << 16u),                  // fire ice smoke
 );
 const VT_LIQUID_T = vec3<u32>(
-    0u | (0u << 8u) | (4u << 16u) | (4u << 24u),
-    4u | (12u << 8u) | (10u << 16u) | (0u << 24u),
-    0u,
+    0u | (4u << 8u) | (4u << 16u) | (4u << 24u),
+    4u | (12u << 8u) | (10u << 16u) | (4u << 24u),
+    0u | (4u << 8u) | (0u << 16u),
 );
 const VT_GAS_T = vec3<u32>(
-    0u | (0u << 8u) | (255u << 16u) | (255u << 24u),
-    255u | (255u << 8u) | (85u << 16u) | (0u << 24u),
-    0u,
+    0u | (255u << 8u) | (255u << 16u) | (255u << 24u),
+    255u | (255u << 8u) | (85u << 16u) | (255u << 24u),
+    0u | (255u << 8u) | (0u << 16u),
 );
 // Top speed of anything moving through this medium (VT_MEDIUM in mod.rs):
 // 255 for air, water, oil, steam, fire, smoke; 0 for lava and solids.
@@ -178,6 +178,7 @@ fn expansion(m: u32) -> i32 {
 }
 const RATE_SCALE: i32 = 55924;
 const RATE_MAX: i32 = 262143; // (1 << 18) - 1
+const FLAME_UNITS: i32 = 640000; // see FLAME_UNITS in mod.rs
 
 // Cell layout: bits 0-3 material, 4-11 aux, 12-31 signed temperature.
 fn celsius(c: i32) -> i32 { return c * T_SCALE; }
@@ -189,7 +190,7 @@ fn pack(m: u32, a: u32, t: i32) -> u32 {
     return m | (a << 4u) | (bitcast<u32>(clamp(t, T_MIN, T_MAX)) << 12u);
 }
 fn has_speed(m: u32) -> bool {
-    return m == SAND || m == WATER || m == OIL || m == LAVA || m == STEAM;
+    return m == SAND || m == WATER || m == OIL || m == LAVA || m == STEAM || m == STONE || m == WOOD || m == ICE;
 }
 fn sinker(m: u32) -> bool { return base_density(m) > 12; }
 fn speed(cell: u32) -> u32 { return select(0u, aux(cell), has_speed(material(cell))); }
@@ -241,6 +242,13 @@ fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     } else if ((a == FIRE && condensed(b)) || (b == FIRE && condensed(a))) {
         radiation = radiation_k(ta, tb) / 3;
     }
+    // Hot crust occupies an entire 5 mm cell; resolve boiling at its
+    // water-facing surface as well as at a direct lava-water boundary.
+    let hot_a = (a == LAVA || a == STONE || a == SAND) && ta >= celsius(500);
+    let hot_b = (b == LAVA || b == STONE || b == SAND) && tb >= celsius(500);
+    if ((a == WATER && hot_b) || (b == WATER && hot_a)) {
+        return (series + radiation) * 6;
+    }
     return series + radiation;
 }
 fn heat_rate(m: u32, conductance: i32) -> i32 {
@@ -269,13 +277,22 @@ fn density(cell: u32) -> i32 {
 fn sinks(top: u32, bottom: u32) -> bool {
     let kt = kind(material(top));
     let kb = kind(material(bottom));
-    return kt != SOLID && kb != SOLID && kb != POWDER && density(top) > density(bottom);
+    // A flame is anchored where it burns: it does not drift off its fuel.
+    if (material(top) == FIRE || material(bottom) == FIRE) {
+        return false;
+    }
+    return kb != SOLID && kb != POWDER && density(top) > density(bottom);
 }
 
 fn accelerate(cell: u32, heavy: u32, light: u32, medium: u32, roll: u32) -> u32 {
     let dh = density(heavy);
     let dl = density(light);
-    let q = u32(G_Q * (dh - dl) / dh);
+    var q = 0u;
+    if (sinker(material(cell))) {
+        q = u32(G_Q * (dh - dl) / dh);
+    } else {
+        q = u32(G_Q * (dh - dl) / max(dl, 1));
+    }
     return min(speed(cell) + ((q + roll) >> 8u), speed_cap(cell, medium));
 }
 
@@ -309,6 +326,10 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
 
     var t = t0;
     var touches_water = false;
+    var touches_air = false;
+    var touches_lava = false;
+    var touches_fire = false;
+    var touches_fuel = false;
     let i = y * w + x;
     let key = pcg(frame ^ EDGE_SALT);
     // Same as heat_cell: an edge with no temperature gap carries no heat
@@ -318,6 +339,10 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         let mn = material(right);
         let tn = temp(right);
         touches_water = touches_water || mn == WATER;
+        touches_air = touches_air || mn == AIR;
+        touches_lava = touches_lava || mn == LAVA;
+        touches_fire = touches_fire || mn == FIRE;
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0) {
             maybe = true;
@@ -328,6 +353,10 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         let mn = material(left);
         let tn = temp(left);
         touches_water = touches_water || mn == WATER;
+        touches_air = touches_air || mn == AIR;
+        touches_lava = touches_lava || mn == LAVA;
+        touches_fire = touches_fire || mn == FIRE;
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0) {
             maybe = true;
@@ -338,6 +367,10 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         let mn = material(down);
         let tn = temp(down);
         touches_water = touches_water || mn == WATER;
+        touches_air = touches_air || mn == AIR;
+        touches_lava = touches_lava || mn == LAVA;
+        touches_fire = touches_fire || mn == FIRE;
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0) {
             maybe = true;
@@ -348,6 +381,10 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         let mn = material(up);
         let tn = temp(up);
         touches_water = touches_water || mn == WATER;
+        touches_air = touches_air || mn == AIR;
+        touches_lava = touches_lava || mn == LAVA;
+        touches_fire = touches_fire || mn == FIRE;
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0) {
             maybe = true;
@@ -358,6 +395,11 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     let r = pcg(i ^ pcg(frame ^ CELL_SALT));
     let r2 = pcg(r);
     let tick = r2 % TICK_STEPS == 0u;
+    // Flame flux onto a touching solid or liquid (same as heat_cell).
+    if (touches_fire && condensed(m) && m != FIRE) {
+        t += FLAME_UNITS / cap(m);
+        maybe = true;
+    }
     if (condensed(m) && open_faces > 0 && t0 != AMBIENT) {
         maybe = true;
         t += flow_24(AMBIENT - t0, sky_rate(m, t0) * open_faces, i32(r2 >> 8u));
@@ -403,33 +445,46 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     }
     var next = m;
     if (m == WATER) {
-        if (t >= celsius(100)) { next = STEAM; } else if (t <= celsius(-2)) { next = ICE; }
+        if (t >= celsius(100)) {
+            next = STEAM;
+            life = vt_gas(STEAM);
+            t -= celsius(40);
+        } else if (t <= celsius(-2)) {
+            next = ICE;
+            t += celsius(10);
+        }
     } else if (m == ICE) {
-        if (t >= celsius(1)) { next = WATER; }
+        if (t >= celsius(1)) {
+            next = WATER;
+            t -= celsius(10);
+        }
     } else if (m == STEAM) {
-        if (t < celsius(50)) { next = WATER; }
+        if (t < celsius(50)) {
+            next = WATER;
+            t += celsius(20);
+        }
     } else if (m == LAVA) {
         if (t < celsius(1000)) { next = select(SAND, STONE, supported); }
     } else if (m == STONE) {
         if (t >= celsius(1200)) { next = LAVA; }
     } else if (m == WOOD) {
-        if (t >= celsius(300)) { next = FIRE; life = 120u + (r & 127u); }
+        if (t >= celsius(300) && (touches_air || touches_lava || touches_fire)) { next = FIRE; life = 120u + (r & 127u); }
     } else if (m == OIL) {
-        if (t >= celsius(250)) { next = FIRE; life = 20u + (r & 31u); }
+        if (t >= celsius(250) && (touches_air || touches_lava || touches_fire)) { next = FIRE; life = 20u + (r & 31u); }
     } else if (m == FIRE) {
         maybe = true;
-        if (touches_water || life == 0u) {
+        if (touches_water || (!touches_air && !touches_lava && !touches_fuel && !touches_fire) || life == 0u) {
             next = SMOKE;
             life = 30u + (r & 31u);
         } else {
-            if (tick) { life -= 1u; }
+            if (tick && !touches_fuel) { life -= 1u; }
             t = max(t, celsius(900));
         }
     } else if (m == SMOKE) {
         maybe = true;
         if (life == 0u) { next = AIR; } else if (tick) { life -= 1u; }
     }
-    if (next != m && next != FIRE && next != SMOKE) {
+    if (next != m && next != FIRE && next != SMOKE && !(m == WATER && next == STEAM)) {
         life = 0u;
     }
     let new_cell = pack(next, life, t);
@@ -456,7 +511,19 @@ fn pair_chance(top: u32, bottom: u32) -> u32 {
 fn can_slide(top: u32, below: u32, diagonal: u32) -> bool {
     let m = material(top);
     let k = kind(m);
-    return (k == POWDER || k == LIQUID) && flow(m) > 0u && speed(top) == 0u && !sinks(top, below) && sinks(top, diagonal);
+    return (k == POWDER || k == LIQUID) && flow(m) > 0u && !sinks(top, below) && sinks(top, diagonal);
+}
+
+fn slide_chance(cell: u32) -> u32 {
+    let m = material(cell);
+    return max(flow(m), move_chance(speed(cell)));
+}
+
+fn can_steam_vent(bottom: u32, top: u32, diagonal: u32) -> bool {
+    return material(bottom) == STEAM
+        && kind(material(top)) >= LIQUID
+        && kind(material(diagonal)) == GAS
+        && sinks(diagonal, bottom);
 }
 
 fn is_fluid(k: u32) -> bool {
@@ -477,6 +544,7 @@ fn spread_chance(left: u32, right: u32) -> u32 {
 fn block_can_move(c: array<u32, 4>) -> bool {
     return pair_chance(c[0], c[2]) > 0u || pair_chance(c[1], c[3]) > 0u
         || can_slide(c[0], c[2], c[3]) || can_slide(c[1], c[3], c[2])
+        || can_steam_vent(c[2], c[0], c[3]) || can_steam_vent(c[3], c[1], c[2])
         || spread_chance(c[0], c[1]) > 0u || spread_chance(c[2], c[3]) > 0u;
 }
 
@@ -530,9 +598,15 @@ fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
         let top = col;
         let bottom = col + 2u;
         let diagonal = 3u - col;
-        let m = material((*cells)[top]);
-        if (can_slide((*cells)[top], (*cells)[bottom], (*cells)[diagonal]) && ((r >> (16u + col * 8u)) & 255u) < flow(m)) {
+        if (can_slide((*cells)[top], (*cells)[bottom], (*cells)[diagonal]) && ((r >> (16u + col * 8u)) & 255u) < slide_chance((*cells)[top])) {
+            let s = speed((*cells)[top]);
             displace(cells, top, diagonal);
+            if (s > 0u) {
+                (*cells)[diagonal] = with_aux((*cells)[diagonal], s / 2u);
+            }
+            slid = true;
+        } else if (can_steam_vent((*cells)[bottom], (*cells)[top], (*cells)[diagonal]) && ((r >> (16u + col * 8u)) & 255u) < slide_chance((*cells)[bottom])) {
+            displace(cells, bottom, diagonal);
             slid = true;
         }
     }

@@ -111,14 +111,14 @@ pub const DENSITY: [i32; MATERIAL_COUNT] = [12, 26000, 16000, 10000, 9000, 26000
 pub const FLOW: [u32; MATERIAL_COUNT] = [256, 0, 21, 42, 17, 2, 42, 0, 21, 0, 12];
 /// Top speed (level) when sinking or rising through a liquid: viscous drag.
 /// About 0.1 m/s for sand, water, oil; 0.3 lava; a steam bubble 0.25 m/s.
-pub const VT_LIQUID: [u32; MATERIAL_COUNT] = [0, 0, 4, 4, 4, 12, 10, 0, 0, 0, 0];
+pub const VT_LIQUID: [u32; MATERIAL_COUNT] = [0, 4, 4, 4, 4, 12, 10, 4, 0, 4, 0];
 /// Top speed (level) anything can reach moving THROUGH this medium. Lava is
 /// ~10^5 times more viscous than water: real flow through it is mm/s,
 /// below one speed level (2.3 cm/s), so it is 0 (no convection in lava).
 pub const VT_MEDIUM: [u32; MATERIAL_COUNT] = [255, 0, 0, 255, 255, 0, 255, 0, 255, 0, 255];
 /// Top speed (level) through a gas. No air resistance is modelled, so
 /// falling things are only limited by MAX_SPEED; steam is capped at 2 m/s.
-pub const VT_GAS: [u32; MATERIAL_COUNT] = [0, 0, 255, 255, 255, 255, 85, 0, 0, 0, 0];
+pub const VT_GAS: [u32; MATERIAL_COUNT] = [0, 255, 255, 255, 255, 255, 85, 255, 0, 255, 0];
 /// Rising speed (level) of gases that do not store a speed (fire, smoke,
 /// hot air), at a full density gap: 1 m/s.
 pub const GAS_RISE: i32 = 42;
@@ -138,6 +138,9 @@ pub const EXPANSION: [i32; MATERIAL_COUNT] = [0, 0, 0, 300, 700, 100, 0, 0, 0, 0
 /// Turns conductance (mW/(m K)) / CAP into a per-step rate times 2^24:
 /// 2^24 * STEP_SECONDS / CELL^2 / (1000 mW/W * 10 J/unit).
 pub const RATE_SCALE: i32 = 55924;
+/// Flame heat flux onto a touching surface (W/m^2), and the per-step heating
+/// it gives in 1/256 K units, numerator: 256 * 150000 / (10 * 0.005 * 1200).
+pub const FLAME_UNITS: i32 = 640_000;
 /// Largest per-step rate (times 2^24): 1.6% of a temperature gap per edge.
 /// Only flames (almost no heat capacity) reach it; they are kept at 900°C
 /// by burning anyway. It also keeps `flow_24` free of overflow.
@@ -175,7 +178,7 @@ pub fn pack(material: u32, aux: u32, temp: i32) -> u32 {
 /// Materials that store a speed in their aux byte. (Fire and smoke use
 /// aux for their remaining life instead.)
 pub const fn has_speed(m: u32) -> bool {
-    matches!(m, SAND | WATER | OIL | LAVA | STEAM)
+    matches!(m, SAND | WATER | OIL | LAVA | STEAM | STONE | WOOD | ICE)
 }
 /// Heavier than air: falls. Otherwise (steam) it rises.
 pub const fn sinker(m: u32) -> bool {
@@ -358,7 +361,13 @@ pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     } else {
         0
     };
-    series + radiation
+    // At this resolution a newly formed hot crust is a whole 5 mm cell.
+    // Resolve boiling at the water-facing surface of lava, or of its still
+    // incandescent stone/sand crust, using an effective interface transfer.
+    // The same conductance is seen from both sides of the edge.
+    let hot_quench_face = (a == WATER && matches!(b, LAVA | STONE | SAND) && tb >= celsius(500))
+        || (b == WATER && matches!(a, LAVA | STONE | SAND) && ta >= celsius(500));
+    if hot_quench_face { (series + radiation) * 6 } else { series + radiation }
 }
 
 /// Per-step rate (times 2^24) at which a cell of material `m` follows a
@@ -401,8 +410,14 @@ pub fn density(cell: u32) -> i32 {
 /// (heavier above lighter)? Solids never move, and a powder is not pushed
 /// aside from below.
 pub fn sinks(top: u32, bottom: u32) -> bool {
-    let (mt, mb) = (material(top) as usize, material(bottom) as usize);
-    KIND[mt] != SOLID && KIND[mb] != SOLID && KIND[mb] != POWDER && density(top) > density(bottom)
+    let mb = material(bottom) as usize;
+    // A flame is anchored where it burns: it does not drift off its fuel.
+    if material(top) == FIRE || material(bottom) == FIRE {
+        return false;
+    }
+    // A solid can fall into air or liquid (unsupported stone, wood, ice);
+    // it still cannot be pushed into another solid or into powder.
+    KIND[mb] != SOLID && KIND[mb] != POWDER && density(top) > density(bottom)
 }
 
 /// New speed of a falling (or rising) cell after one step of gravity.
@@ -411,7 +426,11 @@ pub fn sinks(top: u32, bottom: u32) -> bool {
 /// The 1/256 part is rounded at random so the average is exact.
 fn accelerate(cell: u32, heavy: u32, light: u32, medium: u32, roll: u32) -> u32 {
     let (dh, dl) = (density(heavy), density(light));
-    let q = (G_Q * (dh - dl) / dh) as u32;
+    let q = if sinker(material(cell)) {
+        (G_Q * (dh - dl) / dh) as u32
+    } else {
+        (G_Q * (dh - dl) / dl.max(1)) as u32
+    };
     (speed(cell) + ((q + roll) >> 8)).min(speed_cap(cell, medium))
 }
 
@@ -461,12 +480,20 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     //    (gap = our temperature minus theirs) and negate it.
     let mut t = t0;
     let mut touches_water = false;
+    let mut touches_air = false;
+    let mut touches_lava = false;
+    let mut touches_fire = false;
+    let mut touches_fuel = false; // wood or oil next door: fire can spread into it
     let mut open_faces = 0; // neighbours that are clear gas (sky for radiation)
     let key = pcg(frame ^ EDGE_SALT);
     let mut edge = |j: usize, ours: bool, edge_cell: usize, down: u32| {
         let other = cells[j];
         let (tn, mn) = (temp(other), material(other));
         touches_water |= mn == WATER;
+        touches_air |= mn == AIR;
+        touches_lava |= mn == LAVA;
+        touches_fire |= mn == FIRE;
+        touches_fuel |= mn == WOOD || mn == OIL;
         open_faces += (KIND[mn as usize] == GAS && mn != FIRE) as i32;
         if tn == t0 {
             return; // no gap, no flow (and no need for a random number)
@@ -492,6 +519,13 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     let r = pcg(i as u32 ^ pcg(frame ^ CELL_SALT));
     let r2 = pcg(r);
     let tick = r2 % TICK_STEPS == 0; // one tick of fire/smoke life passes
+    // A flame touching a solid or liquid heats it with a surface flux of
+    // FLAME_Q (150 kW/m^2): dT/dt = q / (rho c dx), in units of 1/256 K per
+    // step = 256 q / (CAP*10 * dx * 1200) = FLAME_UNITS / CAP.
+    if touches_fire && condensed(m) && m != FIRE {
+        t += FLAME_UNITS / CAP[m as usize];
+        maybe = true;
+    }
     // Hot (or cold) surfaces facing open air radiate to the surroundings.
     // This is how lava really cools: air itself carries little heat.
     if condensed(m) && open_faces > 0 && t0 != AMBIENT {
@@ -532,33 +566,48 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     let supported = below.is_none_or(|b| KIND[material(b) as usize] >= POWDER);
     let mut next = m;
     match m {
-        WATER if t >= celsius(100) => next = STEAM,
-        WATER if t <= celsius(-2) => next = ICE,
-        ICE if t >= celsius(1) => next = WATER,
+        WATER if t >= celsius(100) => {
+            next = STEAM;
+            life = VT_GAS[STEAM as usize];
+            t -= celsius(40);
+        }
+        WATER if t <= celsius(-2) => {
+            next = ICE;
+            t += celsius(10);
+        }
+        ICE if t >= celsius(1) => {
+            next = WATER;
+            t -= celsius(10);
+        }
         // Condenses well below boiling, so steam rises a while before raining.
-        STEAM if t < celsius(50) => next = WATER,
+        STEAM if t < celsius(50) => {
+            next = WATER;
+            t += celsius(20);
+        }
         // Lava resting on something sets into stone. Lava that cools while
         // falling or sinking through water shatters into gravel instead
         // (real lava does this in water), so no stone is left hanging in mid-air.
         LAVA if t < celsius(1000) => next = if supported { STONE } else { SAND },
         // Rock melts above eruption temperature, so lava cannot melt it.
         STONE if t >= celsius(1200) => next = LAVA,
-        WOOD if t >= celsius(300) => {
+        WOOD if t >= celsius(300) && (touches_air || touches_lava || touches_fire) => {
             next = FIRE;
             life = 120 + (r & 127); // 6-13 s of burning
         }
-        OIL if t >= celsius(250) => {
+        OIL if t >= celsius(250) && (touches_air || touches_lava || touches_fire) => {
             next = FIRE;
             life = 20 + (r & 31); // 1-2.7 s
         }
         FIRE => {
             maybe = true;
-            if touches_water || life == 0 {
+            // Flames go out in water, or with nothing to burn or breathe.
+            if touches_water || (!touches_air && !touches_lava && !touches_fuel && !touches_fire) || life == 0 {
                 next = SMOKE;
                 life = 30 + (r & 31); // 1.6-3.3 s
             } else {
                 // Burning releases heat: the flame stays at least this hot.
-                if tick {
+                // Fuel next door keeps the flame alive while it burns.
+                if tick && !touches_fuel {
                     life -= 1;
                 }
                 t = t.max(celsius(900));
@@ -574,8 +623,8 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         }
         _ => {}
     }
-    // A new material starts at rest (fire and smoke got a life above).
-    if next != m && next != FIRE && next != SMOKE {
+    // A new material starts at rest (fire, smoke, and steam from water got a life above).
+    if next != m && next != FIRE && next != SMOKE && !(m == WATER && next == STEAM) {
         life = 0;
     }
     let new = pack(next, life, t);
@@ -605,7 +654,20 @@ fn pair_chance(top: u32, bottom: u32) -> u32 {
 fn can_slide(top: u32, below: u32, diagonal: u32) -> bool {
     let m = material(top);
     let k = KIND[m as usize];
-    (k == POWDER || k == LIQUID) && FLOW[m as usize] > 0 && speed(top) == 0 && !sinks(top, below) && sinks(top, diagonal)
+    (k == POWDER || k == LIQUID) && FLOW[m as usize] > 0 && !sinks(top, below) && sinks(top, diagonal)
+}
+
+fn slide_chance(cell: u32) -> u32 {
+    let m = material(cell) as usize;
+    FLOW[m].max(move_chance(speed(cell)))
+}
+
+/// Could steam vent diagonally upward when trapped beneath a heavier cell?
+fn can_steam_vent(bottom: u32, top: u32, diagonal: u32) -> bool {
+    material(bottom) == STEAM
+        && KIND[material(top) as usize] >= LIQUID
+        && KIND[material(diagonal) as usize] == GAS
+        && sinks(diagonal, bottom)
 }
 
 /// Could two side-by-side resting fluid cells trade places (spreading,
@@ -647,16 +709,22 @@ pub fn move_block(cells: &mut [u32; 4], r: u32) {
     }
 
     // 2. Resting powders and liquids that cannot fall straight down slide
-    //    diagonally (friction / viscosity set how often).
+    //    diagonally (friction / viscosity set how often). Also steam venting.
     let mut slid = false;
     for col in 0..2 {
         if fell[col] {
             continue;
         }
         let (top, bottom, diagonal) = (col, col + 2, 3 - col);
-        let m = material(cells[top]) as usize;
-        if can_slide(cells[top], cells[bottom], cells[diagonal]) && ((r >> (16 + col * 8)) & 255) < FLOW[m] {
+        if can_slide(cells[top], cells[bottom], cells[diagonal]) && ((r >> (16 + col * 8)) & 255) < slide_chance(cells[top]) {
+            let s = speed(cells[top]);
             displace(cells, top, diagonal);
+            if s > 0 {
+                cells[diagonal] = with_aux(cells[diagonal], s / 2);
+            }
+            slid = true;
+        } else if can_steam_vent(cells[bottom], cells[top], cells[diagonal]) && ((r >> (16 + col * 8)) & 255) < slide_chance(cells[bottom]) {
+            displace(cells, bottom, diagonal);
             slid = true;
         }
     }
@@ -750,6 +818,8 @@ pub fn block_can_move(cells: &[u32; 4]) -> bool {
         || pair_chance(cells[1], cells[3]) > 0
         || can_slide(cells[0], cells[2], cells[3])
         || can_slide(cells[1], cells[3], cells[2])
+        || can_steam_vent(cells[2], cells[0], cells[3])
+        || can_steam_vent(cells[3], cells[1], cells[2])
         || spread_chance(cells[0], cells[1]) > 0
         || spread_chance(cells[2], cells[3]) > 0
 }
@@ -1148,6 +1218,32 @@ mod tests {
     }
 
     #[test]
+    fn submerged_lava_boils_surrounding_water() {
+        let mut world = World::new(80, 60);
+        world.fill(0, 10, 80, 59, WATER);
+        world.fill(28, 20, 52, 47, LAVA);
+        let mut sim = CpuSim::new(&world);
+        for _ in 0..STEPS_PER_SECOND {
+            sim.step(&mut world);
+        }
+        assert!(world.count(STEAM) > 100, "submerged lava should produce a visible steam cloud within one second");
+        assert!(world.count(LAVA) > 0, "lava should not vanish instantly");
+    }
+
+    #[test]
+    fn lava_at_bottom_keeps_water_boiling_through_hot_crust() {
+        let mut world = World::new(120, 90);
+        world.fill(0, 20, 120, 89, WATER);
+        world.fill(40, 66, 80, 89, LAVA);
+        world.fill(48, 58, 72, 66, LAVA);
+        let mut sim = CpuSim::new(&world);
+        for _ in 0..3 * STEPS_PER_SECOND {
+            sim.step(&mut world);
+        }
+        assert!(world.count(STEAM) >= 10, "hot crust around bottom lava should keep making steam");
+    }
+
+    #[test]
     fn lava_ignites_wood() {
         // A painted flame lasts seconds and does not light a plank (true in
         // real life too). Lava sitting on wood mostly radiates into it and
@@ -1268,5 +1364,112 @@ mod tests {
         }
         let got = mean_landing_step(&mut world, &xs, 140, 20 * STEPS_PER_SECOND as usize) / STEPS_PER_SECOND as f64;
         assert!((4.5..9.0).contains(&got), "sank in {got:.2} s");
+    }
+
+    #[test]
+    fn phase_transition_latent_heat() {
+        // Test single cell phase transitions and their latent heat temperature shifts:
+        let mut cells = vec![pack(WATER, 0, celsius(100))];
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), STEAM);
+        assert_eq!(temp(out), celsius(60));
+
+        cells[0] = pack(WATER, 0, celsius(-2));
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), ICE);
+        assert_eq!(temp(out), celsius(8));
+
+        cells[0] = pack(ICE, 0, celsius(1));
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), WATER);
+        assert_eq!(temp(out), celsius(-9));
+
+        // Steam condenses when t < 50°C. Note: steam is a gas so ambient relaxation applies:
+        // verify condensation occurs and releases latent heat (+20°C).
+        let t_steam = celsius(49);
+        cells[0] = pack(STEAM, 0, t_steam);
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), WATER);
+        // temp before phase transition was relaxed towards ambient, then + celsius(20)
+        assert!(temp(out) >= celsius(68) && temp(out) <= celsius(70));
+    }
+
+    #[test]
+    fn fire_requires_oxygen_and_suffocates_underground() {
+        // Fire surrounded by stone (no AIR or LAVA) suffocates into SMOKE
+        let buried_cells = vec![
+            pack(STONE, 0, AMBIENT), pack(STONE, 0, AMBIENT), pack(STONE, 0, AMBIENT),
+            pack(STONE, 0, AMBIENT), pack(FIRE, 50, celsius(900)), pack(STONE, 0, AMBIENT),
+            pack(STONE, 0, AMBIENT), pack(STONE, 0, AMBIENT), pack(STONE, 0, AMBIENT),
+        ];
+        let (suffocated, _) = heat_cell(&buried_cells, 3, 3, 1, 1, 0);
+        assert_eq!(material(suffocated), SMOKE, "fire deprived of air/oxygen must extinguish into smoke");
+
+        // Wood buried without air does not ignite even at high temperature
+        let buried_hot_wood = vec![
+            pack(STONE, 0, celsius(400)),
+            pack(WOOD, 0, celsius(350)),
+            pack(STONE, 0, celsius(400)),
+        ];
+        let (wood_out, _) = heat_cell(&buried_hot_wood, 3, 1, 1, 0, 0);
+        assert_eq!(material(wood_out), WOOD, "wood without oxygen/air must not ignite despite T >= 300°C");
+    }
+
+    #[test]
+    fn fast_sand_deflects_down_incline() {
+        let mut world = World::new(32, 40);
+        // Fill a solid wedge down and to the left on odd coordinate steps
+        for i in 0..15 {
+            for y in (21 + i)..40 {
+                world.set(25 - i, y, STONE);
+            }
+        }
+        let start_x = 21;
+        let start_y = 20;
+        world.cells[start_y * 32 + start_x] = pack(SAND, 150, AMBIENT);
+
+        let mut sim = CpuSim::new(&world);
+        for _ in 0..600 {
+            sim.step(&mut world);
+        }
+
+        let final_pos = (0..world.cells.len()).find(|&i| material(world.cells[i]) == SAND).expect("sand grain must exist");
+        let fx = final_pos % 32;
+        let fy = final_pos / 32;
+
+        assert!(fx < start_x, "fast sand hitting slope must deflect down the slope (x < start_x)");
+        assert!(fy > start_y, "sand must progress downward along the incline");
+    }
+
+    #[test]
+    fn steam_expansion_burst_and_obstacle_venting() {
+        let mut world = World::new(32, 40);
+        // Stone ceiling from x=0 to 18 at y=15 (gap at x=19..32)
+        for x in 0..18 {
+            world.set(x, 15, STONE);
+        }
+        // Place steam trapped under ceiling at (14..18, 16..17)
+        for y in 16..18 {
+            for x in 14..18 {
+                world.cells[y * 32 + x] = pack(STEAM, 85, celsius(120));
+            }
+        }
+
+        let mut sim = CpuSim::new(&world);
+        for _ in 0..600 {
+            sim.step(&mut world);
+        }
+
+        let steam_above_ceiling = (0..world.cells.len())
+            .filter(|&i| {
+                let y = i / 32;
+                y < 15 && material(world.cells[i]) == STEAM
+            })
+            .count();
+
+        assert!(
+            steam_above_ceiling > 0,
+            "steam trapped under obstacle must expand, divert diagonally, and vent past the ceiling gap into upper space"
+        );
     }
 }

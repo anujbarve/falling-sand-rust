@@ -190,6 +190,22 @@ void main() {
         // Bright line on the surface.
         if (is_gas(mat_of(cell_at(cp + vec2(0.0, -1.0))))) { col += vec3(0.12, 0.16, 0.2); }
     }
+    if (is_mat(m, 3.0)) {
+        // A steam bubble is smaller than a 5 mm cell. Show the unresolved
+        // boiling layer only where water borders an incandescent surface.
+        vec4 n0 = cell_at(cp + vec2(1.0, 0.0));
+        vec4 n1 = cell_at(cp + vec2(-1.0, 0.0));
+        vec4 n2 = cell_at(cp + vec2(0.0, 1.0));
+        vec4 n3 = cell_at(cp + vec2(0.0, -1.0));
+        float hot = 0.0;
+        if (!is_gas(mat_of(n0))) { hot = max(hot, temp_of(n0)); }
+        if (!is_gas(mat_of(n1))) { hot = max(hot, temp_of(n1)); }
+        if (!is_gas(mat_of(n2))) { hot = max(hot, temp_of(n2)); }
+        if (!is_gas(mat_of(n3))) { hot = max(hot, temp_of(n3)); }
+        float boil = clamp((hot - 350.0) / 450.0, 0.0, 1.0);
+        float fleck = step(0.54, hash(floor(cp * 0.8 + vec2(0.0, Time * 18.0))));
+        col = mix(col, vec3(0.55, 0.85, 1.0), boil * (0.35 + 0.5 * fleck));
+    }
     if (Flags.w > 0.5 && solidish && !is_mat(m, 5.0) && t > 450.0) {
         col = mix(col, heat_tint(t), clamp((t - 450.0) / 650.0, 0.0, 1.0));
     }
