@@ -186,6 +186,14 @@ fn material(cell: u32) -> u32 { return cell & 0xFu; }
 fn aux(cell: u32) -> u32 { return (cell >> 4u) & 0xFFu; }
 // >> on an i32 is an arithmetic shift: it keeps the sign.
 fn temp(cell: u32) -> i32 { return bitcast<i32>(cell) >> 12u; }
+// Latent heat of vaporisation of water in temperature units (see LATENT in materials.rs).
+const LATENT: i32 = 138496; // 541 * 256
+// Temperature a cell counts as for conduction and density (see sens() in materials.rs).
+fn sens(cell: u32) -> i32 {
+    let t = temp(cell);
+    if (material(cell) == WATER && t > celsius(100)) { return celsius(100); }
+    return t;
+}
 fn pack(m: u32, a: u32, t: i32) -> u32 {
     return m | (a << 4u) | (bitcast<u32>(clamp(t, T_MIN, T_MAX)) << 12u);
 }

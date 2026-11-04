@@ -62,20 +62,37 @@ pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     } else {
         0
     };
-    // At this resolution a newly formed hot crust is a whole 5 mm cell.
-    // Resolve boiling at the water-facing surface of lava, or of its still
-    // incandescent stone/sand crust, using an effective interface transfer.
-    // The same conductance is seen from both sides of the edge.
-    let hot_quench_face = (a == WATER && matches!(b, LAVA | STONE | SAND) && tb >= celsius(500))
-        || (b == WATER && matches!(a, LAVA | STONE | SAND) && ta >= celsius(500));
-    if hot_quench_face { (series + radiation) * 6 } else { series + radiation }
+    // Water against a hot surface (lava, or stone/sand/wood at 300°C+) is a
+    // boundary layer, not a 5 mm cell: its heat transfer coefficient is much
+    // larger than conduction through a cell (natural convection: ~2000 W/m²K;
+    // nucleate boiling: ~50000 W/m²K). Both sides of the edge see the same value.
+    let hot_surface = |s: u32, ts: i32| matches!(s, LAVA | STONE | SAND | WOOD) && ts >= celsius(300);
+    if (a == WATER && hot_surface(b, tb)) || (b == WATER && hot_surface(a, ta)) {
+        let water_t = if a == WATER { ta } else { tb };
+        return if water_t >= celsius(99) { BOIL_CONDUCTANCE } else { CONVECTIVE_CONDUCTANCE };
+    }
+    series + radiation
 }
+
+/// Boundary conductance (mW/(m K)) for water against a hot surface: h * dx
+/// with h = 2000 W/m²K (convection) or 50000 W/m²K (boiling), dx = 5 mm.
+pub const CONVECTIVE_CONDUCTANCE: i32 = 10_000;
+pub const BOIL_CONDUCTANCE: i32 = 250_000;
 
 /// Per-step rate (times 2^24) at which a cell of material `m` follows a
 /// temperature gap across an edge of the given conductance: heat crossing
 /// the edge divided by the cell's own heat capacity.
 pub fn heat_rate(m: u32, conductance: i32) -> i32 {
-    (conductance * RATE_SCALE / CAP[m as usize]).min(RATE_MAX)
+    // conductance * RATE_SCALE must fit in an i32: up to 37000 it does. Boundary
+    // conductances (water against hot surfaces) are larger, and water's heat
+    // capacity is a multiple of 8, so divide both by 8 there (exact).
+    let cap = CAP[m as usize];
+    let rate = if conductance <= 37_000 {
+        conductance * RATE_SCALE / cap
+    } else {
+        (conductance / 8) * RATE_SCALE / (cap / 8).max(1)
+    };
+    rate.min(RATE_MAX)
 }
 
 /// Rate (times 2^24, per exposed face) at which a hot surface loses heat by
@@ -100,7 +117,7 @@ pub fn density(cell: u32) -> i32 {
         (d * 293 * T_SCALE / (t + 273 * T_SCALE).max(1)).max(1)
     } else if k == LIQUID {
         // Liquids expand a little: d * (1 - expansion * (t - 20°C)).
-        let warmer = (t - AMBIENT) / T_SCALE;
+        let warmer = (sens(cell) - AMBIENT) / T_SCALE;
         (d - d * (EXPANSION[m as usize] * warmer / 1000) / 1000).max(1)
     } else {
         d
@@ -180,6 +197,7 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     //    "ours"; for edges to the left and above we take the neighbour's view
     //    (gap = our temperature minus theirs) and negate it.
     let mut t = t0;
+    let t0s = sens(me); // gap temperature (boiling water counts as 100°C)
     let mut touches_water = false;
     let mut touches_air = false;
     let mut touches_lava = false;
@@ -189,20 +207,20 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     let key = pcg(frame ^ EDGE_SALT);
     let mut edge = |j: usize, ours: bool, edge_cell: usize, down: u32| {
         let other = cells[j];
-        let (tn, mn) = (temp(other), material(other));
+        let (tn, mn) = (sens(other), material(other));
         touches_water |= mn == WATER;
         touches_air |= mn == AIR;
         touches_lava |= mn == LAVA;
         touches_fire |= mn == FIRE;
         touches_fuel |= mn == WOOD || mn == OIL;
         open_faces += (KIND[mn as usize] == GAS && mn != FIRE) as i32;
-        if tn == t0 {
+        if tn == t0s {
             return; // no gap, no flow (and no need for a random number)
         }
         maybe = true;
-        let rate = heat_rate(m, pair_conductance(m, mn, t0, tn));
+        let rate = heat_rate(m, pair_conductance(m, mn, t0s, tn));
         let roll = edge_roll(edge_cell, down, key);
-        t += if ours { flow_24(tn - t0, rate, roll) } else { -flow_24(t0 - tn, rate, roll) };
+        t += if ours { flow_24(tn - t0s, rate, roll) } else { -flow_24(t0s - tn, rate, roll) };
     };
     if x + 1 < w {
         edge(i + 1, true, i, 0);
@@ -267,10 +285,11 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     let supported = below.is_none_or(|b| KIND[material(b) as usize] >= POWDER);
     let mut next = m;
     match m {
-        WATER if t >= celsius(100) => {
+        // Boiling: water turns to steam once it has absorbed its latent heat.
+        WATER if t >= celsius(100) + LATENT => {
             next = STEAM;
             life = VT_GAS[STEAM as usize];
-            t -= celsius(40);
+            t -= LATENT;
         }
         WATER if t <= celsius(-2) => {
             next = ICE;
@@ -281,9 +300,10 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
             t -= celsius(10);
         }
         // Condenses well below boiling, so steam rises a while before raining.
+        // Condensing releases the latent heat back into the water.
         STEAM if t < celsius(50) => {
             next = WATER;
-            t += celsius(20);
+            t += LATENT;
         }
         // Lava resting on something sets into stone. Lava that cools while
         // falling or sinking through water shatters into gravel instead

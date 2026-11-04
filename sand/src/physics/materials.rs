@@ -133,6 +133,20 @@ pub const fn aux(cell: u32) -> u32 {
 pub const fn temp(cell: u32) -> i32 {
     (cell as i32) >> 12
 }
+
+/// Latent heat of vaporisation of water, as the temperature rise it is worth
+/// in water: L / c = 2.26 MJ/kg / 4.18 kJ/(kg K) = 541 K. Boiling water stores
+/// this in its temperature field above 100°C until it has all turned to steam.
+pub const LATENT_K: i32 = 541;
+pub const LATENT: i32 = LATENT_K * T_SCALE;
+
+/// The temperature a cell counts as for conduction and density. Water above
+/// 100°C is still boiling: its field holds the stored latent heat, so it
+/// counts as 100°C here.
+pub fn sens(cell: u32) -> i32 {
+    let t = temp(cell);
+    if material(cell) == WATER && t > celsius(100) { celsius(100) } else { t }
+}
 pub fn pack(material: u32, aux: u32, temp: i32) -> u32 {
     material | (aux << 4) | ((temp.clamp(T_MIN, T_MAX) as u32) << 12)
 }

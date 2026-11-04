@@ -468,11 +468,17 @@ use cpu::CpuSim;
 
     #[test]
     fn phase_transition_latent_heat() {
-        // Test single cell phase transitions and their latent heat temperature shifts:
+        // Boiling water stores latent heat above 100°C: it only turns to steam
+        // after absorbing LATENT (541 K of water heat), and steam keeps the
+        // temperature it had after giving that heat up.
         let mut cells = vec![pack(WATER, 0, celsius(100))];
         let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), WATER, "water at 100°C has not yet absorbed its latent heat");
+
+        cells[0] = pack(WATER, 0, celsius(100) + LATENT);
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
         assert_eq!(material(out), STEAM);
-        assert_eq!(temp(out), celsius(60));
+        assert_eq!(temp(out), celsius(100));
 
         cells[0] = pack(WATER, 0, celsius(-2));
         let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
@@ -484,14 +490,12 @@ use cpu::CpuSim;
         assert_eq!(material(out), WATER);
         assert_eq!(temp(out), celsius(-9));
 
-        // Steam condenses when t < 50°C. Note: steam is a gas so ambient relaxation applies:
-        // verify condensation occurs and releases latent heat (+20°C).
-        let t_steam = celsius(49);
-        cells[0] = pack(STEAM, 0, t_steam);
+        // Steam condenses below 50°C and gives its latent heat back to the water
+        // (steam is a gas, so ambient relaxation applies first: a tiny change).
+        cells[0] = pack(STEAM, 0, celsius(49));
         let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
         assert_eq!(material(out), WATER);
-        // temp before phase transition was relaxed towards ambient, then + celsius(20)
-        assert!(temp(out) >= celsius(68) && temp(out) <= celsius(70));
+        assert!((temp(out) - celsius(49) - LATENT).abs() <= 2, "condensed water = 49°C + latent");
     }
 
     #[test]

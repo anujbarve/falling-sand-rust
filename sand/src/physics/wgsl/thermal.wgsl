@@ -30,17 +30,26 @@ fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     } else if ((a == FIRE && condensed(b)) || (b == FIRE && condensed(a))) {
         radiation = radiation_k(ta, tb) / 3;
     }
-    // Hot crust occupies an entire 5 mm cell; resolve boiling at its
-    // water-facing surface as well as at a direct lava-water boundary.
-    let hot_a = (a == LAVA || a == STONE || a == SAND) && ta >= celsius(500);
-    let hot_b = (b == LAVA || b == STONE || b == SAND) && tb >= celsius(500);
+    // Water against a hot surface: boundary layer (see pair_conductance in thermal.rs).
+    let hot_a = (a == LAVA || a == STONE || a == SAND || a == WOOD) && ta >= celsius(300);
+    let hot_b = (b == LAVA || b == STONE || b == SAND || b == WOOD) && tb >= celsius(300);
     if ((a == WATER && hot_b) || (b == WATER && hot_a)) {
-        return (series + radiation) * 6;
+        let water_t = select(tb, ta, a == WATER);
+        return select(CONVECTIVE_CONDUCTANCE, BOIL_CONDUCTANCE, water_t >= celsius(99));
     }
     return series + radiation;
 }
+const CONVECTIVE_CONDUCTANCE: i32 = 10000;
+const BOIL_CONDUCTANCE: i32 = 250000;
 fn heat_rate(m: u32, conductance: i32) -> i32 {
-    return min(conductance * RATE_SCALE / cap(m), RATE_MAX);
+    // Same as heat_rate in thermal.rs.
+    var rate: i32;
+    if (conductance <= 37000) {
+        rate = conductance * RATE_SCALE / cap(m);
+    } else {
+        rate = (conductance / 8) * RATE_SCALE / max(cap(m) / 8, 1);
+    }
+    return min(rate, RATE_MAX);
 }
 fn sky_rate(m: u32, t: i32) -> i32 {
     let t10 = max((t / T_SCALE + 273) / 10, 0);
@@ -56,7 +65,7 @@ fn density(cell: u32) -> i32 {
         return max(d * 293 * T_SCALE / max(temp(cell) + 273 * T_SCALE, 1), 1);
     }
     if (k == LIQUID) {
-        let warmer = (temp(cell) - AMBIENT) / T_SCALE;
+        let warmer = (sens(cell) - AMBIENT) / T_SCALE;
         return max(d - d * (expansion(m) * warmer / 1000) / 1000, 1);
     }
     return d;
@@ -110,6 +119,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     let m = material(me);
     var life = aux(me);
     let t0 = temp(me);
+    let t0s = sens(me);
     var maybe = false;
 
     var t = t0;
@@ -125,58 +135,58 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     var open_faces = 0;
     if (x + 1u < w) {
         let mn = material(right);
-        let tn = temp(right);
+        let tn = sens(right);
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || mn == FIRE;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
-        if (tn != t0) {
+        if (tn != t0s) {
             maybe = true;
-            t += flow_24(tn - t0, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i, 0u, key));
+            t += flow_24(tn - t0s, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 0u, key));
         }
     }
     if (x > 0u) {
         let mn = material(left);
-        let tn = temp(left);
+        let tn = sens(left);
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || mn == FIRE;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
-        if (tn != t0) {
+        if (tn != t0s) {
             maybe = true;
-            t -= flow_24(t0 - tn, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i - 1u, 0u, key));
+            t -= flow_24(t0s - tn, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i - 1u, 0u, key));
         }
     }
     if (y + 1u < h) {
         let mn = material(down);
-        let tn = temp(down);
+        let tn = sens(down);
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || mn == FIRE;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
-        if (tn != t0) {
+        if (tn != t0s) {
             maybe = true;
-            t += flow_24(tn - t0, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i, 1u, key));
+            t += flow_24(tn - t0s, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 1u, key));
         }
     }
     if (y > 0u) {
         let mn = material(up);
-        let tn = temp(up);
+        let tn = sens(up);
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
         touches_fire = touches_fire || mn == FIRE;
         touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
-        if (tn != t0) {
+        if (tn != t0s) {
             maybe = true;
-            t -= flow_24(t0 - tn, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i - w, 1u, key));
+            t -= flow_24(t0s - tn, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i - w, 1u, key));
         }
     }
 
@@ -233,10 +243,10 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     }
     var next = m;
     if (m == WATER) {
-        if (t >= celsius(100)) {
+        if (t >= celsius(100) + LATENT) {
             next = STEAM;
             life = vt_gas(STEAM);
-            t -= celsius(40);
+            t -= LATENT;
         } else if (t <= celsius(-2)) {
             next = ICE;
             t += celsius(10);
@@ -249,7 +259,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     } else if (m == STEAM) {
         if (t < celsius(50)) {
             next = WATER;
-            t += celsius(20);
+            t += LATENT;
         }
     } else if (m == LAVA) {
         if (t < celsius(1000)) { next = select(SAND, STONE, supported); }
