@@ -23,7 +23,7 @@ A second engine that runs on the CPU and on the GPU (wgpu compute shaders). The 
 
 ```bash
 cd sand
-cargo run --release --bin physics   # window: G switches cpu 1 thread / cpu all cores / gpu, H shows heat
+cargo run --release --bin physics   # GPU window: , slower  . faster  / real time  H heat view
 cargo run --release --bin bench     # CPU vs GPU timing table; add a number for seconds per measurement
 ```
 
@@ -40,3 +40,13 @@ Results on an Apple M5 (10 CPU threads), in ms per step:
 | 3840x2160 | 72.465 | 13.117 | 2.768 | 5.389 | 26.2x | 4.7x |
 
 "gpu + readback" means one step plus copying the grid back to the CPU so it can be drawn. That is the cost per frame in the viewer.
+
+### Real units and time control
+
+The physics engine runs in real units: 1 cell = 5 mm (the 640x360 window is 3.2 m x 1.8 m) and 1 step = 1/1200 s of world time.
+
+- **Gravity** is 9.81 m/s². Every cell that can move stores its speed. Things accelerate as they fall: a drop of 1.19 m takes the expected $\sqrt{2h/g}$ = 0.49 s, within 10% (tested). Air resistance is not modelled. Liquids drag what sinks through them: sand settles through water at about 0.1 m/s (tested).
+- **Heat** uses real thermal diffusivities (m²/s). Each edge's tiny per-step flow is rounded randomly, so heat is still conserved exactly. Real conduction at this scale is slow: lava sitting on wood takes about 20 s to light it, and a 4 s painted flame does not light a plank.
+- **Fire and smoke lifetimes** are in seconds.
+- **Viewer clock:** the viewer runs as many steps per frame as the chosen speed needs, from 0.01x slow motion through 1x real time to 16x. If the GPU can't keep up, the HUD shows the speed it actually reached.
+- **Bench:** the `gpu max speed` column says how much faster than real time each grid size can run. On the M5: 640x360 ≈ 6.8x, 1920x1080 ≈ 1x, 4K ≈ 0.3x.

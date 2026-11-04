@@ -66,9 +66,17 @@ const AMBIENT: i32 = 5120; // 20°C
 const T_MIN: i32 = -524288; // -(1 << 19)
 const T_MAX: i32 = 524287;  //  (1 << 19) - 1
 
-// The material tables of mod.rs, packed into constants. (A `var<private>`
-// array would be copied into every thread's local memory, and indexing it
-// costs memory accesses; shifting a constant is a couple of ALU ops.)
+// Real units: see "Units" in mod.rs. 1 cell = 5 mm, 1 step = 1/1200 s.
+const G_Q: i32 = 89;          // gravity per step, 1/256 of a speed level
+const GAS_RISE: i32 = 42;     // 1 m/s
+const RELAX_K: i32 = 291;     // gases back to 20°C, 3 s time constant
+const TICK_STEPS: u32 = 64u;  // fire/smoke life tick
+const EDGE_SALT: u32 = 0x5EED1234u;
+const CELL_SALT: u32 = 0xA511E9B3u;
+
+// The material tables of mod.rs. Small ones are packed into constants
+// (a `var<private>` array is copied into every thread's local memory, and
+// indexing it costs memory accesses; shifting a constant is a few ALU ops).
 //
 // KIND: 2 bits per material.
 const KIND_BITS: u32 = (GAS << 0u) | (SOLID << 2u) | (POWDER << 4u) | (LIQUID << 6u) | (LIQUID << 8u)
@@ -81,28 +89,59 @@ fn table_byte(t: vec3<u32>, m: u32) -> u32 {
     let word = select(select(t.x, t.y, m >= 4u), t.z, m >= 8u);
     return (word >> ((m & 3u) * 8u)) & 0xFFu;
 }
-const DENSITY_T = vec3<u32>(
-    10u | (255u << 8u) | (150u << 16u) | (100u << 24u), // air stone sand water
-    80u | (250u << 8u) | (3u << 16u) | (255u << 24u),   // oil lava steam wood
-    9u | (255u << 8u) | (6u << 16u),                    // fire ice smoke
-);
-const COND_T = vec3<u32>(
-    15u | (100u << 8u) | (40u << 16u) | (120u << 24u),
-    40u | (80u << 8u) | (20u << 16u) | (40u << 24u),
-    80u | (150u << 8u) | (15u << 16u),
-);
 // FLOW of air is 256 in mod.rs, stored here as 255. That gives identical
 // results: flow() is only compared against a roll for powders and liquids,
-// and in spreads() as min(flow(left), flow(right)) of two DIFFERENT
-// materials, so at most one of them is air and the min is at most 230.
+// and in spread_chance() as the min of two DIFFERENT materials, so at most
+// one of them is air and the min is at most 42.
 const FLOW_T = vec3<u32>(
-    255u | (0u << 8u) | (200u << 16u) | (230u << 24u),
-    150u | (40u << 8u) | (200u << 16u) | (0u << 24u),
-    120u | (0u << 8u) | (150u << 16u),
+    255u | (0u << 8u) | (21u << 16u) | (42u << 24u), // air stone sand water
+    17u | (2u << 8u) | (42u << 16u) | (0u << 24u),    // oil lava steam wood
+    21u | (0u << 8u) | (12u << 16u),                  // fire ice smoke
 );
-fn base_density(m: u32) -> i32 { return i32(table_byte(DENSITY_T, m)); }
-fn cond(m: u32) -> i32 { return i32(table_byte(COND_T, m)); }
+const VT_LIQUID_T = vec3<u32>(
+    0u | (0u << 8u) | (4u << 16u) | (4u << 24u),
+    4u | (12u << 8u) | (10u << 16u) | (0u << 24u),
+    0u,
+);
+const VT_GAS_T = vec3<u32>(
+    0u | (0u << 8u) | (255u << 16u) | (255u << 24u),
+    255u | (255u << 8u) | (85u << 16u) | (0u << 24u),
+    0u,
+);
 fn flow(m: u32) -> u32 { return table_byte(FLOW_T, m); }
+fn vt_liquid(m: u32) -> u32 { return table_byte(VT_LIQUID_T, m); }
+fn vt_gas(m: u32) -> u32 { return table_byte(VT_GAS_T, m); }
+
+fn base_density(m: u32) -> i32 {
+    switch m {
+        case 0u: { return 12; }
+        case 1u: { return 26000; }
+        case 2u: { return 16000; }
+        case 3u: { return 10000; }
+        case 4u: { return 9000; }
+        case 5u: { return 26000; }
+        case 6u: { return 8; }
+        case 7u: { return 6000; }
+        case 8u: { return 3; }
+        case 9u: { return 9170; }
+        default: { return 12; }
+    }
+}
+fn heat_k(m: u32) -> i32 {
+    switch m {
+        case 0u: { return 769; }
+        case 1u: { return 38; }
+        case 2u: { return 9; }
+        case 3u: { return 5; }
+        case 4u: { return 3; }
+        case 5u: { return 17; }
+        case 6u: { return 699; }
+        case 7u: { return 5; }
+        case 8u: { return 6990; }
+        case 9u: { return 42; }
+        default: { return 769; }
+    }
+}
 
 // Cell layout: bits 0-3 material, 4-11 aux, 12-31 signed temperature.
 fn celsius(c: i32) -> i32 { return c * T_SCALE; }
@@ -113,6 +152,12 @@ fn temp(cell: u32) -> i32 { return bitcast<i32>(cell) >> 12u; }
 fn pack(m: u32, a: u32, t: i32) -> u32 {
     return m | (a << 4u) | (bitcast<u32>(clamp(t, T_MIN, T_MAX)) << 12u);
 }
+fn has_speed(m: u32) -> bool {
+    return m == SAND || m == WATER || m == OIL || m == LAVA || m == STEAM;
+}
+fn sinker(m: u32) -> bool { return base_density(m) > 12; }
+fn speed(cell: u32) -> u32 { return select(0u, aux(cell), has_speed(material(cell))); }
+fn with_aux(cell: u32, a: u32) -> u32 { return (cell & ~(0xFFu << 4u)) | (a << 4u); }
 
 // u32 arithmetic in WGSL wraps around, like wrapping_mul / wrapping_add in Rust.
 fn pcg(v: u32) -> u32 {
@@ -131,55 +176,143 @@ const GROUP_W: u32 = 16u;
 const GROUP_H: u32 = 16u;
 
 // ---------------------------------------------------------------------------
-// Heat: one cell.
+// Heat, gravity on speed, phase changes: one cell. Copy of `heat_cell`.
 // ---------------------------------------------------------------------------
 
-// Heat for cell (x, y) given its old value and its 4 old neighbours
-// (a neighbour outside the grid is ignored, whatever value is passed).
-fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u32, h: u32, frame: u32) -> u32 {
+fn edge_roll(i: u32, down: u32, key: u32) -> i32 {
+    return i32(pcg((2u * i + down) ^ key) & 0xFFFFFu);
+}
+// >> on i32 rounds toward minus infinity, like Rust's >> on i32.
+fn edge_flow(t: i32, other: i32, k: i32, roll: i32) -> i32 {
+    return ((other - t) * k + roll) >> 20u;
+}
+fn pair_k(a: u32, b: u32) -> i32 {
+    let ka = heat_k(a);
+    let kb = heat_k(b);
+    return 2 * ka * kb / (ka + kb);
+}
+
+fn density(cell: u32) -> i32 {
+    let m = material(cell);
+    let d = base_density(m);
+    if (kind(m) == GAS && m != FIRE) {
+        return max(d * 293 * T_SCALE / max(temp(cell) + 273 * T_SCALE, 1), 1);
+    }
+    return d;
+}
+
+fn sinks(top: u32, bottom: u32) -> bool {
+    let kt = kind(material(top));
+    let kb = kind(material(bottom));
+    return kt != SOLID && kb != SOLID && kb != POWDER && density(top) > density(bottom);
+}
+
+fn accelerate(cell: u32, heavy: u32, light: u32, medium: u32, roll: u32) -> u32 {
+    let dh = density(heavy);
+    let dl = density(light);
+    let q = u32(G_Q * (dh - dl) / dh);
+    let m = material(cell);
+    let cap = select(vt_gas(m), vt_liquid(m), kind(material(medium)) == LIQUID);
+    return min(speed(cell) + ((q + roll) >> 8u), cap);
+}
+
+fn blocked_speed(cell: u32, in_way: u32) -> u32 {
+    let mw = material(in_way);
+    let same_way = has_speed(mw) && sinker(mw) == sinker(material(cell));
+    return min(speed(cell), select(0u, speed(in_way), same_way));
+}
+
+fn move_chance(s: u32) -> u32 { return 512u * s / (256u + s); }
+
+struct HeatOut {
+    cell: u32,
+    maybe: bool, // could a random number have changed it? (chunk sleeping)
+}
+
+// Cell (x, y) given its old value and its 4 old neighbours (a neighbour
+// outside the grid is ignored, whatever value is passed).
+fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u32, h: u32, frame: u32) -> HeatOut {
     let m = material(me);
     var life = aux(me);
     let t0 = temp(me);
-    let k_self = cond(m);
+    var maybe = false;
 
-    // Neighbours left, right, up, down, as in heat_cell. A neighbour outside
-    // the grid does not exist (no flux), and the bottom edge supports.
-    var flux = 0;
+    var t = t0;
     var touches_water = false;
-    if (x > 0u) {
-        let other = left;
-        let mn = material(other);
-        flux += (temp(other) - t0) * min(k_self, cond(mn)) / 1024;
-        touches_water = touches_water || mn == WATER;
-    }
+    let i = y * w + x;
+    let key = pcg(frame ^ EDGE_SALT);
+    // Same as heat_cell: an edge with no temperature gap carries no heat
+    // and needs no random number.
     if (x + 1u < w) {
-        let other = right;
-        let mn = material(other);
-        flux += (temp(other) - t0) * min(k_self, cond(mn)) / 1024;
-        touches_water = touches_water || mn == WATER;
+        touches_water = touches_water || material(right) == WATER;
+        if (temp(right) != t0) {
+            maybe = true;
+            t += edge_flow(t0, temp(right), pair_k(m, material(right)), edge_roll(i, 0u, key));
+        }
+    }
+    if (x > 0u) {
+        touches_water = touches_water || material(left) == WATER;
+        if (temp(left) != t0) {
+            maybe = true;
+            t -= edge_flow(temp(left), t0, pair_k(m, material(left)), edge_roll(i - 1u, 0u, key));
+        }
+    }
+    if (y + 1u < h) {
+        touches_water = touches_water || material(down) == WATER;
+        if (temp(down) != t0) {
+            maybe = true;
+            t += edge_flow(t0, temp(down), pair_k(m, material(down)), edge_roll(i, 1u, key));
+        }
     }
     if (y > 0u) {
-        let other = up;
-        let mn = material(other);
-        flux += (temp(other) - t0) * min(k_self, cond(mn)) / 1024;
-        touches_water = touches_water || mn == WATER;
+        touches_water = touches_water || material(up) == WATER;
+        if (temp(up) != t0) {
+            maybe = true;
+            t -= edge_flow(temp(up), t0, pair_k(m, material(up)), edge_roll(i - w, 1u, key));
+        }
     }
-    var supported = true;
-    if (y + 1u < h) {
-        let other = down;
-        let mn = material(other);
-        flux += (temp(other) - t0) * min(k_self, cond(mn)) / 1024;
-        touches_water = touches_water || mn == WATER;
-        supported = kind(mn) >= POWDER;
-    }
-    var t = t0 + flux;
 
+    let r = pcg(i ^ pcg(frame ^ CELL_SALT));
+    let tick = pcg(r) % TICK_STEPS == 0u;
     if (kind(m) == GAS && m != FIRE) {
-        t += (AMBIENT - t) / 64;
+        t += ((AMBIENT - t0) * RELAX_K + i32(r & 0xFFFFFu)) >> 20u;
+        maybe = maybe || t0 != AMBIENT;
     }
 
-    // heat_cell's random number `r`, computed only in the branches that use it.
-    let salt = frame ^ 0xA511E9B3u;
+    let has_below = y + 1u < h;
+    let has_above = y > 0u;
+    if (has_speed(m)) {
+        let roll = (r >> 20u) & 255u;
+        var free = false;
+        var has_other = false;
+        var other = 0u;
+        if (sinker(m)) {
+            has_other = has_below;
+            other = down;
+            free = has_below && sinks(me, down);
+        } else {
+            has_other = has_above;
+            other = up;
+            free = has_above && sinks(up, me);
+        }
+        if (free) {
+            maybe = true;
+            if (sinker(m)) {
+                life = accelerate(me, me, other, other, roll);
+            } else {
+                life = accelerate(me, other, me, other, roll);
+            }
+        } else if (has_other) {
+            life = blocked_speed(me, other);
+        } else {
+            life = 0u;
+        }
+    }
+
+    var supported = true;
+    if (has_below) {
+        supported = kind(material(down)) >= POWDER;
+    }
     var next = m;
     if (m == WATER) {
         if (t >= celsius(100)) { next = STEAM; } else if (t <= celsius(-2)) { next = ICE; }
@@ -192,67 +325,75 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     } else if (m == STONE) {
         if (t >= celsius(1100)) { next = LAVA; }
     } else if (m == WOOD) {
-        if (t >= celsius(300)) { next = FIRE; life = 40u + (hash3(x, y, salt) & 63u); }
+        if (t >= celsius(300)) { next = FIRE; life = 120u + (r & 127u); }
     } else if (m == OIL) {
-        if (t >= celsius(250)) { next = FIRE; life = 20u + (hash3(x, y, salt) & 31u); }
+        if (t >= celsius(250)) { next = FIRE; life = 20u + (r & 31u); }
     } else if (m == FIRE) {
+        maybe = true;
         if (touches_water || life == 0u) {
             next = SMOKE;
-            life = 30u + (hash3(x, y, salt) & 31u);
+            life = 30u + (r & 31u);
         } else {
-            life -= 1u;
+            if (tick) { life -= 1u; }
             t = max(t, celsius(900));
         }
     } else if (m == SMOKE) {
-        if (life == 0u) { next = AIR; } else { life -= 1u; }
+        maybe = true;
+        if (life == 0u) { next = AIR; } else if (tick) { life -= 1u; }
     }
-    if (next == AIR) {
+    if (next != m && next != FIRE && next != SMOKE) {
         life = 0u;
     }
-    return pack(next, life, t);
+    let new_cell = pack(next, life, t);
+    return HeatOut(new_cell, maybe || new_cell != me);
 }
 
 // ---------------------------------------------------------------------------
-// Movement: one 2x2 block, in registers.
+// Movement: one 2x2 block, in registers. Copy of `move_block`.
 // ---------------------------------------------------------------------------
 
-fn density(cell: u32) -> i32 {
-    let m = material(cell);
-    let d = base_density(m);
-    if (kind(m) == GAS && m != FIRE) {
-        return max(d - (temp(cell) - AMBIENT) / celsius(40), 1);
+fn pair_chance(top: u32, bottom: u32) -> u32 {
+    if (!sinks(top, bottom)) {
+        return 0u;
     }
-    return d;
-}
-
-fn sinks(top: u32, bottom: u32, roll: u32) -> bool {
-    let mt = material(top);
-    let mb = material(bottom);
-    if (kind(mt) == SOLID || kind(mb) == SOLID || kind(mb) == POWDER) {
-        return false;
+    let body = select(bottom, top, sinker(material(top)));
+    if (has_speed(material(body))) {
+        return move_chance(speed(body));
     }
     let dt = density(top);
     let db = density(bottom);
-    if (dt <= db) {
-        return false;
-    }
-    return roll < u32((dt - db) * 256 / dt);
+    return move_chance(u32(GAS_RISE * (dt - db) / dt));
+}
+
+fn can_slide(top: u32, below: u32, diagonal: u32) -> bool {
+    let m = material(top);
+    let k = kind(m);
+    return (k == POWDER || k == LIQUID) && flow(m) > 0u && speed(top) == 0u && !sinks(top, below) && sinks(top, diagonal);
 }
 
 fn is_fluid(k: u32) -> bool {
     return k == GAS || k == LIQUID;
 }
 
-fn spreads(left: u32, right: u32, roll: u32) -> bool {
+fn spread_chance(left: u32, right: u32) -> u32 {
     let ml = material(left);
     let mr = material(right);
-    return ml != mr && is_fluid(kind(ml)) && is_fluid(kind(mr)) && roll < min(flow(ml), flow(mr));
+    if (ml != mr && is_fluid(kind(ml)) && is_fluid(kind(mr)) && speed(left) == 0u && speed(right) == 0u) {
+        return min(flow(ml), flow(mr));
+    }
+    return 0u;
 }
 
-// Can move_block change this block at all? Not if all 4 cells are one
-// material whose density is fixed (no density gap, and spreading needs two
-// different materials), nor if all 4 cells are identical (same gas at the
-// same temperature). Skipping those saves the hash and every branch.
+// Could the block change for SOME random number? Copy of `block_can_move`:
+// this decides whether the owner chunk counts as active.
+fn block_can_move(c: array<u32, 4>) -> bool {
+    return pair_chance(c[0], c[2]) > 0u || pair_chance(c[1], c[3]) > 0u
+        || can_slide(c[0], c[2], c[3]) || can_slide(c[1], c[3], c[2])
+        || spread_chance(c[0], c[1]) > 0u || spread_chance(c[2], c[3]) > 0u;
+}
+
+// Cheap first filter: four cells of one material whose density is fixed,
+// or four identical cells, can never move (block_can_move would say no).
 fn may_move(c: array<u32, 4>) -> bool {
     let m = material(c[0]);
     if (material(c[1]) != m || material(c[2]) != m || material(c[3]) != m) {
@@ -264,18 +405,13 @@ fn may_move(c: array<u32, 4>) -> bool {
     return !(c[1] == c[0] && c[2] == c[0] && c[3] == c[0]);
 }
 
-// Could the block change for SOME random number? Copy of `block_can_move`
-// in mod.rs: this decides whether the owner chunk counts as active.
-fn block_can_move(c: array<u32, 4>) -> bool {
-    var diag = false;
-    for (var col = 0u; col < 2u; col += 1u) {
-        let m = material(c[col]);
-        if ((kind(m) == POWDER || kind(m) == LIQUID) && flow(m) > 0u && sinks(c[col], c[3u - col], 0u)) {
-            diag = true;
-        }
+fn displace(cells: ptr<function, array<u32, 4>>, mover: u32, pushed: u32) {
+    var p = (*cells)[pushed];
+    if (has_speed(material(p))) {
+        p = with_aux(p, 0u);
     }
-    return sinks(c[0], c[2], 0u) || sinks(c[1], c[3], 0u) || diag
-        || spreads(c[0], c[1], 0u) || spreads(c[2], c[3], 0u);
+    (*cells)[pushed] = (*cells)[mover];
+    (*cells)[mover] = p;
 }
 
 fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
@@ -285,8 +421,12 @@ fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
     for (var col = 0u; col < 2u; col += 1u) {
         let top = col;
         let bottom = col + 2u;
-        if (sinks((*cells)[top], (*cells)[bottom], (r >> (col * 8u)) & 255u)) {
-            let c = (*cells)[top]; (*cells)[top] = (*cells)[bottom]; (*cells)[bottom] = c;
+        if (((r >> (col * 8u)) & 255u) < pair_chance((*cells)[top], (*cells)[bottom])) {
+            if (sinker(material((*cells)[top]))) {
+                displace(cells, top, bottom);
+            } else {
+                displace(cells, bottom, top);
+            }
             fell[col] = true;
         }
     }
@@ -297,14 +437,11 @@ fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
             continue;
         }
         let top = col;
+        let bottom = col + 2u;
         let diagonal = 3u - col;
         let m = material((*cells)[top]);
-        if (kind(m) != POWDER && kind(m) != LIQUID) {
-            continue;
-        }
-        let roll = (r >> (16u + col * 8u)) & 255u;
-        if (roll < flow(m) && sinks((*cells)[top], (*cells)[diagonal], 0u)) {
-            let c = (*cells)[top]; (*cells)[top] = (*cells)[diagonal]; (*cells)[diagonal] = c;
+        if (can_slide((*cells)[top], (*cells)[bottom], (*cells)[diagonal]) && ((r >> (16u + col * 8u)) & 255u) < flow(m)) {
+            displace(cells, top, diagonal);
             slid = true;
         }
     }
@@ -313,7 +450,7 @@ fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
         for (var row = 0u; row < 2u; row += 1u) {
             let left = row * 2u;
             let right = row * 2u + 1u;
-            if (spreads((*cells)[left], (*cells)[right], (r2 >> (row * 8u)) & 255u)) {
+            if (((r2 >> (row * 8u)) & 255u) < spread_chance((*cells)[left], (*cells)[right])) {
                 let c = (*cells)[left]; (*cells)[left] = (*cells)[right]; (*cells)[right] = c;
             }
         }
@@ -395,15 +532,17 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
         b0 = cells_in[j + w]; b1 = cells_in[j + w + 1u];
 
         // Fast path: block and neighbours all one identical value v. Then
-        // all 4 heat results are identical (position only matters at grid
-        // edges, excluded here, and in the hash, which only wood, oil and
-        // fire use), so compute it once; 4 identical cells never move.
+        // all 4 heat results are identical and no random number can matter:
+        // no temperature gaps, nothing free to fall, and we exclude what
+        // uses its per-cell random number anyway (ignition of wood and oil,
+        // fire and smoke, a gas away from 20°C). 4 identical cells never move.
         let v = c00;
         let m = material(v);
         let same = a0 == v && a1 == v && l0 == v && c01 == v && r0 == v && l1 == v
             && c10 == v && c11 == v && r1 == v && b0 == v && b1 == v;
-        if (same && m != WOOD && m != OIL && m != FIRE) {
-            let nv = heat(v, v, v, v, v, ux, uy, w, h, frame);
+        let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT);
+        if (same && fixed) {
+            let nv = heat(v, v, v, v, v, ux, uy, w, h, frame).cell;
             let idx = array<u32, 4>(i, i + 1u, j, j + 1u);
             for (var k = 0u; k < 4u; k += 1u) {
                 if (wake[k]) {
@@ -434,13 +573,14 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
     //    A sleeping cell keeps its old value (that IS its heat result).
     let old = array<u32, 4>(c00, c01, c10, c11);
     var cells = old;
-    if (wake[0]) { cells[0] = heat(c00, l0, c01, a0, c10, ux, uy, w, h, frame); }
-    if (wake[1]) { cells[1] = heat(c01, c00, r0, a1, c11, ux + 1u, uy, w, h, frame); }
-    if (wake[2]) { cells[2] = heat(c10, l1, c11, c00, b0, ux, uy + 1u, w, h, frame); }
-    if (wake[3]) { cells[3] = heat(c11, c10, r1, c01, b1, ux + 1u, uy + 1u, w, h, frame); }
+    var maybe = array<bool, 4>(false, false, false, false);
+    if (wake[0]) { let o0 = heat(c00, l0, c01, a0, c10, ux, uy, w, h, frame); cells[0] = o0.cell; maybe[0] = o0.maybe; }
+    if (wake[1]) { let o1 = heat(c01, c00, r0, a1, c11, ux + 1u, uy, w, h, frame); cells[1] = o1.cell; maybe[1] = o1.maybe; }
+    if (wake[2]) { let o2 = heat(c10, l1, c11, c00, b0, ux, uy + 1u, w, h, frame); cells[2] = o2.cell; maybe[2] = o2.maybe; }
+    if (wake[3]) { let o3 = heat(c11, c10, r1, c01, b1, ux + 1u, uy + 1u, w, h, frame); cells[3] = o3.cell; maybe[3] = o3.maybe; }
     var write = wake;
     for (var k = 0u; k < 4u; k += 1u) {
-        if (wake[k] && cells[k] != old[k]) {
+        if (maybe[k]) {
             mark_active(chunk[k]);
         }
     }

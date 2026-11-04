@@ -37,6 +37,7 @@
 //! (position, step number), not a running generator. So the CPU and the GPU
 //! give exactly the same result, bit for bit, which the tests check.
 
+pub mod clock;
 pub mod cpu;
 pub mod gpu;
 
@@ -75,21 +76,58 @@ pub const NAMES: [&str; MATERIAL_COUNT] = [
     "air", "stone", "sand", "water", "oil", "lava", "steam", "wood", "fire", "ice", "smoke",
 ];
 
+// ---------------------------------------------------------------------------
+// Units. Everything below is in real units, so world time can be scaled:
+// the viewer runs as many steps per frame as the chosen speed needs.
+// ---------------------------------------------------------------------------
+
+/// One cell is 5 mm across: a 640x360 world is 3.2 m x 1.8 m.
+pub const CELL_METERS: f64 = 0.005;
+/// One step is 1/1200 s of world time.
+pub const STEPS_PER_SECOND: u32 = 1200;
+pub const STEP_SECONDS: f64 = 1.0 / STEPS_PER_SECOND as f64;
+/// Nothing moves faster than one cell per step: 6 m/s. That is enough to
+/// fall the whole 1.8 m window height (5.9 m/s at the bottom).
+pub const MAX_SPEED: f64 = CELL_METERS / STEP_SECONDS;
+pub const GRAVITY: f64 = 9.81;
+
+/// Speeds are stored as a "level" 0..=255 in the cell's aux byte:
+/// level 256 would be MAX_SPEED. `level(1.0)` is 1 m/s.
+pub const fn level(meters_per_second: f64) -> u32 {
+    (meters_per_second / MAX_SPEED * 256.0) as u32
+}
+/// Gravity adds this much speed per step, in 1/256 of a level
+/// (9.81 m/s^2 * 1/1200 s = 8.2 mm/s per step = 0.349 levels = 89/256).
+pub const G_Q: i32 = (GRAVITY * STEP_SECONDS / MAX_SPEED * 65536.0) as i32;
+
 // Indexed by material id.         air stone sand water oil lava steam wood fire ice smoke
 pub const KIND: [u32; MATERIAL_COUNT] = [GAS, SOLID, POWDER, LIQUID, LIQUID, LIQUID, GAS, SOLID, GAS, SOLID, GAS];
-/// Relative density. Only differences matter. Solids never move.
-pub const DENSITY: [i32; MATERIAL_COUNT] = [10, 255, 150, 100, 80, 250, 3, 255, 9, 255, 6];
-/// Chance out of 256 to flow sideways (liquids, gases) or slide down a
-/// slope (powders) in one step. Low = viscous / high friction.
-pub const FLOW: [u32; MATERIAL_COUNT] = [256, 0, 200, 230, 150, 40, 200, 0, 120, 0, 150];
-/// Thermal conductivity, out of 1024 per neighbour per step. Must stay
-/// at most 256 so that 4 neighbours can never move more than 100% of
-/// the temperature gap in one step (which would make the maths unstable).
-pub const COND: [i32; MATERIAL_COUNT] = [15, 100, 40, 120, 40, 80, 20, 40, 80, 150, 15];
+/// Density in units of 0.1 kg/m^3 (water = 10000). Gases are given at 20°C;
+/// `density()` makes hot gases lighter (ideal gas law).
+pub const DENSITY: [i32; MATERIAL_COUNT] = [12, 26000, 16000, 10000, 9000, 26000, 8, 6000, 3, 9170, 12];
+/// Speed (as a level) at which powders slide down slopes and fluids spread
+/// sideways when resting. sand 0.5 m/s, water 1 m/s, oil 0.4, lava 0.05,
+/// steam 1, fire 0.5, smoke 0.3. Air's 256 means "never the limit".
+pub const FLOW: [u32; MATERIAL_COUNT] = [256, 0, 21, 42, 17, 2, 42, 0, 21, 0, 12];
+/// Top speed (level) when sinking or rising through a liquid: viscous drag.
+/// About 0.1 m/s for sand, water, oil; 0.3 lava; a steam bubble 0.25 m/s.
+pub const VT_LIQUID: [u32; MATERIAL_COUNT] = [0, 0, 4, 4, 4, 12, 10, 0, 0, 0, 0];
+/// Top speed (level) through a gas. No air resistance is modelled, so
+/// falling things are only limited by MAX_SPEED; steam is capped at 2 m/s.
+pub const VT_GAS: [u32; MATERIAL_COUNT] = [0, 0, 255, 255, 255, 255, 85, 0, 0, 0, 0];
+/// Rising speed (level) of gases that do not store a speed (fire, smoke,
+/// hot air), at a full density gap: 1 m/s.
+pub const GAS_RISE: i32 = 42;
+/// Heat: thermal diffusivity alpha (m^2/s) turned into a per-step rate,
+/// alpha * STEP_SECONDS / CELL^2, times 2^20. Real values: air 2.2e-5,
+/// granite 1.1e-6, dry sand 2.5e-7, water 1.43e-7, oil 9e-8, lava 5e-7,
+/// steam 2e-5, wood 1.5e-7, flame gas 2e-4, ice 1.2e-6, smoke 2.2e-5.
+pub const HEAT_K: [i32; MATERIAL_COUNT] = [769, 38, 9, 5, 3, 17, 699, 5, 6990, 42, 769];
+/// Gases mix with the room and drift back to 20°C with a 3 s time
+/// constant: 2^20 / (3 s * 1200 steps/s).
+pub const RELAX_K: i32 = 291;
 
-/// Temperatures are fixed point: 256 units per degree Celsius. Fine steps
-/// matter: conduction rounds toward zero, so a gap smaller than one unit
-/// times 1024 / COND would never flow.
+/// Temperatures are fixed point: 256 units per degree Celsius.
 pub const T_SCALE: i32 = 256;
 pub const fn celsius(c: i32) -> i32 {
     c * T_SCALE
@@ -115,6 +153,27 @@ pub fn pack(material: u32, aux: u32, temp: i32) -> u32 {
     material | (aux << 4) | ((temp.clamp(T_MIN, T_MAX) as u32) << 12)
 }
 
+/// Materials that store a speed in their aux byte. (Fire and smoke use
+/// aux for their remaining life instead.)
+pub const fn has_speed(m: u32) -> bool {
+    matches!(m, SAND | WATER | OIL | LAVA | STEAM)
+}
+/// Heavier than air: falls. Otherwise (steam) it rises.
+pub const fn sinker(m: u32) -> bool {
+    DENSITY[m as usize] > DENSITY[AIR as usize]
+}
+/// The cell's speed level (0 for materials without one).
+pub const fn speed(cell: u32) -> u32 {
+    if has_speed(material(cell)) { aux(cell) } else { 0 }
+}
+pub const fn with_aux(cell: u32, aux: u32) -> u32 {
+    (cell & !(0xFF << 4)) | (aux << 4)
+}
+
+/// Fire and smoke lives count "ticks" of 64 steps (53 ms): each step the
+/// life goes down by one with chance 1/64.
+pub const TICK_STEPS: u32 = 64;
+
 /// Starting temperature of a freshly placed cell.
 pub fn default_temp(m: u32) -> i32 {
     match m {
@@ -126,12 +185,12 @@ pub fn default_temp(m: u32) -> i32 {
     }
 }
 
-/// Starting `aux` (life) of a freshly placed cell.
+/// Starting `aux` (life in ticks, or speed) of a freshly placed cell.
 pub fn default_aux(m: u32) -> u32 {
     match m {
-        FIRE => 80,
-        SMOKE => 60,
-        _ => 0,
+        FIRE => 80,  // 4.3 s
+        SMOKE => 60, // 3.2 s
+        _ => 0,      // at rest
     }
 }
 
@@ -224,48 +283,161 @@ impl World {
 // The rules. cpu.rs calls these; sim.wgsl is a line-by-line copy of them.
 // ---------------------------------------------------------------------------
 
-/// Heat pass for one cell: conduction from the 4 neighbours, then phase
-/// changes. Reads only the old grid, returns the cell's new packed value.
-pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u32) -> u32 {
-    let i = y * w + x;
-    let m = material(cells[i]);
-    let mut life = aux(cells[i]);
-    let t0 = temp(cells[i]);
-    let k_self = COND[m as usize];
+/// Salts that keep the different random numbers of one step independent.
+const EDGE_SALT: u32 = 0x5EED_1234;
+const CELL_SALT: u32 = 0xA511_E9B3;
 
-    // Conduction. The heat that flows from j to i is exactly minus the heat
-    // that flows from i to j (integer division rounds toward zero, the same
-    // for +x and -x), so conduction alone never creates or destroys heat.
-    let mut flux = 0;
+/// The random part of rounding the heat flow across one grid edge. An edge
+/// is named by the index of its left/upper cell and its direction (0 = to
+/// the right, 1 = down), so both cells on the edge use the same number.
+/// `key` is `pcg(frame ^ EDGE_SALT)`, computed once per step: one hash per
+/// edge is enough here and keeps the GPU fast.
+fn edge_roll(i: usize, down: u32, key: u32) -> i32 {
+    (pcg((2 * i as u32 + down) ^ key) & 0xF_FFFF) as i32
+}
+
+/// Heat that flows from the cell with temperature `from` into the cell
+/// with temperature `to`'s neighbour... precisely: the change of the
+/// left/upper cell of an edge when its partner has temperature `other`.
+/// Stochastic rounding: on average exactly (other - t) * k / 2^20, so even
+/// tiny real-world rates add up correctly instead of rounding to zero.
+/// The partner changes by exactly minus this, so heat is conserved.
+fn edge_flow(t: i32, other: i32, k: i32, roll: i32) -> i32 {
+    ((other - t) * k + roll) >> 20
+}
+
+/// Heat conductance between two materials: the harmonic mean of their
+/// rates (two layers in series, like resistors).
+fn pair_k(a: u32, b: u32) -> i32 {
+    let (ka, kb) = (HEAT_K[a as usize], HEAT_K[b as usize]);
+    2 * ka * kb / (ka + kb)
+}
+
+/// Density of a cell. Gases expand when heated (ideal gas law: density
+/// times absolute temperature is constant), so hot air rises: convection.
+/// Flames keep a fixed density, or they would shoot off what they burn.
+pub fn density(cell: u32) -> i32 {
+    let (m, t) = (material(cell), temp(cell));
+    let d = DENSITY[m as usize];
+    if KIND[m as usize] == GAS && m != FIRE {
+        // d * 293 K / (t + 273 K), with t in fixed point.
+        (d * 293 * T_SCALE / (t + 273 * T_SCALE).max(1)).max(1)
+    } else {
+        d
+    }
+}
+
+/// Could `top` and the cell right below it trade places by gravity
+/// (heavier above lighter)? Solids never move, and a powder is not pushed
+/// aside from below.
+pub fn sinks(top: u32, bottom: u32) -> bool {
+    let (mt, mb) = (material(top) as usize, material(bottom) as usize);
+    KIND[mt] != SOLID && KIND[mb] != SOLID && KIND[mb] != POWDER && density(top) > density(bottom)
+}
+
+/// New speed of a falling (or rising) cell after one step of gravity.
+/// `heavy` and `light` are the two cells of the pair, `medium` the one it
+/// moves through. Buoyancy: the pull is g * (heavy - light) / heavy.
+/// The 1/256 part is rounded at random so the average is exact.
+fn accelerate(cell: u32, heavy: u32, light: u32, medium: u32, roll: u32) -> u32 {
+    let (dh, dl) = (density(heavy), density(light));
+    let q = (G_Q * (dh - dl) / dh) as u32;
+    let m = material(cell) as usize;
+    let cap = if KIND[material(medium) as usize] == LIQUID { VT_LIQUID[m] } else { VT_GAS[m] };
+    (speed(cell) + ((q + roll) >> 8)).min(cap)
+}
+
+/// The speed the cell may keep when it cannot move: it may not be faster
+/// than the thing in its way (a falling column moves together), and it
+/// stops dead against anything not moving the same way.
+fn blocked_speed(cell: u32, in_way: u32) -> u32 {
+    let same_way = has_speed(material(in_way)) && sinker(material(in_way)) == sinker(material(cell));
+    speed(cell).min(if same_way { speed(in_way) } else { 0 })
+}
+
+/// Chance (out of 256) that a cell with speed level `s` moves in a step
+/// where it may. A cell is in the top row of a block only every other
+/// step unless it keeps moving, so the chance is p = 2s/(1+s) (s as a
+/// fraction): then it covers exactly s cells per step on average.
+pub fn move_chance(s: u32) -> u32 {
+    512 * s / (256 + s)
+}
+
+/// Update one cell for one step: heat conduction from its 4 neighbours,
+/// gravity on its speed, then phase changes. Reads only the old grid.
+/// Returns the new cell and whether it could have changed for SOME random
+/// number (used by chunk sleeping: see below).
+pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u32) -> (u32, bool) {
+    let i = y * w + x;
+    let me = cells[i];
+    let m = material(me);
+    let mut life = aux(me);
+    let t0 = temp(me);
+    let mut maybe = false; // could a random number have changed something?
+
+    // 1. Conduction across the 4 edges, each rounded at random (see
+    //    edge_flow). Edges to the right and below are "ours"; edges to the
+    //    left and above belong to the neighbour, so we take minus its flow.
+    let mut t = t0;
     let mut touches_water = false;
-    let mut neighbour = |j: usize| {
-        let mn = material(cells[j]);
-        let k = k_self.min(COND[mn as usize]);
-        flux += (temp(cells[j]) - t0) * k / 1024;
+    let key = pcg(frame ^ EDGE_SALT);
+    let mut edge = |j: usize, ours: bool, edge_cell: usize, down: u32| {
+        let other = cells[j];
+        let (tn, mn) = (temp(other), material(other));
         touches_water |= mn == WATER;
+        if tn == t0 {
+            return; // no gap, no flow (and no need for a random number)
+        }
+        maybe = true;
+        let (k, roll) = (pair_k(m, mn), edge_roll(edge_cell, down, key));
+        t += if ours { edge_flow(t0, tn, k, roll) } else { -edge_flow(tn, t0, k, roll) };
     };
-    if x > 0 {
-        neighbour(i - 1);
-    }
     if x + 1 < w {
-        neighbour(i + 1);
+        edge(i + 1, true, i, 0);
     }
-    if y > 0 {
-        neighbour(i - w);
+    if x > 0 {
+        edge(i - 1, false, i - 1, 0);
     }
     if y + 1 < h {
-        neighbour(i + w);
+        edge(i + w, true, i, 1);
     }
-    let mut t = t0 + flux;
-    // Is something solid holding this cell up? (The world's bottom edge counts.)
-    let supported = y + 1 >= h || KIND[material(cells[i + w]) as usize] >= POWDER;
+    if y > 0 {
+        edge(i - w, false, i - w, 1);
+    }
 
-    // Gases mix with the wider atmosphere and drift back to room temperature.
+    let r = pcg(i as u32 ^ pcg(frame ^ CELL_SALT));
+    let tick = pcg(r) % TICK_STEPS == 0; // one tick of fire/smoke life passes
+    // Gases mix with the room and drift back to 20°C.
     if KIND[m as usize] == GAS && m != FIRE {
-        t += (AMBIENT - t) / 64;
+        t += ((AMBIENT - t0) * RELAX_K + (r & 0xF_FFFF) as i32) >> 20;
+        maybe |= t0 != AMBIENT;
     }
 
-    let r = hash3(x as u32, y as u32, frame ^ 0xA511_E9B3);
+    // 2. Gravity. A cell that is free to fall (or, for steam, to rise)
+    //    speeds up; one that is blocked slows to what blocks it. The world's
+    //    edges block.
+    let below = (y + 1 < h).then(|| cells[i + w]);
+    let above = (y > 0).then(|| cells[i - w]);
+    if has_speed(m) {
+        let roll = (r >> 20) & 255;
+        let (free, other) = if sinker(m) {
+            (below.is_some_and(|b| sinks(me, b)), below)
+        } else {
+            (above.is_some_and(|a| sinks(a, me)), above)
+        };
+        life = match (free, other) {
+            (true, Some(o)) => {
+                let (heavy, light) = if sinker(m) { (me, o) } else { (o, me) };
+                maybe = true; // the random rounding of the speed-up
+                accelerate(me, heavy, light, o, roll)
+            }
+            (_, Some(o)) => blocked_speed(me, o),
+            (_, None) => 0,
+        };
+    }
+
+    // 3. Phase changes.
+    let supported = below.is_none_or(|b| KIND[material(b) as usize] >= POWDER);
     let mut next = m;
     match m {
         WATER if t >= celsius(100) => next = STEAM,
@@ -280,109 +452,127 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         STONE if t >= celsius(1100) => next = LAVA,
         WOOD if t >= celsius(300) => {
             next = FIRE;
-            life = 40 + (r & 63);
+            life = 120 + (r & 127); // 6-13 s of burning
         }
         OIL if t >= celsius(250) => {
             next = FIRE;
-            life = 20 + (r & 31);
+            life = 20 + (r & 31); // 1-2.7 s
         }
         FIRE => {
+            maybe = true;
             if touches_water || life == 0 {
                 next = SMOKE;
-                life = 30 + (r & 31);
+                life = 30 + (r & 31); // 1.6-3.3 s
             } else {
                 // Burning releases heat: the flame stays at least this hot.
-                life -= 1;
+                if tick {
+                    life -= 1;
+                }
                 t = t.max(celsius(900));
             }
         }
         SMOKE => {
+            maybe = true;
             if life == 0 {
                 next = AIR;
-            } else {
+            } else if tick {
                 life -= 1;
             }
         }
         _ => {}
     }
-    pack(next, if next == AIR { 0 } else { life }, t)
+    // A new material starts at rest (fire and smoke got a life above).
+    if next != m && next != FIRE && next != SMOKE {
+        life = 0;
+    }
+    let new = pack(next, life, t);
+    (new, maybe || new != me)
 }
 
-/// Density of a cell at temperature `t`. Gases expand when heated, so hot
-/// air is lighter than cold air and rises: that is convection. (Flames keep
-/// a fixed density, or they would shoot away from what they are burning.)
-fn density(cell: u32) -> i32 {
-    let (m, t) = (material(cell), temp(cell));
-    let d = DENSITY[m as usize];
-    if KIND[m as usize] == GAS && m != FIRE {
-        (d - (t - AMBIENT) / celsius(40)).max(1)
+/// Chance (out of 256) that the pair `top` over `bottom` trades places in a
+/// step where they may, or 0 if gravity does not move them. The moving
+/// "body" is the top cell when it is heavier than air, else the bottom one
+/// (a gas rising through air). Bodies with a speed move at that speed;
+/// fire, smoke and hot air rise at GAS_RISE times the density gap.
+fn pair_chance(top: u32, bottom: u32) -> u32 {
+    if !sinks(top, bottom) {
+        return 0;
+    }
+    let body = if sinker(material(top)) { top } else { bottom };
+    if has_speed(material(body)) {
+        move_chance(speed(body))
     } else {
-        d
+        let (dt, db) = (density(top), density(bottom));
+        move_chance((GAS_RISE * (dt - db) / dt) as u32)
     }
 }
 
-/// Would the cell `top` sink into the cell `bottom` right below it?
-/// The bigger the density gap, the more likely: that is buoyancy.
-fn sinks(top: u32, bottom: u32, roll: u32) -> bool {
-    let (mt, mb) = (material(top) as usize, material(bottom) as usize);
-    // Solids never move; a pile of powder is not pushed aside by liquid.
-    if KIND[mt] == SOLID || KIND[mb] == SOLID || KIND[mb] == POWDER {
-        return false;
-    }
-    let (dt, db) = (density(top), density(bottom));
-    if dt <= db {
-        return false;
-    }
-    roll < ((dt - db) * 256 / dt) as u32
+/// Could a resting powder or liquid slide from `top` into `diagonal`? Only
+/// when it cannot fall straight down and the diagonal cell is lighter.
+fn can_slide(top: u32, below: u32, diagonal: u32) -> bool {
+    let m = material(top);
+    let k = KIND[m as usize];
+    (k == POWDER || k == LIQUID) && FLOW[m as usize] > 0 && speed(top) == 0 && !sinks(top, below) && sinks(top, diagonal)
 }
 
-/// Would two side-by-side fluid cells trade places (spreading, mixing)?
-fn spreads(left: u32, right: u32, roll: u32) -> bool {
-    let (ml, mr) = (material(left) as usize, material(right) as usize);
-    let fluid = |k: u32| k == GAS || k == LIQUID;
-    ml != mr && fluid(KIND[ml]) && fluid(KIND[mr]) && roll < FLOW[ml].min(FLOW[mr])
+/// Could two side-by-side resting fluid cells trade places (spreading,
+/// mixing)? Returns the chance out of 256.
+fn spread_chance(left: u32, right: u32) -> u32 {
+    let (ml, mr) = (material(left), material(right));
+    let fluid = |m: u32| KIND[m as usize] == GAS || KIND[m as usize] == LIQUID;
+    if ml != mr && fluid(ml) && fluid(mr) && speed(left) == 0 && speed(right) == 0 {
+        FLOW[ml as usize].min(FLOW[mr as usize])
+    } else {
+        0
+    }
+}
+
+/// Swap two cells of a block. A cell that is pushed out of the way stops
+/// (its speed was for its own motion, not this one).
+fn displace(cells: &mut [u32; 4], mover: usize, pushed: usize) {
+    if has_speed(material(cells[pushed])) {
+        cells[pushed] = with_aux(cells[pushed], 0);
+    }
+    cells.swap(mover, pushed);
 }
 
 /// Move pass for one 2x2 block. `cells` is in the order top-left,
-/// top-right, bottom-left, bottom-right. The temperature is packed into
-/// the cell, so it travels with the cell for free.
+/// top-right, bottom-left, bottom-right. Speeds and temperatures are packed
+/// into the cells, so they travel with them.
 pub fn move_block(cells: &mut [u32; 4], r: u32) {
     let r2 = pcg(r);
     let mut fell = [false; 2];
 
-    // 1. Gravity and buoyancy, in each column: heavy above light trades places.
+    // 1. Gravity and buoyancy, in each column, at the body's own speed.
     for col in 0..2 {
         let (top, bottom) = (col, col + 2);
-        if sinks(cells[top], cells[bottom], (r >> (col * 8)) & 255) {
-            cells.swap(top, bottom);
+        if ((r >> (col * 8)) & 255) < pair_chance(cells[top], cells[bottom]) {
+            let (mover, pushed) = if sinker(material(cells[top])) { (top, bottom) } else { (bottom, top) };
+            displace(cells, mover, pushed);
             fell[col] = true;
         }
     }
 
-    // 2. Could not fall straight down: powders and liquids slide diagonally,
-    //    with a chance set by their friction / viscosity.
+    // 2. Resting powders and liquids that cannot fall straight down slide
+    //    diagonally (friction / viscosity set how often).
     let mut slid = false;
     for col in 0..2 {
         if fell[col] {
             continue;
         }
-        let (top, diagonal) = (col, 3 - col);
+        let (top, bottom, diagonal) = (col, col + 2, 3 - col);
         let m = material(cells[top]) as usize;
-        if KIND[m] != POWDER && KIND[m] != LIQUID {
-            continue;
-        }
-        let roll = (r >> (16 + col * 8)) & 255;
-        if roll < FLOW[m] && sinks(cells[top], cells[diagonal], 0) {
-            cells.swap(top, diagonal);
+        if can_slide(cells[top], cells[bottom], cells[diagonal]) && ((r >> (16 + col * 8)) & 255) < FLOW[m] {
+            displace(cells, top, diagonal);
             slid = true;
         }
     }
 
-    // 3. Nothing fell: fluids spread sideways. This levels out liquids.
+    // 3. Nothing moved: resting fluids spread sideways. This levels liquids.
     if !fell[0] && !fell[1] && !slid {
         for row in 0..2 {
             let (left, right) = (row * 2, row * 2 + 1);
-            if spreads(cells[left], cells[right], (r2 >> (row * 8)) & 255) {
+            if ((r2 >> (row * 8)) & 255) < spread_chance(cells[left], cells[right]) {
                 cells.swap(left, right);
             }
         }
@@ -405,11 +595,14 @@ pub fn block_offset(frame: u32) -> usize {
 //
 // The grid is cut into fixed CHUNK x CHUNK chunks (independent of the block
 // offset). During step n a chunk is ACTIVE if
-//   - the heat pass changed one of its cells (new value != old value), or
+//   - the heat pass of one of its cells changed it OR could have changed it
+//     for SOME random number (`heat_cell`'s second result: any temperature
+//     difference to a neighbour, a gas away from 20°C, fire, smoke, or a
+//     cell free to fall, all of which use random rounding), or
 //   - a 2x2 block it OWNS (the chunk holding the block's top-left cell) could
 //     move for SOME random number (`block_can_move`), whether it moved or not.
-// Counting "could move" and not just "did move" matters: a water/oil pair
-// that happened not to swap for two steps is not settled, it is unlucky.
+// Counting "could" and not just "did" matters: a water/oil pair that
+// happened not to swap for two steps is not settled, it is unlucky.
 //
 // Rule: chunk c is AWAKE in step n if c or any of its 8 neighbours was active
 // in step n-1 or n-2. Asleep chunks run neither pass (no reads, no writes).
@@ -421,11 +614,10 @@ pub fn block_offset(frame: u32) -> usize {
 //    in N(c). So "N(c) inactive in steps n-1 and n-2" means those cells are
 //    the same at the start of steps n-2, n-1 and n.
 // 2. Heat: a cell's heat update reads it and its 4 neighbours (all within 2
-//    of c). When the update leaves a cell unchanged it does not depend on the
-//    frame (the random number is only used by updates that change the cell:
-//    ignition, and fire/smoke, which change every step). Same inputs as in
-//    step n-1, where it changed nothing => it changes nothing in step n. So
-//    the post-heat values within 1 cell of c equal those of step n-2.
+//    of c). An update that could not change the cell for any random number
+//    in step n-1 sees the same inputs in step n, so it cannot change it now
+//    either. So the post-heat values within 1 cell of c equal those of
+//    step n-2.
 // 3. Move: step n uses the same block offset as step n-2. Every block that
 //    touches c (including blocks owned by an awake neighbour that straddle
 //    into c) has its top-left in N(c), sees the same post-heat cells as in
@@ -457,21 +649,16 @@ pub fn chunk_dims(w: usize, h: usize) -> (usize, usize) {
 }
 
 /// Could `move_block` change this block for SOME random number `r`?
-/// `sinks(.., 0)` / `spreads(.., 0)` are true exactly when some roll would
-/// make them true, and if no first-stage swap is possible the later stages
-/// see the same cells, so checking all six candidate swaps on the input is
-/// enough. When this is false, `move_block` leaves the block as it is.
+/// Each candidate swap is checked on the input: if no column swap is
+/// possible the later stages see the same cells, so this is exact. When it
+/// is false, `move_block` leaves the block as it is.
 pub fn block_can_move(cells: &[u32; 4]) -> bool {
-    let diagonal = |col: usize| {
-        let m = material(cells[col]) as usize;
-        (KIND[m] == POWDER || KIND[m] == LIQUID) && FLOW[m] > 0 && sinks(cells[col], cells[3 - col], 0)
-    };
-    sinks(cells[0], cells[2], 0)
-        || sinks(cells[1], cells[3], 0)
-        || diagonal(0)
-        || diagonal(1)
-        || spreads(cells[0], cells[1], 0)
-        || spreads(cells[2], cells[3], 0)
+    pair_chance(cells[0], cells[2]) > 0
+        || pair_chance(cells[1], cells[3]) > 0
+        || can_slide(cells[0], cells[2], cells[3])
+        || can_slide(cells[1], cells[3], cells[2])
+        || spread_chance(cells[0], cells[1]) > 0
+        || spread_chance(cells[2], cells[3]) > 0
 }
 
 // ---------------------------------------------------------------------------
@@ -602,8 +789,10 @@ mod tests {
         }
     }
 
-    /// A scene that reaches a true fixed point: still water filling whole
-    /// rows of a tank, and a heap of sand dropped on dry ground beside it.
+    /// A scene that reaches a true fixed point quickly: still water filling
+    /// whole rows of a tank, and a block of sand that falls into a walled
+    /// bin and lands flat (a free heap would creep down its slope for many
+    /// seconds of world time).
     fn settling_scene(w: usize, h: usize) -> World {
         let mut g = World::new(w, h);
         let (wi, hi) = (w as i32, h as i32);
@@ -611,7 +800,9 @@ mod tests {
         g.fill(wi / 2, hi / 2, wi / 2 + 3, floor, STONE);
         g.fill(wi - 3, hi / 2, wi, floor, STONE);
         g.fill(wi / 2 + 3, hi * 3 / 4, wi - 3, floor, WATER);
-        g.fill(wi / 8, hi / 4, wi / 3, hi / 2, SAND);
+        g.fill(wi / 8 - 3, hi / 4, wi / 8, floor, STONE);
+        g.fill(wi / 3, hi / 4, wi / 3 + 3, floor, STONE);
+        g.fill(wi / 8, hi / 4, wi / 3, hi / 3, SAND);
         g
     }
 
@@ -624,7 +815,9 @@ mod tests {
             let cells: [u32; 4] = std::array::from_fn(|k| {
                 let r = hash3(s, k as u32, 77);
                 let m = r % MATERIAL_COUNT as u32;
-                pack(m, default_aux(m), AMBIENT + ((r >> 8) % 4096) as i32 * 4 - 8192)
+                // Half the cells at rest, the rest with a random speed/life.
+                let a = if r & (1 << 31) != 0 { 0 } else { pcg(r) & 255 };
+                pack(m, a, AMBIENT + ((r >> 8) % 4096) as i32 * 4 - 8192)
             });
             if block_can_move(&cells) {
                 continue;
@@ -690,7 +883,7 @@ mod tests {
         let total = sim.chunk_count();
         assert_eq!(total, 16 * 10);
         assert_eq!(sim.awake_chunks(), total, "everything starts awake");
-        for _ in 0..3000 {
+        for _ in 0..9000 {
             sim.step_parallel(&mut world);
         }
         let cpu_awake = sim.awake_chunks();
@@ -699,7 +892,7 @@ mod tests {
         // Exactly what an unsleeping run gives.
         let mut reference = start.clone();
         let mut plain = CpuSim::new(&reference);
-        for _ in 0..3000 {
+        for _ in 0..9000 {
             plain.step_no_sleep(&mut reference);
         }
         assert_eq!(world, reference);
@@ -707,7 +900,7 @@ mod tests {
         // The GPU agrees, cell for cell and chunk for chunk.
         let Some(mut gpu) = gpu_or_skip(&start) else { return };
         assert_eq!(gpu.chunk_count(), total);
-        gpu.step(3000);
+        gpu.step(9000);
         let mut gpu_world = start.clone();
         gpu.download(&mut gpu_world);
         assert_eq!(gpu_world, world);
@@ -814,10 +1007,13 @@ mod tests {
         }
         let total = |w: &World| w.cells.iter().map(|&c| temp(c) as i64).sum::<i64>();
         let before = total(&world);
-        run(&mut world, 300);
+        run(&mut world, STEPS_PER_SECOND as usize); // 1 s
         let after = total(&world);
-        assert_eq!(before, after);
-        assert!(temp(world.cells[64 * 25 + 15]) > AMBIENT, "heat should have spread outward");
+        assert_eq!(before, after, "random rounding must still conserve heat exactly");
+        // Real granite is slow: in 1 s heat only gets about one cell (5 mm) out.
+        let next_to_hot = temp(world.cells[64 * 25 + 19]);
+        assert!(next_to_hot > AMBIENT + celsius(5), "the neighbour should warm up (got {next_to_hot})");
+        assert_eq!(temp(world.cells[64 * 25 + 5]), AMBIENT, "but not 15 cells away");
     }
 
     #[test]
@@ -826,7 +1022,7 @@ mod tests {
         let mut world = World::new(32, 64);
         world.fill(0, 20, 32, 43, WATER);
         world.fill(0, 43, 32, 63, OIL);
-        run(&mut world, 3000);
+        run(&mut world, 10 * STEPS_PER_SECOND as usize); // 10 s
         let mean_y = |m: u32| {
             let ys: Vec<usize> = (0..world.cells.len()).filter(|&i| material(world.cells[i]) == m).map(|i| i / 32).collect();
             ys.iter().sum::<usize>() as f64 / ys.len() as f64
@@ -839,7 +1035,8 @@ mod tests {
         let mut world = scene(1, 200, 120);
         let mut sim = CpuSim::new(&world);
         let mut most_steam = 0;
-        for _ in 0..600 {
+        for _ in 0..12 * STEPS_PER_SECOND {
+            // 12 s: the lava falls in, then takes a few seconds to boil water.
             sim.step(&mut world);
             most_steam = most_steam.max(world.count(STEAM));
         }
@@ -848,12 +1045,64 @@ mod tests {
     }
 
     #[test]
-    fn hot_fire_ignites_wood() {
+    fn lava_ignites_wood() {
+        // A painted flame lasts seconds and does not light a plank (true in
+        // real life too); lava sitting on wood heats it to 300°C in ~20 s.
         let mut world = World::new(64, 64);
         world.fill(10, 40, 50, 63, WOOD);
-        world.fill(28, 38, 32, 40, FIRE);
+        world.fill(20, 30, 40, 40, LAVA);
         let wood_before = world.count(WOOD);
-        run(&mut world, 600);
+        run(&mut world, 35 * STEPS_PER_SECOND as usize);
         assert!(world.count(WOOD) < wood_before, "the wood should burn");
+    }
+
+    /// Steps until a grain dropped from rest reaches the floor, averaged
+    /// over several grains (the speed-up is random rounding).
+    fn mean_landing_step(world: &mut World, xs: &[usize], landing_y: usize, max_steps: usize) -> f64 {
+        let w = world.width;
+        let mut sim = CpuSim::new(world);
+        let mut landed = vec![None; xs.len()];
+        for step in 1..=max_steps {
+            sim.step(world);
+            for (k, &x) in xs.iter().enumerate() {
+                if landed[k].is_none() && material(world.cells[landing_y * w + x]) == SAND {
+                    landed[k] = Some(step);
+                }
+            }
+            if landed.iter().all(|l| l.is_some()) {
+                break;
+            }
+        }
+        let steps: Vec<usize> = landed.iter().map(|l| l.expect("every grain should land")).collect();
+        steps.iter().sum::<usize>() as f64 / steps.len() as f64
+    }
+
+    #[test]
+    fn free_fall_takes_the_right_time() {
+        // Drop grains 238 cells (1.19 m) through air: t = sqrt(2h/g) = 0.493 s.
+        let mut world = World::new(64, 260);
+        let xs: Vec<usize> = (4..64).step_by(8).collect();
+        for &x in &xs {
+            world.set(x as i32, 20, SAND);
+        }
+        let h = (258 - 20) as f64 * CELL_METERS;
+        let expected = (2.0 * h / GRAVITY).sqrt() * STEPS_PER_SECOND as f64;
+        let got = mean_landing_step(&mut world, &xs, 258, 3000);
+        let err = (got - expected).abs() / expected;
+        assert!(err < 0.1, "fell in {got:.0} steps, expected {expected:.0} ({:.1}% off)", err * 100.0);
+    }
+
+    #[test]
+    fn sand_sinks_slowly_through_water() {
+        // Through 0.6 m of water at its ~0.1 m/s terminal speed: about 6.4 s,
+        // where the same drop through air takes 0.35 s.
+        let mut world = World::new(32, 142);
+        world.fill(0, 20, 32, 141, WATER);
+        let xs = [8, 16, 24];
+        for &x in &xs {
+            world.set(x as i32, 19, SAND);
+        }
+        let got = mean_landing_step(&mut world, &xs, 140, 20 * STEPS_PER_SECOND as usize) / STEPS_PER_SECOND as f64;
+        assert!((4.5..9.0).contains(&got), "sank in {got:.2} s");
     }
 }

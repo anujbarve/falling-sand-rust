@@ -177,7 +177,7 @@ impl CpuSim {
         }
         for y in 0..h {
             for x in 0..w {
-                self.next[y * w + x] = heat_cell(&world.cells, w, h, x, y, frame);
+                self.next[y * w + x] = heat_cell(&world.cells, w, h, x, y, frame).0;
             }
         }
         std::mem::swap(&mut world.cells, &mut self.next);
@@ -254,8 +254,10 @@ fn heat_chunk_row(
         for ly in 0..rows {
             let y = y0 + ly;
             for x in x0..x1 {
-                let v = heat_cell(cells, w, h, x, y, frame);
-                changed |= v != cells[y * w + x];
+                // Active if it changed, or if a random number could have
+                // changed it (stochastic rounding, fire, gravity): see mod.rs.
+                let (v, maybe) = heat_cell(cells, w, h, x, y, frame);
+                changed |= maybe;
                 out[ly * w + x] = v;
             }
         }

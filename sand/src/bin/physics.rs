@@ -2,10 +2,15 @@
 //! Each frame it queues the steps plus a copy of the grid and draws the
 //! newest copy that has come back, without waiting for the GPU.
 //!
+//! The world runs in real time by default: 1 s on screen = 1 s of world
+//! time (1200 steps). `,` and `.` slow it down (to 0.01x) or speed it up
+//! (to 16x), `/` goes back to real time. If the GPU cannot keep up, the
+//! HUD shows the speed actually reached.
+//!
 //!     cargo run --release --bin physics
 
 use macroquad::prelude::*;
-use sand::physics::{gpu::GpuSim, *};
+use sand::physics::{clock::Clock, gpu::GpuSim, *};
 
 const W: usize = 640;
 const H: usize = 360;
@@ -36,7 +41,7 @@ async fn main() {
     };
     let mut brush = SAND;
     let mut brush_size = 6;
-    let mut steps_per_frame = 4u32;
+    let mut clock = Clock::default();
     let mut paused = false;
     let mut heat_view = false;
     let mut cpu_ms = 0.0f64; // smoothed CPU time per frame spent submitting + collecting readbacks
@@ -68,6 +73,7 @@ async fn main() {
         }
         if replaced {
             gpu.upload(&world); // also drops readbacks of the old world still in flight
+            clock.reset();
         }
         if is_key_pressed(KeyCode::H) {
             heat_view = !heat_view;
@@ -75,11 +81,14 @@ async fn main() {
         if is_key_pressed(KeyCode::Space) {
             paused = !paused;
         }
-        if is_key_pressed(KeyCode::Equal) {
-            steps_per_frame = (steps_per_frame * 2).min(64);
+        if is_key_pressed(KeyCode::Period) {
+            clock.faster();
         }
-        if is_key_pressed(KeyCode::Minus) {
-            steps_per_frame = (steps_per_frame / 2).max(1);
+        if is_key_pressed(KeyCode::Comma) {
+            clock.slower();
+        }
+        if is_key_pressed(KeyCode::Slash) {
+            clock.real_time();
         }
         pick_brush(&mut brush);
         let wheel = mouse_wheel().1;
@@ -99,13 +108,17 @@ async fn main() {
         }
 
         // --- simulate ---
-        let steps = if !paused {
-            steps_per_frame
-        } else if is_key_pressed(KeyCode::N) {
-            1
-        } else {
-            0
+        // As many steps as the chosen speed needs for the time this frame
+        // took, but no more than about 12 ms of GPU work per frame.
+        let budget = match gpu.gpu_time_ms() {
+            Some(ms) if ms > 0.0 => (12.0 / ms).clamp(1.0, 20_000.0) as u32,
+            _ => 2_000,
         };
+        let mut steps = clock.steps_for_frame(get_frame_time() as f64, budget, paused);
+        if paused && is_key_pressed(KeyCode::N) {
+            steps = STEPS_PER_SECOND / 60; // advance 1/60 s of world time
+            clock.add_steps(steps);
+        }
         let start = std::time::Instant::now();
         if steps > 0 || !edits.is_empty() {
             gpu.step_and_readback(steps); // returns at once; the GPU works in the background
@@ -150,23 +163,36 @@ async fn main() {
         let lines = [
             format!("scene {}/{}: {name} - {about}", scene_index + 1, SCENES.len()),
             format!(
-                "{} | {} steps/frame | {gpu_ms} | cpu {:.2} ms/frame | frame {:.1} ms, {} fps",
-                gpu.adapter_name,
-                steps_per_frame,
+                "world time {:.2} s | speed {}x{} | {} steps/frame | {gpu_ms} | cpu {:.2} ms/frame | {} fps",
+                clock.world_seconds,
+                clock.speed(),
+                if paused {
+                    String::new()
+                } else if clock.behind {
+                    format!(" (GPU too slow: reaching {:.2}x)", clock.achieved)
+                } else {
+                    format!(" (reaching {:.2}x)", clock.achieved)
+                },
+                steps,
                 cpu_ms,
-                get_frame_time() * 1000.0,
                 get_fps(),
             ),
             format!(
                 "{}brush: {} size {} | 1 sand 2 water 3 stone 4 erase 5 wood 6 fire 7 oil 8 lava 9 ice 0 steam | {}",
-                if paused { "PAUSED (N = step) | " } else { "" },
+                if paused { "PAUSED (N = 1/60 s) | " } else { "" },
                 NAMES[brush as usize],
                 brush_size,
                 probe
             ),
-            "H heat view | - = steps/frame | [ ] size | Tab scene | R reset | C clear | Space pause".to_string(),
+            "< , slower | . faster > | / real time | H heat view | [ ] size | Tab scene | R reset | C clear | Space pause"
+                .to_string(),
         ];
         draw_rectangle(0.0, 0.0, W as f32 * SCALE, 102.0, Color::new(0.0, 0.0, 0.0, 0.6));
+        // Scale bar: 10 cm = 20 cells.
+        let bar = (0.1 / CELL_METERS) as f32 * SCALE;
+        let (bx, by) = (W as f32 * SCALE - bar - 16.0, H as f32 * SCALE - 16.0);
+        draw_line(bx, by, bx + bar, by, 2.0, WHITE);
+        draw_text("10 cm", bx, by - 6.0, 18.0, WHITE);
         for (i, text) in lines.iter().enumerate() {
             draw_text(text, 10.0, 22.0 + i as f32 * 24.0, 22.0, WHITE);
         }

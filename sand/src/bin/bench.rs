@@ -20,7 +20,7 @@
 //! scene, and a "settled" world (scene 0 run until most of it has come to
 //! rest), each with sleeping on and off, plus how many chunks are awake.
 
-use sand::physics::{cpu::CpuSim, gpu::GpuSim, scene, World};
+use sand::physics::{STEPS_PER_SECOND, cpu::CpuSim, gpu::GpuSim, scene, World};
 use std::time::{Duration, Instant};
 
 const SIZES: [(usize, usize); 5] = [(640, 360), (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
@@ -83,10 +83,10 @@ fn main() {
     }
 
     println!(
-        "{:>11} | {:>9} | {:>11} | {:>11} | {:>11} | {:>16} | {:>15} | {:>12} | {:>11}",
-        "grid", "cells", "cpu 1 thr", "cpu all", "gpu", "gpu (timestamps)", "gpu + readback", "gpu vs 1 thr", "gpu vs all"
+        "{:>11} | {:>9} | {:>11} | {:>11} | {:>11} | {:>16} | {:>15} | {:>12} | {:>11} | {:>13}",
+        "grid", "cells", "cpu 1 thr", "cpu all", "gpu", "gpu (timestamps)", "gpu + readback", "gpu vs 1 thr", "gpu vs all", "gpu max speed"
     );
-    println!("{}", "-".repeat(132));
+    println!("{}", "-".repeat(148));
     for (w, h) in SIZES {
         let start = scene(BENCH_SCENE, w, h);
         let mut sim = CpuSim::new(&start);
@@ -130,7 +130,7 @@ fn main() {
         let ms = |v: Option<f64>| v.map_or("n/a".to_string(), |v| format!("{v:.3} ms"));
         let x = |v: Option<f64>, base: f64| v.map_or("n/a".to_string(), |v| format!("{:.1}x", base / v));
         println!(
-            "{:>11} | {:>8.2}M | {:>11} | {:>11} | {:>11} | {:>16} | {:>15} | {:>12} | {:>11}",
+            "{:>11} | {:>8.2}M | {:>11} | {:>11} | {:>11} | {:>16} | {:>15} | {:>12} | {:>11} | {:>13}",
             format!("{w}x{h}"),
             (w * h) as f64 / 1e6,
             ms(Some(single)),
@@ -140,9 +140,15 @@ fn main() {
             ms(readback),
             x(gpu, single),
             x(gpu, multi),
+            // World seconds per wall second if the GPU did nothing else.
+            gpu.map_or("n/a".to_string(), |v| format!("{:.2}x", 1000.0 / (STEPS_PER_SECOND as f64 * v))),
         );
     }
     println!("\nms = milliseconds per simulation step (lower is better). 60 fps leaves 16.7 ms per frame.");
+    println!(
+        "One step = 1/{STEPS_PER_SECOND} s of world time, so real time needs {STEPS_PER_SECOND} steps per second.\n\
+         gpu max speed = how many times faster than real time the GPU alone could run (busy scene)."
+    );
 
     if GpuSim::new(&World::new(8, 8)).is_err() {
         return;
