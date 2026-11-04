@@ -27,7 +27,7 @@ fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     var radiation = 0;
     if (a != b && condensed(a) && condensed(b)) {
         radiation = radiation_k(ta, tb);
-    } else if ((a == FIRE && condensed(b)) || (b == FIRE && condensed(a))) {
+    } else if ((flame(a) && condensed(b)) || (flame(b) && condensed(a))) {
         radiation = radiation_k(ta, tb) / 3;
     }
     // Water against a hot surface: boundary layer (see pair_conductance in thermal.rs).
@@ -36,7 +36,7 @@ fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     if ((a == WATER && hot_b) || (b == WATER && hot_a)) {
         return BOIL_CONDUCTANCE;
     }
-    if ((a == WATER && b == ICE) || (a == ICE && b == WATER)) {
+    if ((a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FREEZER) && b == WATER)) {
         return MELT_CONDUCTANCE;
     }
     return series + radiation;
@@ -65,7 +65,7 @@ fn density(cell: u32) -> i32 {
     let m = material(cell);
     let d = base_density(m);
     let k = kind(m);
-    if (k == GAS && m != FIRE) {
+    if (k == GAS && !flame(m)) {
         return max(d * 293 * T_SCALE / max(sens(cell) + 273 * T_SCALE, 1), 1);
     }
     if (k == LIQUID) {
@@ -79,7 +79,7 @@ fn sinks(top: u32, bottom: u32) -> bool {
     let kt = kind(material(top));
     let kb = kind(material(bottom));
     // A flame is anchored where it burns: it does not drift off its fuel.
-    if (material(top) == FIRE || material(bottom) == FIRE) {
+    if (anchored(material(top)) || anchored(material(bottom))) {
         return false;
     }
     return kb != SOLID && kb != POWDER && density(top) > density(bottom);
@@ -144,9 +144,9 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
-        touches_fire = touches_fire || mn == FIRE;
-        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
-        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        touches_fire = touches_fire || flame(mn);
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
+        open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
             maybe = true;
             t += flow_24(tn - t0s, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 0u, key));
@@ -158,9 +158,9 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
-        touches_fire = touches_fire || mn == FIRE;
-        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
-        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        touches_fire = touches_fire || flame(mn);
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
+        open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
             maybe = true;
             t -= flow_24(t0s - tn, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i - 1u, 0u, key));
@@ -172,9 +172,9 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
-        touches_fire = touches_fire || mn == FIRE;
-        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
-        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        touches_fire = touches_fire || flame(mn);
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
+        open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
             maybe = true;
             t += flow_24(tn - t0s, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 1u, key));
@@ -186,9 +186,9 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         touches_water = touches_water || mn == WATER;
         touches_air = touches_air || mn == AIR;
         touches_lava = touches_lava || mn == LAVA;
-        touches_fire = touches_fire || mn == FIRE;
-        touches_fuel = touches_fuel || mn == WOOD || mn == OIL;
-        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        touches_fire = touches_fire || flame(mn);
+        touches_fuel = touches_fuel || mn == WOOD || mn == OIL || mn == COAL;
+        open_faces += select(0, 1, kind(mn) == GAS && !flame(mn));
         if (tn != t0s) {
             maybe = true;
             t -= flow_24(t0s - tn, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i - w, 1u, key));
@@ -199,7 +199,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     let r2 = pcg(r);
     let tick = r2 % TICK_STEPS == 0u;
     // Flame flux onto a touching solid or liquid (same as heat_cell).
-    if (touches_fire && condensed(m) && m != FIRE) {
+    if (touches_fire && condensed(m) && !flame(m)) {
         t += FLAME_UNITS / cap(m);
         maybe = true;
     }
@@ -245,6 +245,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         }
     }
 
+    if (m == JET || m == EXHAUST) { maybe = true; } // never asleep: see directed_can_act
     var next = m;
     let stored = t - celsius(100);
     let boils_now = m == WATER && stored > 0
@@ -275,6 +276,9 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         if (t < celsius(1000)) { next = select(STONE, SAND, touches_water && !held); }
     } else if (m == STONE) {
         if (t >= celsius(1200)) { next = LAVA; }
+    } else if (m == COAL) {
+        // Coal: hard to light, then burns for a long time (up to ~13 s).
+        if (t >= celsius(350) && (touches_air || touches_lava || touches_fire)) { next = FIRE; life = 200u + (r & 55u); }
     } else if (m == WOOD) {
         if (t >= celsius(300) && (touches_air || touches_lava || touches_fire)) { next = FIRE; life = 120u + (r & 127u); }
     } else if (m == OIL) {
@@ -288,6 +292,17 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
             if (tick && !touches_fuel) { life -= 1u; }
             t = max(t, celsius(900));
         }
+    } else if (m == EXHAUST) {
+        // A jet's exhaust: counts down its life, then cools to smoke.
+        maybe = true;
+        let dir = life & 3u;
+        let left = life >> 2u;
+        if (left == 0u) {
+            next = SMOKE;
+            life = 30u + (r & 31u);
+        } else if (r2 % 16u == 0u) {
+            life = dir | ((left - 1u) << 2u);
+        }
     } else if (m == SMOKE) {
         maybe = true;
         if (life == 0u) { next = AIR; } else if (tick) { life -= 1u; }
@@ -295,6 +310,8 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     if (next != m && next != FIRE && next != SMOKE && !(m == WATER && next == STEAM)) {
         life = 0u;
     }
+    // Nozzles and freezers are fixed-temperature reservoirs (see JET_T, FREEZER_T).
+    if (m == JET) { t = JET_T; } else if (m == FREEZER) { t = FREEZER_T; }
     let new_cell = pack(next, life, t);
     return HeatOut(new_cell, maybe || new_cell != me);
 }

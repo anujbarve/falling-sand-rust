@@ -43,7 +43,7 @@ fn spread_chance(left: u32, right: u32) -> u32 {
     let ml = material(left);
     let mr = material(right);
     // A flame is anchored: it does not mix sideways into air and die out.
-    if (ml != mr && ml != FIRE && mr != FIRE && is_fluid(kind(ml)) && is_fluid(kind(mr)) && speed(left) == 0u && speed(right) == 0u) {
+    if (ml != mr && !anchored(ml) && !anchored(mr) && is_fluid(kind(ml)) && is_fluid(kind(mr)) && speed(left) == 0u && speed(right) == 0u) {
         return min(flow(ml), flow(mr));
     }
     return 0u;
@@ -52,7 +52,8 @@ fn spread_chance(left: u32, right: u32) -> u32 {
 // Could the block change for SOME random number? Copy of `block_can_move`:
 // this decides whether the owner chunk counts as active.
 fn block_can_move(c: array<u32, 4>) -> bool {
-    return pair_chance(c[0], c[2]) > 0u || pair_chance(c[1], c[3]) > 0u
+    return directed_can_act(c)
+        || pair_chance(c[0], c[2]) > 0u || pair_chance(c[1], c[3]) > 0u
         || can_slide(c[0], c[2], c[3]) || can_slide(c[1], c[3], c[2])
         || can_steam_vent(c[2], c[0], c[3]) || can_steam_vent(c[3], c[1], c[2])
         || spread_chance(c[0], c[1]) > 0u || spread_chance(c[2], c[3]) > 0u;
@@ -66,6 +67,9 @@ fn may_move(c: array<u32, 4>) -> bool {
     let m = material(c[0]);
     if (material(c[1]) != m || material(c[2]) != m || material(c[3]) != m) {
         return true;
+    }
+    if (m == JET || m == EXHAUST) {
+        return true; // a nozzle or its exhaust acts every step
     }
     let k = kind(m);
     if (k == SOLID || k == POWDER || m == FIRE) {
@@ -83,9 +87,51 @@ fn displace(cells: ptr<function, array<u32, 4>>, mover: u32, pushed: u32) {
     (*cells)[mover] = p;
 }
 
+// Direction codes (aux bits 0-1): 0 up, 1 right, 2 down, 3 left. Copy of dir_step.
+fn dir_dx(d: u32) -> i32 { return select(select(0i, 1i, d == 1u), -1i, d == 3u); }
+fn dir_dy(d: u32) -> i32 { return select(select(0i, -1i, d == 0u), 1i, d == 2u); }
+
+// The cell in the same block as c in direction d, or 4 if it is outside. Copy of block_partner.
+fn block_partner(c: u32, d: u32) -> u32 {
+    let nx = i32(c % 2u) + dir_dx(d);
+    let ny = i32(c / 2u) + dir_dy(d);
+    if (nx < 0i || nx > 1i || ny < 0i || ny > 1i) { return 4u; }
+    return u32(ny * 2i + nx);
+}
+
+// Copy of directed_can_act.
+fn directed_can_act(c: array<u32, 4>) -> bool {
+    for (var i = 0u; i < 4u; i += 1u) {
+        let m = material(c[i]);
+        if (m == JET || m == EXHAUST) {
+            let p = block_partner(i, aux(c[i]) & 3u);
+            if (p < 4u && material(c[p]) == AIR) { return true; }
+        }
+    }
+    return false;
+}
+
 fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
     let r2 = pcg(r);
     var fell = array<bool, 2>(false, false);
+
+    // 0. Nozzles and exhaust (copy of the first step of move_block in motion.rs).
+    var done = array<bool, 4>(false, false, false, false);
+    for (var c = 0u; c < 4u; c += 1u) {
+        let m = material((*cells)[c]);
+        if ((m == JET || m == EXHAUST) && !done[c]) {
+            let d = aux((*cells)[c]) & 3u;
+            let p = block_partner(c, d);
+            if (p < 4u && material((*cells)[p]) == AIR) {
+                if (m == JET) {
+                    (*cells)[p] = pack(EXHAUST, d | (EXHAUST_LIFE_MAX << 2u), EXHAUST_T);
+                } else {
+                    let tmp = (*cells)[c]; (*cells)[c] = (*cells)[p]; (*cells)[p] = tmp;
+                }
+                done[p] = true;
+            }
+        }
+    }
 
     for (var col = 0u; col < 2u; col += 1u) {
         let top = col;

@@ -66,7 +66,8 @@ float temp_of(vec4 c) {
 }
 bool is_mat(float m, float k) { return abs(m - k) < 0.5; }
 // AIR 0 STONE 1 SAND 2 WATER 3 OIL 4 LAVA 5 STEAM 6 WOOD 7 FIRE 8 ICE 9 SMOKE 10
-bool is_gas(float m) { return is_mat(m, 0.0) || is_mat(m, 6.0) || is_mat(m, 8.0) || is_mat(m, 10.0); }
+// METAL 11 COAL 12 JET 13 FREEZER 14 EXHAUST 15
+bool is_gas(float m) { return is_mat(m, 0.0) || is_mat(m, 6.0) || is_mat(m, 8.0) || is_mat(m, 10.0) || is_mat(m, 15.0); }
 bool is_liquid(float m) { return is_mat(m, 3.0) || is_mat(m, 4.0) || is_mat(m, 5.0); }
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -91,6 +92,7 @@ vec3 emission(vec4 c, float incandescence) {
     float t = temp_of(c);
     if (is_mat(m, 5.0)) { return lava_color(t) * 1.1; }
     if (is_mat(m, 8.0)) { return fire_color(aux_of(c)) * 1.3; }
+    if (is_mat(m, 15.0)) { return lava_color(t) * 0.8; } // hot exhaust glows
     if (!is_gas(m) && t > 500.0) { return heat_tint(t) * clamp((t - 500.0) / 700.0, 0.0, 1.0) * incandescence; }
     if (is_mat(m, 0.0) && t > 150.0) { return vec3(0.9, 0.3, 0.1) * clamp((t - 150.0) / 1500.0, 0.0, 0.25); }
     return vec3(0.0);
@@ -171,6 +173,15 @@ void main() {
     else if (is_mat(m, 7.0)) { col = vec3(0.42, 0.26, 0.13) * (1.0 + n * 0.2 + 0.08 * sin(cp.y * 0.9)); }
     else if (is_mat(m, 8.0)) { col = fire_color(a) * (1.0 + 0.15 * sin(Time * 30.0 + cp.x * 1.7 + cp.y)); }
     else if (is_mat(m, 9.0)) { col = vec3(0.72, 0.86, 0.98) * (1.0 + n * 0.08); }
+    else if (is_mat(m, 11.0)) { col = vec3(0.58, 0.6, 0.64) * (1.0 + n * 0.1); } // metal
+    else if (is_mat(m, 12.0)) { col = vec3(0.1, 0.1, 0.11) * (1.0 + n * 0.2); } // coal
+    else if (is_mat(m, 13.0)) { col = vec3(0.24, 0.23, 0.24) * (1.0 + n * 0.08); } // nozzle body
+    else if (is_mat(m, 14.0)) { col = vec3(0.55, 0.8, 0.95) * (1.0 + n * 0.05); } // freezer wall
+    else if (is_mat(m, 15.0)) {
+        // Exhaust: flame gas, orange to pale yellow as it is hotter.
+        col = mix(vec3(0.95, 0.35, 0.08), vec3(1.0, 0.85, 0.45), clamp((t - 500.0) / 600.0, 0.0, 1.0));
+        col *= 1.0 + 0.15 * sin(Time * 40.0 + cp.x * 2.3 + cp.y * 1.1);
+    }
     else { col = mix(sky, vec3(0.22, 0.22, 0.24), 0.55 + n * 0.2); } // smoke
 
     bool solidish = !is_gas(m);
@@ -265,6 +276,12 @@ fn material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str])
     .unwrap_or_else(|e| panic!("shader failed to compile: {e:?}"))
 }
 
+fn grid_texture(grid: (usize, usize)) -> Texture2D {
+    let cells = Texture2D::from_rgba8(grid.0 as u16, grid.1 as u16, &vec![0; grid.0 * grid.1 * 4]);
+    cells.set_filter(FilterMode::Nearest);
+    cells
+}
+
 fn glow_targets(grid: (usize, usize), divisor: u32) -> [RenderTarget; 2] {
     let (w, h) = ((grid.0 as u32).div_ceil(divisor).max(1), (grid.1 as u32).div_ceil(divisor).max(1));
     let make = || {
@@ -304,9 +321,19 @@ impl Renderer {
             ],
             &["Glow"],
         );
-        let cells = Texture2D::from_rgba8(grid.0 as u16, grid.1 as u16, &vec![0; grid.0 * grid.1 * 4]);
-        cells.set_filter(FilterMode::Nearest);
-        Renderer { grid, bloom_divisor: g.bloom_divisor, cells, emit, blur, scene, glow: glow_targets(grid, g.bloom_divisor) }
+        let mut r = Renderer { grid, bloom_divisor: g.bloom_divisor, cells: grid_texture(grid), emit, blur, scene, glow: glow_targets(grid, g.bloom_divisor) };
+        r.grid = grid;
+        r
+    }
+
+    /// Change the grid size. Only the textures are rebuilt: the materials
+    /// (shader programs) live as long as the viewer. Deleting and recreating
+    /// them mid-run made macroquad panic on the next draw.
+    pub fn set_grid(&mut self, grid: (usize, usize), g: &Graphics) {
+        self.grid = grid;
+        self.bloom_divisor = g.bloom_divisor;
+        self.cells = grid_texture(grid);
+        self.glow = glow_targets(grid, g.bloom_divisor);
     }
 
     /// Upload a new frame of cells. `bytemuck` reinterprets the u32s as

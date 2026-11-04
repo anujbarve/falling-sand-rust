@@ -118,3 +118,89 @@ pub fn pan_gains(pan: f32) -> (f32, f32) {
     let a = (pan.clamp(-1.0, 1.0) + 1.0) * 0.25 * PI;
     (a.cos(), a.sin())
 }
+
+/// A small, dark stereo room (Freeverb-style: 4 damped combs + 2 all-passes
+/// per side). A little of it glues the close sounds together, the way a
+/// real quiet room does. Buffers are allocated once in `new`.
+pub struct Reverb {
+    combs: [[Comb; 4]; 2],
+    allpasses: [[Allpass; 2]; 2],
+}
+
+struct Comb {
+    buf: Vec<f32>,
+    i: usize,
+    store: f32,
+}
+
+struct Allpass {
+    buf: Vec<f32>,
+    i: usize,
+}
+
+impl Comb {
+    fn process(&mut self, x: f32, feedback: f32, damp: f32) -> f32 {
+        let y = self.buf[self.i];
+        self.store = y * (1.0 - damp) + self.store * damp;
+        self.buf[self.i] = x + self.store * feedback;
+        self.i = (self.i + 1) % self.buf.len();
+        y
+    }
+}
+
+impl Allpass {
+    fn process(&mut self, x: f32) -> f32 {
+        let b = self.buf[self.i];
+        self.buf[self.i] = x + b * 0.5;
+        self.i = (self.i + 1) % self.buf.len();
+        b - x
+    }
+}
+
+impl Reverb {
+    pub fn new(sample_rate: f32) -> Reverb {
+        // Freeverb's tunings (at 44.1 kHz), scaled to a smaller room.
+        let scale = sample_rate / 44_100.0 * 0.55;
+        let len = |n: usize, side: usize| ((n + side * 23) as f32 * scale).max(1.0) as usize;
+        let comb = |n, side| Comb { buf: vec![0.0; len(n, side)], i: 0, store: 0.0 };
+        let ap = |n, side| Allpass { buf: vec![0.0; len(n, side)], i: 0 };
+        let side = |s| ([comb(1116, s), comb(1188, s), comb(1277, s), comb(1356, s)], [ap(556, s), ap(441, s)]);
+        let (l, r) = (side(0), side(1));
+        Reverb { combs: [l.0, r.0], allpasses: [l.1, r.1] }
+    }
+
+    /// Wet signal only, for a mono-summed input.
+    pub fn process(&mut self, x: f32) -> (f32, f32) {
+        let mut out = [0.0f32; 2];
+        for s in 0..2 {
+            let mut y = 0.0;
+            for c in self.combs[s].iter_mut() {
+                y += c.process(x * 0.25, 0.72, 0.45);
+            }
+            for a in self.allpasses[s].iter_mut() {
+                y = a.process(y);
+            }
+            out[s] = y;
+        }
+        (out[0], out[1])
+    }
+}
+
+/// Slow random drift in [-1, 1]: a new random target now and then, glided
+/// to. Sounds organic where a sine LFO sounds mechanical.
+#[derive(Clone, Copy, Default)]
+pub struct Wander {
+    target: f32,
+    value: f32,
+}
+
+impl Wander {
+    /// Advance by one block. `rate` = new targets per second, `glide` = s.
+    pub fn step(&mut self, rng: &mut Rng, rate: f32, glide: f32, block_s: f32) -> f32 {
+        if rng.f() < rate * block_s {
+            self.target = rng.bi();
+        }
+        self.value += (self.target - self.value) * smooth_coef(glide, block_s);
+        self.value
+    }
+}

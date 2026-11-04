@@ -638,3 +638,159 @@ use cpu::CpuSim;
             "steam trapped under obstacle must expand, divert diagonally, and vent past the ceiling gap into upper space"
         );
     }
+
+// ---------------------------------------------------------------------------
+// Jets, exhaust, freezers, metal and coal.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod new_materials {
+    use super::*;
+
+    fn set(w: &mut World, x: usize, y: usize, m: u32, a: u32, t: i32) {
+        let i = y * w.width + x;
+        w.cells[i] = pack(m, a, t);
+    }
+
+    fn cells_of(w: &World, m: u32) -> Vec<(usize, usize, u32)> {
+        (0..w.cells.len())
+            .filter(|&i| material(w.cells[i]) == m)
+            .map(|i| (i % w.width, i / w.width, w.cells[i]))
+            .collect()
+    }
+
+    #[test]
+    fn jet_exhaust_only_goes_where_the_nozzle_points() {
+        for d in 0..4u32 {
+            // Big enough that the stream does not reach the walls in 150 steps.
+            let mut w = World::new(121, 121);
+            set(&mut w, 60, 60, JET, d, JET_T);
+            run(&mut w, 150);
+            let (dx, dy) = dir_step(d);
+            let ex = cells_of(&w, EXHAUST);
+            assert!(ex.len() > 40, "direction {d}: exhaust should stream out, got {}", ex.len());
+            for &(x, y, _) in &ex {
+                let forward = (x as i32 - 60) * dx + (y as i32 - 60) * dy;
+                assert!(forward > 0, "direction {d}: exhaust at ({x},{y}) is not ahead of the nozzle");
+            }
+            // The nozzle itself never moves or changes its direction.
+            assert_eq!(material(w.cells[60 * 121 + 60]), JET);
+            assert_eq!(aux(w.cells[60 * 121 + 60]) & 3, d);
+        }
+    }
+
+    #[test]
+    fn jet_runs_forever_and_exhaust_dies_when_it_stops() {
+        let mut w = World::new(41, 41);
+        set(&mut w, 20, 20, JET, 1, JET_T);
+        run(&mut w, 1200 * 10);
+        assert!(!cells_of(&w, EXHAUST).is_empty(), "a jet keeps exhausting for as long as it runs");
+        // Stop the jet: the exhaust counts down its life and cools to smoke.
+        set(&mut w, 20, 20, AIR, 0, AMBIENT);
+        run(&mut w, 1200 * 6);
+        assert!(cells_of(&w, EXHAUST).is_empty(), "exhaust is gone once its life runs out");
+    }
+
+    #[test]
+    fn freezer_and_jet_hold_their_temperature() {
+        let mut w = World::new(40, 40);
+        w.fill(4, 4, 8, 8, FREEZER);
+        for y in 4..=8 {
+            for x in 4..=8 {
+                set(&mut w, x, y, FREEZER, 0, FREEZER_T);
+            }
+        }
+        // Hot lava right next to the freezer and a jet: they must not drift.
+        w.fill(9, 4, 14, 8, LAVA);
+        set(&mut w, 20, 20, JET, 0, JET_T);
+        run(&mut w, 2000);
+        let fz = w.cells[6 * 40 + 6];
+        assert_eq!(material(fz), FREEZER);
+        assert_eq!(temp(fz), FREEZER_T, "a freezer is a fixed cold source");
+        assert_eq!(temp(w.cells[20 * 40 + 20]), JET_T, "a jet nozzle is a fixed hot source");
+    }
+
+    #[test]
+    fn metal_carries_heat_much_faster_than_stone() {
+        // Pure conduction: a solid block with no air around it. Steel's
+        // diffusivity is about ten times stone's, so after 20 s heat has
+        // reached 3 cells (1.5 cm) in steel and barely 1 cell in stone.
+        let mut at = |m: u32| {
+            let mut w = World::new(16, 16);
+            for c in w.cells.iter_mut() {
+                *c = pack(m, 0, AMBIENT);
+            }
+            for y in 0..16 {
+                w.cells[y * 16] = pack(m, 0, celsius(900));
+            }
+            run(&mut w, 24_000);
+            temp(w.cells[8 * 16 + 3]) as f64 / T_SCALE as f64
+        };
+        let (metal, stone) = (at(METAL), at(STONE));
+        assert!(metal > stone + 10.0, "metal 1.5 cm along: {metal:.1}°C, stone: {stone:.1}°C");
+    }
+
+    #[test]
+    fn freezer_freezes_a_sealed_water_pool() {
+        // A pool on a freezer plate, walled in so it cannot slide away. A
+        // cold plate in water is slow (about a minute to the first ice).
+        let mut w = World::new(30, 30);
+        w.fill(0, 0, 1, 30, STONE);
+        w.fill(29, 0, 30, 30, STONE);
+        w.fill(0, 29, 30, 30, STONE);
+        w.fill(1, 24, 29, 29, FREEZER);
+        w.fill(1, 16, 29, 24, WATER);
+        let mut sim = CpuSim::new(&w);
+        for _ in 0..90 * STEPS_PER_SECOND {
+            sim.step(&mut w);
+        }
+        assert!(w.count(ICE) > 0, "a freezer plate freezes the water on it within 90 s");
+        assert_eq!(temp(w.cells[24 * 30 + 5]), FREEZER_T, "the plate stays at -30°C");
+    }
+
+    #[test]
+    fn coal_lights_next_to_fire_and_burns() {
+        let mut w = World::new(20, 20);
+        set(&mut w, 10, 10, COAL, 0, celsius(360));
+        set(&mut w, 11, 10, FIRE, 40, celsius(900));
+        run(&mut w, 200);
+        assert_eq!(material(w.cells[10 * 20 + 10]), FIRE, "hot coal next to fire catches");
+    }
+
+    #[test]
+    fn gpu_matches_cpu_with_jets_freezers_metal_and_coal() {
+        let mut cpu_world = World::new(96, 64);
+        for (d, (x, y)) in [(0u32, (20usize, 40usize)), (1, (40, 30)), (2, (60, 20)), (3, (76, 44))] {
+            set(&mut cpu_world, x, y, JET, d, JET_T);
+        }
+        for y in 50..56 {
+            for x in 4..16 {
+                set(&mut cpu_world, x, y, FREEZER, 0, FREEZER_T);
+            }
+        }
+        cpu_world.fill(20, 56, 60, 60, METAL);
+        for x in 22..30 {
+            set(&mut cpu_world, x, 50, COAL, 0, celsius(400));
+        }
+        set(&mut cpu_world, 31, 50, FIRE, 60, celsius(900));
+        cpu_world.fill(0, 8, 95, 10, WATER);
+        cpu_world.fill(6, 44, 14, 50, WATER); // resting on the freezer plate
+        cpu_world.fill(48, 14, 52, 20, LAVA);
+        let mut gpu_world = cpu_world.clone();
+        let mut gpu = match gpu::GpuSim::new(&gpu_world) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU adapter, skipping: {e}");
+                return;
+            }
+        };
+        run(&mut cpu_world, 600);
+        gpu.step(600);
+        gpu.download(&mut gpu_world);
+        let diff = (0..cpu_world.cells.len()).filter(|&i| cpu_world.cells[i] != gpu_world.cells[i]).count();
+        assert_eq!(diff, 0, "{diff} cells differ between CPU and GPU");
+        assert!(!cells_of(&cpu_world, EXHAUST).is_empty(), "the scene really ran jets");
+    }
+}
+
+

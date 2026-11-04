@@ -55,6 +55,15 @@ const WOOD: u32 = 7u;
 const FIRE: u32 = 8u;
 const ICE: u32 = 9u;
 const SMOKE: u32 = 10u;
+const METAL: u32 = 11u;
+const COAL: u32 = 12u;
+const JET: u32 = 13u;
+const FREEZER: u32 = 14u;
+const EXHAUST: u32 = 15u;
+const JET_T: i32 = 179200;      // 700°C
+const FREEZER_T: i32 = -7680;   // -30°C
+const EXHAUST_T: i32 = 281600;  // 1100°C
+const EXHAUST_LIFE_MAX: u32 = 63u;
 
 const GAS: u32 = 0u;
 const LIQUID: u32 = 1u;
@@ -80,40 +89,45 @@ const CELL_SALT: u32 = 0xA511E9B3u;
 //
 // KIND: 2 bits per material.
 const KIND_BITS: u32 = (GAS << 0u) | (SOLID << 2u) | (POWDER << 4u) | (LIQUID << 6u) | (LIQUID << 8u)
-    | (LIQUID << 10u) | (GAS << 12u) | (SOLID << 14u) | (GAS << 16u) | (SOLID << 18u) | (GAS << 20u);
+    | (LIQUID << 10u) | (GAS << 12u) | (SOLID << 14u) | (GAS << 16u) | (SOLID << 18u) | (GAS << 20u)
+    | (SOLID << 22u) | (SOLID << 24u) | (SOLID << 26u) | (SOLID << 28u) | (GAS << 30u);
 fn kind(m: u32) -> u32 { return (KIND_BITS >> (2u * m)) & 3u; }
 
 // Byte tables: 4 materials per u32 (lowest byte first): materials 0-3 in
-// x, 4-7 in y, 8-10 in z.
-fn table_byte(t: vec3<u32>, m: u32) -> u32 {
-    let word = select(select(t.x, t.y, m >= 4u), t.z, m >= 8u);
+// x, 4-7 in y, 8-11 in z, 12-15 in w.
+fn table_byte(t: vec4<u32>, m: u32) -> u32 {
+    let word = select(select(select(t.x, t.y, m >= 4u), t.z, m >= 8u), t.w, m >= 12u);
     return (word >> ((m & 3u) * 8u)) & 0xFFu;
 }
 // FLOW of air is 256 in mod.rs, stored here as 255. That gives identical
 // results: flow() is only compared against a roll for powders and liquids,
 // and in spread_chance() as the min of two DIFFERENT materials, so at most
 // one of them is air and the min is at most 42.
-const FLOW_T = vec3<u32>(
+const FLOW_T = vec4<u32>(
     255u | (0u << 8u) | (21u << 16u) | (42u << 24u), // air stone sand water
     17u | (2u << 8u) | (42u << 16u) | (0u << 24u),    // oil lava steam wood
-    21u | (0u << 8u) | (12u << 16u),                  // fire ice smoke
+    21u | (0u << 8u) | (12u << 16u) | (0u << 24u),    // fire ice smoke metal
+    0u | (0u << 8u) | (0u << 16u) | (21u << 24u),     // coal jet freezer exhaust
 );
-const VT_LIQUID_T = vec3<u32>(
+const VT_LIQUID_T = vec4<u32>(
     0u | (4u << 8u) | (4u << 16u) | (4u << 24u),
     4u | (12u << 8u) | (10u << 16u) | (4u << 24u),
-    0u | (4u << 8u) | (0u << 16u),
+    0u | (4u << 8u) | (0u << 16u) | (4u << 24u),
+    4u | (0u << 8u) | (0u << 16u) | (0u << 24u),
 );
-const VT_GAS_T = vec3<u32>(
+const VT_GAS_T = vec4<u32>(
     0u | (255u << 8u) | (255u << 16u) | (255u << 24u),
     255u | (255u << 8u) | (85u << 16u) | (255u << 24u),
-    0u | (255u << 8u) | (0u << 16u),
+    0u | (255u << 8u) | (0u << 16u) | (255u << 24u),
+    255u | (0u << 8u) | (0u << 16u) | (0u << 24u),
 );
 // Top speed of anything moving through this medium (VT_MEDIUM in mod.rs):
 // 255 for air, water, oil, steam, fire, smoke; 0 for lava and solids.
-const VT_MEDIUM_T = vec3<u32>(
+const VT_MEDIUM_T = vec4<u32>(
     255u | (0u << 8u) | (0u << 16u) | (255u << 24u),
     255u | (0u << 8u) | (255u << 16u) | (0u << 24u),
-    255u | (0u << 8u) | (255u << 16u),
+    255u | (0u << 8u) | (255u << 16u) | (0u << 24u),
+    0u | (0u << 8u) | (0u << 16u) | (255u << 24u),
 );
 fn vt_medium(m: u32) -> u32 { return table_byte(VT_MEDIUM_T, m); }
 fn flow(m: u32) -> u32 { return table_byte(FLOW_T, m); }
@@ -132,6 +146,12 @@ fn base_density(m: u32) -> i32 {
         case 7u: { return 6000; }
         case 8u: { return 3; }
         case 9u: { return 9170; }
+        case 10u: { return 12; }
+        case 11u: { return 78000; }
+        case 12u: { return 13500; }
+        case 13u: { return 26000; }
+        case 14u: { return 26000; }
+        case 15u: { return 3; }
         default: { return 12; }
     }
 }
@@ -148,6 +168,11 @@ fn cond(m: u32) -> i32 {
         case 7u: { return 150; }
         case 8u: { return 80; }
         case 9u: { return 2200; }
+        case 11u: { return 50000; }
+        case 12u: { return 250; }
+        case 13u: { return 50000; }
+        case 14u: { return 2000; }
+        case 15u: { return 80; }
         default: { return 26; }
     }
 }
@@ -164,6 +189,11 @@ fn cap(m: u32) -> i32 {
         case 7u: { return 102000; }
         case 8u: { return 35; }
         case 9u: { return 190000; }
+        case 11u: { return 380000; }
+        case 12u: { return 130000; }
+        case 13u: { return 380000; }
+        case 14u: { return 190000; }
+        case 15u: { return 35; }
         default: { return 120; }
     }
 }
@@ -202,8 +232,13 @@ fn pack(m: u32, a: u32, t: i32) -> u32 {
     return m | (a << 4u) | (bitcast<u32>(clamp(t, T_MIN, T_MAX)) << 12u);
 }
 fn has_speed(m: u32) -> bool {
-    return m == SAND || m == WATER || m == OIL || m == LAVA || m == STEAM || m == STONE || m == WOOD || m == ICE;
+    return m == SAND || m == WATER || m == OIL || m == LAVA || m == STEAM || m == STONE || m == WOOD || m == ICE
+        || m == METAL || m == COAL;
 }
+// Anchored cells never move by gravity or spread (see anchored() in materials.rs).
+fn anchored(m: u32) -> bool { return m == FIRE || m == EXHAUST || m == JET || m == FREEZER; }
+// Burning gas: a flame or a jet's exhaust (see flame() in thermal.rs).
+fn flame(m: u32) -> bool { return m == FIRE || m == EXHAUST; }
 fn sinker(m: u32) -> bool { return base_density(m) > 12; }
 fn speed(cell: u32) -> u32 { return select(0u, aux(cell), has_speed(material(cell))); }
 fn with_aux(cell: u32, a: u32) -> u32 { return (cell & ~(0xFFu << 4u)) | (a << 4u); }

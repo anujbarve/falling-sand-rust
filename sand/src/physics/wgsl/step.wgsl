@@ -77,14 +77,14 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
         // Fast path: block and neighbours all one identical value v. Then
         // all 4 heat results are identical and no random number can matter:
         // no temperature gaps, nothing free to fall, and we exclude what
-        // uses its per-cell random number anyway (ignition of wood and oil,
-        // fire and smoke, a gas away from 20°C). 4 identical cells never move.
+        // uses its per-cell random number anyway (ignition of wood, oil and coal,
+        // fire, smoke and exhaust, a gas away from 20°C). 4 identical cells never move.
         let v = c00;
         let m = material(v);
         let same = a0 == v && a1 == v && l0 == v && c01 == v && r0 == v && l1 == v
             && c10 == v && c11 == v && r1 == v && b0 == v && b1 == v;
         // Boiling water (field above 100°C) uses its random number to bubble.
-        let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT)
+        let fixed = m != WOOD && m != OIL && m != COAL && m != FIRE && m != SMOKE && m != EXHAUST && (kind(m) != GAS || temp(v) == AMBIENT)
             && !(m == WATER && temp(v) > celsius(100));
         if (same && fixed) {
             let nv = heat(v, v, v, v, v, ux, uy, w, h, frame).cell;

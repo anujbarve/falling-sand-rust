@@ -47,7 +47,7 @@ pub(crate) fn spread_chance(left: u32, right: u32) -> u32 {
     let (ml, mr) = (material(left), material(right));
     let fluid = |m: u32| KIND[m as usize] == GAS || KIND[m as usize] == LIQUID;
     // A flame is anchored: it does not mix sideways into air and die out.
-    if ml != mr && ml != FIRE && mr != FIRE && fluid(ml) && fluid(mr) && speed(left) == 0 && speed(right) == 0 {
+    if ml != mr && !anchored(ml) && !anchored(mr) && fluid(ml) && fluid(mr) && speed(left) == 0 && speed(right) == 0 {
         FLOW[ml as usize].min(FLOW[mr as usize])
     } else {
         0
@@ -63,12 +63,53 @@ pub(crate) fn displace(cells: &mut [u32; 4], mover: usize, pushed: usize) {
     cells.swap(mover, pushed);
 }
 
+/// Could a nozzle or exhaust in this block act (for some random number, in
+/// fact always)? Such a block is never asleep.
+pub(crate) fn directed_can_act(cells: &[u32; 4]) -> bool {
+    (0..4).any(|c| {
+        let m = material(cells[c]);
+        (m == JET || m == EXHAUST)
+            && block_partner(c, aux(cells[c]) & 3).is_some_and(|p| material(cells[p]) == AIR && p != c)
+    })
+}
+
 /// Move pass for one 2x2 block. `cells` is in the order top-left,
 /// top-right, bottom-left, bottom-right. Speeds and temperatures are packed
 /// into the cells, so they travel with them.
+/// The cell in the same block as `c` (0 top-left, 1 top-right, 2 bottom-left,
+/// 3 bottom-right) that lies in direction `d`, if there is one.
+pub(crate) fn block_partner(c: usize, d: u32) -> Option<usize> {
+    let (dx, dy) = dir_step(d);
+    let (nx, ny) = ((c % 2) as i32 + dx, (c / 2) as i32 + dy);
+    ((0..2).contains(&nx) && (0..2).contains(&ny)).then(|| (ny * 2 + nx) as usize)
+}
+
 pub fn move_block(cells: &mut [u32; 4], r: u32) {
     let r2 = pcg(r);
     let mut fell = [false; 2];
+
+    // 0. Nozzles and exhaust. A jet puts exhaust into air in its direction;
+    //    exhaust moves one cell along its own direction into air. Only pairs
+    //    inside this block can act, so a jet works on every other step (its
+    //    block only covers its neighbour then), which is deterministic.
+    let mut done = [false; 4];
+    for c in 0..4 {
+        let m = material(cells[c]);
+        if (m != JET && m != EXHAUST) || done[c] {
+            continue;
+        }
+        let d = aux(cells[c]) & 3;
+        let Some(p) = block_partner(c, d) else { continue };
+        if material(cells[p]) != AIR {
+            continue;
+        }
+        if m == JET {
+            cells[p] = pack(EXHAUST, d | (EXHAUST_LIFE_MAX << 2), EXHAUST_T);
+        } else {
+            cells.swap(c, p);
+        }
+        done[p] = true;
+    }
 
     // 1. Gravity and buoyancy, in each column, at the body's own speed.
     for col in 0..2 {

@@ -45,11 +45,11 @@ fn window_conf() -> Conf {
 struct Sim {
     world: World, // the CPU copy, refreshed by readbacks; only used to paint and probe
     gpu: GpuSim,
-    renderer: Renderer,
 }
 
 impl Sim {
     fn new(scene_index: usize, settings: &Settings) -> Sim {
+        // (The renderer is not part of this: see `Renderer::set_grid`.)
         let (w, h) = GRIDS[settings.grid];
         let world = scene(scene_index, w, h);
         let mut gpu = GpuSim::new(&world).unwrap_or_else(|e| {
@@ -57,14 +57,11 @@ impl Sim {
             std::process::exit(1);
         });
         gpu.set_sleeping(settings.sleeping);
-        let mut renderer = Renderer::new((w, h), &settings.graphics);
-        renderer.upload(&world.cells);
-        Sim { world, gpu, renderer }
+        Sim { world, gpu }
     }
 
     fn replace_world(&mut self, world: World) {
         self.gpu.upload(&world); // also drops readbacks of the old world in flight
-        self.renderer.upload(&world.cells);
         self.world = world;
     }
 }
@@ -86,13 +83,18 @@ fn env<T: std::str::FromStr>(name: &str) -> Option<T> {
 async fn main() {
     let mut settings = Settings::default();
     settings.heat_view = env::<u8>("SAND_HEAT") == Some(1);
+    settings.grid = env("SAND_GRID").unwrap_or(settings.grid).min(GRIDS.len() - 1);
     let mut scene_index = env("SAND_SCENE").unwrap_or(0usize).min(SCENES.len() - 1);
     let mut sim = Sim::new(scene_index, &settings);
+    let mut renderer = Renderer::new(GRIDS[settings.grid], &settings.graphics);
+    renderer.upload(&sim.world.cells);
     let mut clock = Clock::default();
     let mut menu = Menu::new();
     let mut menu_open = env::<u8>("SAND_MENU") == Some(1);
     let mut brush = SAND;
     let mut brush_size = 6;
+    // Direction of a jet nozzle when painted (0 up, 1 right, 2 down, 3 left).
+    let mut jet_dir = 1u32;
     let mut paused = false;
     // Reused every frame: no allocations in the steady state.
     let mut edits: Vec<(usize, u32)> = Vec::new();
@@ -100,6 +102,10 @@ async fn main() {
     let mut cpu_ms = 0.0f64;
     let screenshot: Option<(String, u32)> = std::env::var("SAND_SCREENSHOT").ok().map(|p| (p, env("SAND_FRAMES").unwrap_or(120)));
     let mut frame = 0u32;
+    let late_grid: Option<(u32, usize)> = std::env::var("SAND_GRID_LATE").ok().and_then(|v| {
+        let (a, b) = v.split_once(':')?;
+        Some((a.parse().ok()?, b.parse().ok()?))
+    });
     // Sound. No device (or SAND_SCREENSHOT runs): the game runs silent.
     let mut audio = if screenshot.is_some() { None } else {
         AudioOut::start().map_err(|e| eprintln!("no sound: {e}")).ok()
@@ -111,6 +117,13 @@ async fn main() {
         let frame_start = std::time::Instant::now();
         frame += 1;
         actions.clear();
+        // Test hook: SAND_GRID_LATE=<frame>:<grid> switches size while running.
+        if let Some((at, g)) = late_grid {
+            if frame == at {
+                settings.grid = g.min(GRIDS.len() - 1);
+                actions.push(Action::SetGrid(settings.grid));
+            }
+        }
 
         // --- keyboard ---
         if is_key_pressed(KeyCode::Escape) {
@@ -141,6 +154,9 @@ async fn main() {
         if is_key_pressed(KeyCode::M) {
             settings.audio = !settings.audio;
         }
+        if is_key_pressed(KeyCode::T) {
+            jet_dir = (jet_dir + 1) % 4; // the next jet you paint faces this way
+        }
         if is_key_pressed(KeyCode::Period) {
             clock.faster();
         }
@@ -167,7 +183,7 @@ async fn main() {
         clear_background(Color::from_rgba(6, 7, 10, 255));
         let grid = GRIDS[settings.grid];
         let dest = world_rect(grid);
-        sim.renderer.draw(dest, &settings.graphics, settings.heat_view, get_time() as f32);
+        renderer.draw(dest, &settings.graphics, settings.heat_view, get_time() as f32);
 
         // --- UI on top; it also decides whether the mouse may paint ---
         ui::toolbar(&mut brush, &mut clock, paused, &mut actions);
@@ -190,18 +206,22 @@ async fn main() {
                         _ => scene_index,
                     };
                     sim.replace_world(scene(scene_index, grid.0, grid.1));
+                    renderer.upload(&sim.world.cells);
                     clock.reset();
                     analyzer.reset();
                 }
                 Action::Clear => {
                     sim.replace_world(World::new(grid.0, grid.1));
+                    renderer.upload(&sim.world.cells);
                     clock.reset();
                     analyzer.reset();
                 }
                 Action::SetGrid(_) => {
-                    // A new grid size needs new GPU buffers and textures:
-                    // build them all fresh; the old ones are freed on drop.
+                    // A new grid size needs new GPU buffers and the grid texture.
+                    // The shader materials are kept (see Renderer::set_grid).
                     sim = Sim::new(scene_index, &settings);
+                    renderer.set_grid(GRIDS[settings.grid], &settings.graphics);
+                    renderer.upload(&sim.world.cells);
                     clock.reset();
                     analyzer.reset();
                 }
@@ -227,7 +247,7 @@ async fn main() {
                 None
             };
             if let Some(m) = m {
-                paint(&sim.world, m, cell, brush_size, &mut edits);
+                paint(&sim.world, m, jet_dir, cell, brush_size, &mut edits);
             }
         }
         if !edits.is_empty() {
@@ -249,7 +269,7 @@ async fn main() {
             sim.gpu.step_and_readback(steps); // returns at once; the GPU works in the background
         }
         if sim.gpu.latest(&mut sim.world) {
-            sim.renderer.upload(&sim.world.cells); // drawn next frame
+            renderer.upload(&sim.world.cells); // drawn next frame
             if let Some(out) = audio.as_mut() {
                 // World time since the last measured frame (for event rates).
                 let dt = (clock.world_seconds - audio_world_seconds).max(0.0) as f32;
@@ -295,7 +315,8 @@ async fn main() {
                 format!("{} fps  |  frame {:.1} ms  |  cpu {:.2} ms", get_fps(), get_frame_time() * 1000.0, cpu_ms),
                 format!("gpu {gpu_ms} ms/step  |  {steps} steps/frame"),
                 format!("world {:.2} s  |  {speed}", clock.world_seconds),
-                format!("grid {}x{}  |  {}  |  brush {}{probe}", grid.0, grid.1, settings::QUALITY_NAMES[settings.quality.index()], brush_size),
+                format!("grid {}x{}  |  {}  |  brush {}{}{probe}", grid.0, grid.1, settings::QUALITY_NAMES[settings.quality.index()], brush_size,
+                    if brush == JET { format!(" (jet facing {}, T turns)", ["up", "right", "down", "left"][jet_dir as usize]) } else { String::new() }),
             ]);
         }
 
@@ -320,9 +341,10 @@ async fn main() {
 }
 
 /// Cells of a round brush, as `(cell index, new cell)` edits in index order.
-fn paint(world: &World, m: u32, (cx, cy): (i32, i32), size: i32, edits: &mut Vec<(usize, u32)>) {
+fn paint(world: &World, m: u32, jet_dir: u32, (cx, cy): (i32, i32), size: i32, edits: &mut Vec<(usize, u32)>) {
     let loose = KIND[m as usize] != SOLID;
-    let cell = pack(m, default_aux(m), default_temp(m));
+    let aux = if m == JET { jet_dir } else { default_aux(m) };
+    let cell = pack(m, aux, default_temp(m));
     for dy in -size..=size {
         for dx in -size..=size {
             if dx * dx + dy * dy > size * size {

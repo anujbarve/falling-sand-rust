@@ -52,12 +52,17 @@ pub fn radiation_k(ta: i32, tb: i32) -> i32 {
 /// different materials (inside one continuous body there is no gap to
 /// radiate across). A flame radiates onto a surface at about a third of
 /// that (emissivity ~0.3).
+/// Burning gas: a flame or a jet's exhaust.
+pub(crate) const fn flame(m: u32) -> bool {
+    m == FIRE || m == EXHAUST
+}
+
 pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     let (ka, kb) = (COND[a as usize], COND[b as usize]);
     let series = 2 * ka * kb / (ka + kb);
     let radiation = if a != b && condensed(a) && condensed(b) {
         radiation_k(ta, tb)
-    } else if (a == FIRE && condensed(b)) || (b == FIRE && condensed(a)) {
+    } else if (flame(a) && condensed(b)) || (flame(b) && condensed(a)) {
         radiation_k(ta, tb) / 3
     } else {
         0
@@ -72,7 +77,10 @@ pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     if (a == WATER && hot_surface(b, tb)) || (b == WATER && hot_surface(a, ta)) {
         return BOIL_CONDUCTANCE;
     }
-    if (a == WATER && b == ICE) || (a == ICE && b == WATER) {
+    // Water against ice (a melting interface), or against a freezer plate
+    // (a cold plate with the same contact coefficient, h ~ 1500 W/m²K): the
+    // freezer's wall is 5 mm of insulation, far less than the water layer.
+    if (a == WATER && (b == ICE || b == FREEZER)) || ((a == ICE || a == FREEZER) && b == WATER) {
         return MELT_CONDUCTANCE;
     }
     series + radiation
@@ -123,7 +131,7 @@ pub fn density(cell: u32) -> i32 {
     let (m, t) = (material(cell), sens(cell));
     let d = DENSITY[m as usize];
     let k = KIND[m as usize];
-    if k == GAS && m != FIRE {
+    if k == GAS && !flame(m) {
         // d * 293 K / (t + 273 K), with t in fixed point.
         (d * 293 * T_SCALE / (t + 273 * T_SCALE).max(1)).max(1)
     } else if k == LIQUID {
@@ -141,7 +149,7 @@ pub fn density(cell: u32) -> i32 {
 pub fn sinks(top: u32, bottom: u32) -> bool {
     let mb = material(bottom) as usize;
     // A flame is anchored where it burns: it does not drift off its fuel.
-    if material(top) == FIRE || material(bottom) == FIRE {
+    if anchored(material(top)) || anchored(material(bottom)) {
         return false;
     }
     // A solid can fall into air or liquid (unsupported stone, wood, ice);
@@ -227,9 +235,9 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         touches_water |= mn == WATER;
         touches_air |= mn == AIR;
         touches_lava |= mn == LAVA;
-        touches_fire |= mn == FIRE;
-        touches_fuel |= mn == WOOD || mn == OIL;
-        open_faces += (KIND[mn as usize] == GAS && mn != FIRE) as i32;
+        touches_fire |= flame(mn);
+        touches_fuel |= mn == WOOD || mn == OIL || mn == COAL;
+        open_faces += (KIND[mn as usize] == GAS && !flame(mn)) as i32;
         if tn == t0s {
             return; // no gap, no flow (and no need for a random number)
         }
@@ -257,7 +265,7 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     // A flame touching a solid or liquid heats it with a surface flux of
     // FLAME_Q (150 kW/m^2): dT/dt = q / (rho c dx), in units of 1/256 K per
     // step = 256 q / (CAP*10 * dx * 1200) = FLAME_UNITS / CAP.
-    if touches_fire && condensed(m) && m != FIRE {
+    if touches_fire && condensed(m) && !flame(m) {
         t += FLAME_UNITS / CAP[m as usize];
         maybe = true;
     }
@@ -281,6 +289,9 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     //    edges block.
     let below = (y + 1 < h).then(|| cells[i + w]);
     let above = (y > 0).then(|| cells[i - w]);
+    if m == JET || m == EXHAUST {
+        maybe = true; // a nozzle emits and exhaust moves every step: never asleep
+    }
     if has_speed(m) {
         let roll = (r >> 20) & 255;
         let (free, other) = if sinker(m) {
@@ -349,6 +360,22 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         }
         // Rock melts above eruption temperature, so lava cannot melt it.
         STONE if t >= celsius(1200) => next = LAVA,
+        // Coal: hard to light, then burns for a long time (up to ~13 s).
+        COAL if t >= celsius(350) && (touches_air || touches_lava || touches_fire) => {
+            next = FIRE;
+            life = 200 + (r & 55);
+        }
+        // A jet's exhaust: counts down its life, then cools to smoke.
+        EXHAUST => {
+            maybe = true;
+            let (dir, left) = (life & 3, life >> 2);
+            if left == 0 {
+                next = SMOKE;
+                life = 30 + (r & 31);
+            } else if r2 % 16 == 0 {
+                life = dir | ((left - 1) << 2);
+            }
+        }
         WOOD if t >= celsius(300) && (touches_air || touches_lava || touches_fire) => {
             next = FIRE;
             life = 120 + (r & 127); // 6-13 s of burning
@@ -381,6 +408,13 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
             }
         }
         _ => {}
+    }
+    // Nozzles and freezers are fixed-temperature reservoirs: their field is
+    // pinned, so they are an endless source of heat or cold.
+    if m == JET {
+        t = JET_T;
+    } else if m == FREEZER {
+        t = FREEZER_T;
     }
     // A new material starts at rest (fire, smoke, and steam from water got a life above).
     if next != m && next != FIRE && next != SMOKE && !(m == WATER && next == STEAM) {

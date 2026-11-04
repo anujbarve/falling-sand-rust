@@ -71,7 +71,8 @@ pub fn chunk_dims(w: usize, h: usize) -> (usize, usize) {
 /// possible the later stages see the same cells, so this is exact. When it
 /// is false, `move_block` leaves the block as it is.
 pub fn block_can_move(cells: &[u32; 4]) -> bool {
-    pair_chance(cells[0], cells[2]) > 0
+    directed_can_act(cells)
+        || pair_chance(cells[0], cells[2]) > 0
         || pair_chance(cells[1], cells[3]) > 0
         || can_slide(cells[0], cells[2], cells[3])
         || can_slide(cells[1], cells[3], cells[2])

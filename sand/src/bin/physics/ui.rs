@@ -12,7 +12,7 @@ use macroquad::ui::{hash, root_ui, Skin};
 use crate::settings::{Graphics, Quality, Settings, FPS_CAP_NAMES, GRID_NAMES, QUALITY_NAMES, WINDOW_NAMES};
 use sand::physics::{clock::Clock, *};
 
-pub const BAR_HEIGHT: f32 = 44.0;
+pub const BAR_HEIGHT: f32 = 76.0; // two rows: controls, then brushes
 
 /// Things the UI asks `main` to do.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -30,7 +30,7 @@ pub enum Action {
 }
 
 /// The brushes, in toolbar order, with their key and swatch colour.
-pub const BRUSHES: [(u32, KeyCode, [u8; 3]); 10] = [
+pub const BRUSHES: [(u32, KeyCode, [u8; 3]); 14] = [
     (SAND, KeyCode::Key1, [219, 189, 115]),
     (WATER, KeyCode::Key2, [33, 92, 199]),
     (STONE, KeyCode::Key3, [110, 110, 117]),
@@ -41,6 +41,10 @@ pub const BRUSHES: [(u32, KeyCode, [u8; 3]); 10] = [
     (LAVA, KeyCode::Key8, [240, 90, 20]),
     (ICE, KeyCode::Key9, [184, 219, 250]),
     (STEAM, KeyCode::Key0, [190, 196, 210]),
+    (METAL, KeyCode::Minus, [148, 152, 162]),
+    (COAL, KeyCode::Equal, [30, 30, 34]),
+    (JET, KeyCode::J, [70, 66, 70]),
+    (FREEZER, KeyCode::F, [140, 200, 240]),
 ];
 
 fn rgb(c: [u8; 3]) -> Color {
@@ -72,16 +76,19 @@ pub fn toolbar(brush: &mut u32, clock: &mut Clock, paused: bool, out: &mut Vec<A
     let w = screen_width();
     draw_rectangle(0.0, 0.0, w, BAR_HEIGHT, Color::from_rgba(12, 14, 20, 225));
     draw_line(0.0, BAR_HEIGHT, w, BAR_HEIGHT, 1.0, Color::from_rgba(70, 80, 110, 255));
-    let (y, h) = (6.0, BAR_HEIGHT - 12.0);
+    // Row 2: the brushes, left to right.
+    let (y2, h2) = (42.0, 30.0);
     let mut x = 8.0;
     for (m, _, c) in BRUSHES {
         let label = if m == AIR { "erase" } else { NAMES[m as usize] };
-        let bw = 26.0 + measure_text(label, None, 17, 1.0).width + 10.0;
-        if button(Rect::new(x, y, bw, h), label, *brush == m, Some(rgb(c))) {
+        let bw = 22.0 + measure_text(label, None, 16, 1.0).width + 8.0;
+        if button(Rect::new(x, y2, bw, h2), label, *brush == m, Some(rgb(c))) {
             *brush = m;
         }
         x += bw + 4.0;
     }
+    // Row 1: controls, from the right edge.
+    let (y, h) = (6.0, 30.0);
 
     // Right side, laid out from the right edge.
     let mut rx = w - 8.0;

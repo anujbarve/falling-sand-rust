@@ -24,7 +24,17 @@ pub const WOOD: u32 = 7;
 pub const FIRE: u32 = 8;
 pub const ICE: u32 = 9;
 pub const SMOKE: u32 = 10;
-pub const MATERIAL_COUNT: usize = 11;
+pub const METAL: u32 = 11;
+pub const COAL: u32 = 12;
+/// A fixed nozzle: pinned at JET_T, it emits EXHAUST in its direction.
+pub const JET: u32 = 13;
+/// A fixed cold source: pinned at FREEZER_T.
+pub const FREEZER: u32 = 14;
+/// Hot combustion gas from a JET. A particle with a direction (aux bits 0-1)
+/// and a life (aux bits 2-7): it moves one cell along its direction each step.
+pub const EXHAUST: u32 = 15;
+/// The 4-bit material field is now full (16 materials).
+pub const MATERIAL_COUNT: usize = 16;
 
 // What kind of matter each material is.
 pub const GAS: u32 = 0;
@@ -34,6 +44,7 @@ pub const SOLID: u32 = 3;
 
 pub const NAMES: [&str; MATERIAL_COUNT] = [
     "air", "stone", "sand", "water", "oil", "lava", "steam", "wood", "fire", "ice", "smoke",
+    "metal", "coal", "jet", "freezer", "exhaust",
 ];
 
 // ---------------------------------------------------------------------------
@@ -61,40 +72,42 @@ pub const fn level(meters_per_second: f64) -> u32 {
 pub const G_Q: i32 = (GRAVITY * STEP_SECONDS / MAX_SPEED * 65536.0) as i32;
 
 // Indexed by material id.         air stone sand water oil lava steam wood fire ice smoke
-pub const KIND: [u32; MATERIAL_COUNT] = [GAS, SOLID, POWDER, LIQUID, LIQUID, LIQUID, GAS, SOLID, GAS, SOLID, GAS];
+pub const KIND: [u32; MATERIAL_COUNT] = [GAS, SOLID, POWDER, LIQUID, LIQUID, LIQUID, GAS, SOLID, GAS, SOLID, GAS, SOLID, SOLID, SOLID, SOLID, GAS];
 /// Density in units of 0.1 kg/m^3 (water = 10000). Gases are given at 20°C;
 /// `density()` makes hot gases lighter (ideal gas law).
-pub const DENSITY: [i32; MATERIAL_COUNT] = [12, 26000, 16000, 10000, 9000, 26000, 8, 6000, 3, 9170, 12];
+pub const DENSITY: [i32; MATERIAL_COUNT] = [12, 26000, 16000, 10000, 9000, 26000, 8, 6000, 3, 9170, 12, 78000, 13500, 26000, 26000, 3];
 /// Speed (as a level) at which powders slide down slopes and fluids spread
 /// sideways when resting. sand 0.5 m/s, water 1 m/s, oil 0.4, lava 0.05,
 /// steam 1, fire 0.5, smoke 0.3. Air's 256 means "never the limit".
-pub const FLOW: [u32; MATERIAL_COUNT] = [256, 0, 21, 42, 17, 2, 42, 0, 21, 0, 12];
+pub const FLOW: [u32; MATERIAL_COUNT] = [256, 0, 21, 42, 17, 2, 42, 0, 21, 0, 12, 0, 0, 0, 0, 21];
 /// Top speed (level) when sinking or rising through a liquid: viscous drag.
 /// About 0.1 m/s for sand, water, oil; 0.3 lava; a steam bubble 0.25 m/s.
-pub const VT_LIQUID: [u32; MATERIAL_COUNT] = [0, 4, 4, 4, 4, 12, 10, 4, 0, 4, 0];
+pub const VT_LIQUID: [u32; MATERIAL_COUNT] = [0, 4, 4, 4, 4, 12, 10, 4, 0, 4, 0, 4, 4, 0, 0, 0];
 /// Top speed (level) anything can reach moving THROUGH this medium. Lava is
 /// ~10^5 times more viscous than water: real flow through it is mm/s,
 /// below one speed level (2.3 cm/s), so it is 0 (no convection in lava).
-pub const VT_MEDIUM: [u32; MATERIAL_COUNT] = [255, 0, 0, 255, 255, 0, 255, 0, 255, 0, 255];
+pub const VT_MEDIUM: [u32; MATERIAL_COUNT] = [255, 0, 0, 255, 255, 0, 255, 0, 255, 0, 255, 0, 0, 0, 0, 255];
 /// Top speed (level) through a gas. No air resistance is modelled, so
 /// falling things are only limited by MAX_SPEED; steam is capped at 2 m/s.
-pub const VT_GAS: [u32; MATERIAL_COUNT] = [0, 255, 255, 255, 255, 255, 85, 255, 0, 255, 0];
+pub const VT_GAS: [u32; MATERIAL_COUNT] = [0, 255, 255, 255, 255, 255, 85, 255, 0, 255, 0, 255, 255, 0, 0, 0];
 /// Rising speed (level) of gases that do not store a speed (fire, smoke,
 /// hot air), at a full density gap: 1 m/s.
 pub const GAS_RISE: i32 = 42;
 /// Heat, part 1: thermal conductivity in mW/(m K). How easily heat crosses
 /// a boundary. Air 0.026 W/(m K), granite 2.5, dry sand 0.3, water 0.6,
 /// oil 0.15, lava 1.5, steam 0.025, wood 0.15, flame gas 0.08, ice 2.2.
-pub const COND: [i32; MATERIAL_COUNT] = [26, 2500, 300, 600, 150, 1500, 25, 150, 80, 2200, 26];
+// Steel 50 W/(m K); coal 0.25; the nozzle is a steel-like metal body; the
+// freezer a cold insulated box wall (about ice); exhaust as flame gas.
+pub const COND: [i32; MATERIAL_COUNT] = [26, 2500, 300, 600, 150, 1500, 25, 150, 80, 2200, 26, 50000, 250, 50000, 2000, 80];
 /// Heat, part 2: volumetric heat capacity rho*c in units of 10 J/(m^3 K).
 /// How much heat it takes to warm a cell by 1 K: air 1.2 kJ/(m^3 K),
 /// granite 2100, sand 1300, water 4180, oil 1700, lava 3000, wood 1020,
 /// flame gas 0.35, ice 1900. Air holds ~3500x less heat than water, so air
 /// next to something hot warms up in a fraction of a second.
-pub const CAP: [i32; MATERIAL_COUNT] = [120, 210000, 130000, 418000, 170000, 300000, 120, 102000, 35, 190000, 120];
+pub const CAP: [i32; MATERIAL_COUNT] = [120, 210000, 130000, 418000, 170000, 300000, 120, 102000, 35, 190000, 120, 380000, 130000, 380000, 190000, 35];
 /// Thermal expansion of liquids in ppm per K: hot water is lighter than
 /// cold water, which makes liquids heated from below circulate.
-pub const EXPANSION: [i32; MATERIAL_COUNT] = [0, 0, 0, 300, 700, 100, 0, 0, 0, 0, 0];
+pub const EXPANSION: [i32; MATERIAL_COUNT] = [0, 0, 0, 300, 700, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 /// Turns conductance (mW/(m K)) / CAP into a per-step rate times 2^24:
 /// 2^24 * STEP_SECONDS / CELL^2 / (1000 mW/W * 10 J/unit).
 pub const RATE_SCALE: i32 = 55924;
@@ -115,6 +128,29 @@ pub const fn celsius(c: i32) -> i32 {
     c * T_SCALE
 }
 pub const AMBIENT: i32 = celsius(20);
+/// The fixed temperatures of a jet nozzle and of a freezer, and the
+/// temperature a jet's exhaust starts at.
+pub const JET_T: i32 = celsius(700);
+pub const FREEZER_T: i32 = celsius(-30);
+pub const EXHAUST_T: i32 = celsius(1100);
+/// Exhaust life: 6 bits of aux, ticks of 16 steps on average.
+pub const EXHAUST_LIFE_MAX: u32 = 63;
+
+/// Anchored cells never move by gravity or spread: flames, nozzles, exhaust
+/// and freezers stay where they are.
+pub const fn anchored(m: u32) -> bool {
+    matches!(m, FIRE | EXHAUST | JET | FREEZER)
+}
+
+/// Direction codes (aux bits 0-1): 0 up, 1 right, 2 down, 3 left.
+pub const fn dir_step(d: u32) -> (i32, i32) {
+    match d & 3 {
+        0 => (0, -1),
+        1 => (1, 0),
+        2 => (0, 1),
+        _ => (-1, 0),
+    }
+}
 
 /// Temperature range that fits in 20 signed bits.
 pub const T_MIN: i32 = -(1 << 19);
@@ -167,7 +203,7 @@ pub fn pack(material: u32, aux: u32, temp: i32) -> u32 {
 /// Materials that store a speed in their aux byte. (Fire and smoke use
 /// aux for their remaining life instead.)
 pub const fn has_speed(m: u32) -> bool {
-    matches!(m, SAND | WATER | OIL | LAVA | STEAM | STONE | WOOD | ICE)
+    matches!(m, SAND | WATER | OIL | LAVA | STEAM | STONE | WOOD | ICE | METAL | COAL)
 }
 /// Heavier than air: falls. Otherwise (steam) it rises.
 pub const fn sinker(m: u32) -> bool {
@@ -192,6 +228,9 @@ pub fn default_temp(m: u32) -> i32 {
         FIRE => celsius(900),
         ICE => celsius(-40),
         STEAM => celsius(120),
+        JET => JET_T,
+        FREEZER => FREEZER_T,
+        EXHAUST => EXHAUST_T,
         _ => AMBIENT,
     }
 }
@@ -201,6 +240,7 @@ pub fn default_aux(m: u32) -> u32 {
     match m {
         FIRE => 80,  // 4.3 s
         SMOKE => 60, // 3.2 s
+        EXHAUST => 0, // direction 0 (up), full life set by the jet
         _ => 0,      // at rest
     }
 }

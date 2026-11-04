@@ -95,6 +95,8 @@ impl Analyzer {
                             || (y + 1 < h && next_to(row + w + x));
                         c[b].fuel_near_fire += fuel as u32;
                     }
+                    // A jet's exhaust burns: it roars with the fire bed.
+                    EXHAUST => c[b].fire += 1,
                     STEAM => c[b].steam += 1,
                     LAVA => {
                         c[b].lava += 1;
@@ -143,13 +145,15 @@ impl Analyzer {
         for b in 0..BANDS {
             let k = &c[b];
             let n = |count: u32| count as f32 * scale;
-            // Caps per band keep the total (8 bands) within what the ear can
-            // separate: a dense pour is a hiss bed plus ~250 ticks/s, not 3000.
-            frame.rates[Kind::Grain as usize][b] = (n(k.grains_landing) * 1.5).min(30.0);
-            frame.rates[Kind::Drip as usize][b] = (n(k.drops_landing) * 1.0).min(12.0);
-            frame.rates[Kind::Bubble as usize][b] = (n(k.boiling) * 0.4).min(18.0);
+            // Streams: moving sand is many grains touching (most of the
+            // sound), landings add a few more; flowing water is many small
+            // bubbles; lava on water fries.
+            frame.rates[Kind::Grain as usize][b] = (n(k.sand_moving) * 0.12 + n(k.grains_landing) * 1.0).min(140.0);
+            frame.rates[Kind::Drip as usize][b] = (n(k.water_moving) * 0.02 + n(k.drops_landing) * 0.4).min(30.0);
+            frame.rates[Kind::Bubble as usize][b] = (n(k.boiling) * 0.3).min(20.0);
             frame.rates[Kind::Crackle as usize][b] = (n(k.fuel_near_fire) * 1.5 + n(k.fire) * 0.12).min(25.0);
             frame.rates[Kind::Plop as usize][b] = (n(k.lava) * 0.002).min(1.5);
+            frame.rates[Kind::Fry as usize][b] = (n(k.quench) * 1.0).min(90.0);
             if !self.first {
                 let ignited = k.fire.saturating_sub(self.prev_fire[b]);
                 let set = self.prev_lava[b].saturating_sub(k.lava);

@@ -7,13 +7,21 @@ use super::*;
 // resolution (the benchmark runs them up to 4K).
 // ---------------------------------------------------------------------------
 
-pub const SCENES: [(&str, &str); 5] = [
+pub const SCENES: [(&str, &str); 6] = [
     ("layers", "sand, water and oil sort themselves by density"),
     ("lava + water", "lava cools to stone, water boils to steam, steam rains back down"),
     ("fire", "fire heats wood until it ignites; a pool of oil goes up too"),
     ("ice", "hot steam and lava melt ice; meltwater refreezes on the cold blocks"),
     ("benchmark", "everything at once; what the benchmark runs"),
+    ("jet engine", "four nozzles blow hot exhaust forever; a freezer ices the water; a jet lights the coal"),
 ];
+
+/// A nozzle at (x, y) facing `dir` (0 up, 1 right, 2 down, 3 left).
+fn jet(g: &mut World, x: i32, y: i32, dir: u32) {
+    if let Some(i) = g.index(x, y) {
+        g.cells[i] = pack(JET, dir, default_temp(JET));
+    }
+}
 
 pub fn scene(index: usize, w: usize, h: usize) -> World {
     let mut g = World::new(w, h);
@@ -57,7 +65,7 @@ pub fn scene(index: usize, w: usize, h: usize) -> World {
             g.fill(fx(0.45), fy(0.2), fx(0.55), fy(0.3), LAVA);
             g.sprinkle(fx(0.7), fy(0.1), fx(0.9), fy(0.3), WATER, 40);
         }
-        _ => {
+        4 => {
             // Busy everywhere, so no part of the grid is idle.
             for i in 0..8 {
                 let y = fy(0.15 + i as f32 * 0.1);
@@ -71,6 +79,20 @@ pub fn scene(index: usize, w: usize, h: usize) -> World {
             g.fill(fx(0.1), fy(0.8), fx(0.2), floor, ICE);
             g.fill(fx(0.8), fy(0.75), fx(0.85), floor, WOOD);
             g.fill(fx(0.82), fy(0.73), fx(0.83), fy(0.74), FIRE);
+        }
+        _ => {
+            // A jet rig: a metal body with a nozzle on each side; a freezer
+            // under falling water; a jet blowing onto a coal pile.
+            let (cx, cy) = (fx(0.5), fy(0.5));
+            g.fill(cx - 6, cy - 4, cx + 6, cy + 4, METAL);
+            jet(&mut g, cx, cy - 5, 0);
+            jet(&mut g, cx + 7, cy, 1);
+            jet(&mut g, cx, cy + 5, 2);
+            jet(&mut g, cx - 7, cy, 3);
+            g.fill(fx(0.12), fy(0.8), fx(0.12) + 8, fy(0.8) + 3, FREEZER);
+            g.fill(fx(0.12), fy(0.55), fx(0.12) + 8, fy(0.7), WATER);
+            g.fill(fx(0.7), floor - 6, fx(0.7) + 10, floor, COAL);
+            jet(&mut g, fx(0.7) + 14, floor - 3, 3);
         }
     }
     g
