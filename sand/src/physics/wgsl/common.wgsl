@@ -188,10 +188,14 @@ fn aux(cell: u32) -> u32 { return (cell >> 4u) & 0xFFu; }
 fn temp(cell: u32) -> i32 { return bitcast<i32>(cell) >> 12u; }
 // Latent heat of vaporisation of water in temperature units (see LATENT in materials.rs).
 const LATENT: i32 = 138496; // 541 * 256
+const LATENT_F: i32 = 20480; // 80 * 256 (latent heat of fusion)
 // Temperature a cell counts as for conduction and density (see sens() in materials.rs).
 fn sens(cell: u32) -> i32 {
     let t = temp(cell);
-    if (material(cell) == WATER && t > celsius(100)) { return celsius(100); }
+    let m = material(cell);
+    if (m == WATER) { return clamp(t, 0, celsius(100)); }
+    if (m == STEAM) { return max(t, celsius(100)); }
+    if (m == ICE) { return min(t, 0); }
     return t;
 }
 fn pack(m: u32, a: u32, t: i32) -> u32 {

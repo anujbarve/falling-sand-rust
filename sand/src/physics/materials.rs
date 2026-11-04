@@ -139,13 +139,28 @@ pub const fn temp(cell: u32) -> i32 {
 /// this in its temperature field above 100°C until it has all turned to steam.
 pub const LATENT_K: i32 = 541;
 pub const LATENT: i32 = LATENT_K * T_SCALE;
+/// Latent heat of fusion of water, 333 kJ/kg / 4.18 kJ/(kg K) = 80 K. Freezing
+/// water holds it as a deficit in its field (down to -80 K, real temperature
+/// 0°C) until it is all frozen; melting ice holds it as a surplus (field 0 to
+/// +80 K, real temperature 0°C) until it is all melted.
+pub const LATENT_F_K: i32 = 80;
+pub const LATENT_F: i32 = LATENT_F_K * T_SCALE;
 
 /// The temperature a cell counts as for conduction and density. Water above
 /// 100°C is still boiling: its field holds the stored latent heat, so it
 /// counts as 100°C here.
 pub fn sens(cell: u32) -> i32 {
     let t = temp(cell);
-    if material(cell) == WATER && t > celsius(100) { celsius(100) } else { t }
+    match material(cell) {
+        // Water's field holds latent heat beyond its phase-change temperatures.
+        WATER => t.clamp(0, celsius(100)),
+        // A steam parcel below 100°C in its field is wet (partly condensed): it
+        // stays at 100°C until it has given its latent heat back.
+        STEAM => t.max(celsius(100)),
+        // Melting ice (field above 0°C) is still at 0°C.
+        ICE => t.min(0),
+        _ => t,
+    }
 }
 pub fn pack(material: u32, aux: u32, temp: i32) -> u32 {
     material | (aux << 4) | ((temp.clamp(T_MIN, T_MAX) as u32) << 12)

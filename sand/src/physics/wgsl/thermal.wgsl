@@ -31,23 +31,27 @@ fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
         radiation = radiation_k(ta, tb) / 3;
     }
     // Water against a hot surface: boundary layer (see pair_conductance in thermal.rs).
-    let hot_a = (a == LAVA || a == STONE || a == SAND || a == WOOD) && ta >= celsius(300);
-    let hot_b = (b == LAVA || b == STONE || b == SAND || b == WOOD) && tb >= celsius(300);
+    let hot_a = (a == LAVA || a == STONE || a == SAND || a == WOOD) && ta >= celsius(110);
+    let hot_b = (b == LAVA || b == STONE || b == SAND || b == WOOD) && tb >= celsius(110);
     if ((a == WATER && hot_b) || (b == WATER && hot_a)) {
-        let water_t = select(tb, ta, a == WATER);
-        return select(CONVECTIVE_CONDUCTANCE, BOIL_CONDUCTANCE, water_t >= celsius(99));
+        return BOIL_CONDUCTANCE;
+    }
+    if ((a == WATER && b == ICE) || (a == ICE && b == WATER)) {
+        return MELT_CONDUCTANCE;
     }
     return series + radiation;
 }
-const CONVECTIVE_CONDUCTANCE: i32 = 10000;
 const BOIL_CONDUCTANCE: i32 = 250000;
-fn heat_rate(m: u32, conductance: i32) -> i32 {
-    // Same as heat_rate in thermal.rs.
+const STEAM_RELAX_K: i32 = 2950;
+const BOIL_SLOWDOWN: u32 = 64u;
+const MELT_CONDUCTANCE: i32 = 7500;
+fn heat_rate(c: i32, conductance: i32) -> i32 {
+    // Same as heat_rate in thermal.rs (c = the cell's heat capacity).
     var rate: i32;
     if (conductance <= 37000) {
-        rate = conductance * RATE_SCALE / cap(m);
+        rate = conductance * RATE_SCALE / c;
     } else {
-        rate = (conductance / 8) * RATE_SCALE / max(cap(m) / 8, 1);
+        rate = (conductance / 8) * RATE_SCALE / max(c / 8, 1);
     }
     return min(rate, RATE_MAX);
 }
@@ -62,7 +66,7 @@ fn density(cell: u32) -> i32 {
     let d = base_density(m);
     let k = kind(m);
     if (k == GAS && m != FIRE) {
-        return max(d * 293 * T_SCALE / max(temp(cell) + 273 * T_SCALE, 1), 1);
+        return max(d * 293 * T_SCALE / max(sens(cell) + 273 * T_SCALE, 1), 1);
     }
     if (k == LIQUID) {
         let warmer = (sens(cell) - AMBIENT) / T_SCALE;
@@ -120,6 +124,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     var life = aux(me);
     let t0 = temp(me);
     let t0s = sens(me);
+    let my_cap = select(cap(m), cap(WATER), (m == STEAM && t0 < celsius(100)) || (m == ICE && t0 > 0));
     var maybe = false;
 
     var t = t0;
@@ -144,7 +149,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0s) {
             maybe = true;
-            t += flow_24(tn - t0s, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 0u, key));
+            t += flow_24(tn - t0s, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 0u, key));
         }
     }
     if (x > 0u) {
@@ -158,7 +163,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0s) {
             maybe = true;
-            t -= flow_24(t0s - tn, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i - 1u, 0u, key));
+            t -= flow_24(t0s - tn, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i - 1u, 0u, key));
         }
     }
     if (y + 1u < h) {
@@ -172,7 +177,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0s) {
             maybe = true;
-            t += flow_24(tn - t0s, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 1u, key));
+            t += flow_24(tn - t0s, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i, 1u, key));
         }
     }
     if (y > 0u) {
@@ -186,7 +191,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
         if (tn != t0s) {
             maybe = true;
-            t -= flow_24(t0s - tn, heat_rate(m, pair_conductance(m, mn, t0s, tn)), edge_roll(i - w, 1u, key));
+            t -= flow_24(t0s - tn, heat_rate(my_cap, pair_conductance(m, mn, t0s, tn)), edge_roll(i - w, 1u, key));
         }
     }
 
@@ -203,8 +208,11 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         t += flow_24(AMBIENT - t0, sky_rate(m, t0) * open_faces, i32(r2 >> 8u));
     }
     if (kind(m) == GAS && m != FIRE) {
-        t += ((AMBIENT - t0) * RELAX_K + i32(r & 0xFFFFFu)) >> 20u;
-        maybe = maybe || t0 != AMBIENT;
+        var k = RELAX_K;
+        var tg = t0;
+        if (m == STEAM) { k = STEAM_RELAX_K; tg = t0s; }
+        t += ((AMBIENT - tg) * k + i32(r & 0xFFFFFu)) >> 20u;
+        maybe = maybe || tg != AMBIENT || m == STEAM;
     }
 
     let has_below = y + 1u < h;
@@ -237,32 +245,34 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
         }
     }
 
-    var supported = true;
-    if (has_below) {
-        supported = kind(material(down)) >= POWDER;
-    }
     var next = m;
+    let stored = t - celsius(100);
+    let boils_now = m == WATER && stored > 0
+        && pcg(r ^ 0xB011B011u) % (u32(LATENT) * BOIL_SLOWDOWN) < u32(max(stored, 0));
+    if (m == WATER && stored > 0) { maybe = true; }
     if (m == WATER) {
-        if (t >= celsius(100) + LATENT) {
+        if (t >= celsius(100) + LATENT || boils_now) {
             next = STEAM;
             life = vt_gas(STEAM);
             t -= LATENT;
-        } else if (t <= celsius(-2)) {
+        } else if (t < -LATENT_F) {
             next = ICE;
-            t += celsius(10);
+            t += LATENT_F;
         }
     } else if (m == ICE) {
-        if (t >= celsius(1)) {
+        if (t >= LATENT_F) {
             next = WATER;
-            t -= celsius(10);
+            t -= LATENT_F;
         }
     } else if (m == STEAM) {
-        if (t < celsius(50)) {
+        if (t < celsius(100) - LATENT) {
             next = WATER;
             t += LATENT;
         }
     } else if (m == LAVA) {
-        if (t < celsius(1000)) { next = select(SAND, STONE, supported); }
+        // Gravel only if quenched in water and not held up by rock, lava or powder.
+        let held = has_below && (material(down) == LAVA || material(down) == STONE || kind(material(down)) >= POWDER);
+        if (t < celsius(1000)) { next = select(STONE, SAND, touches_water && !held); }
     } else if (m == STONE) {
         if (t >= celsius(1200)) { next = LAVA; }
     } else if (m == WOOD) {

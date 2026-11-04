@@ -253,7 +253,7 @@ async fn main() {
         if settings.show_stats {
             let probe = sim.world.index(cell.0, cell.1).map_or(String::new(), |i| {
                 let c = sim.world.cells[i];
-                format!("  |  {} {:.0}°C", NAMES[material(c) as usize], temp(c) as f32 / T_SCALE as f32)
+                format!("  |  {} {:.0}°C", NAMES[material(c) as usize], sens(c) as f32 / T_SCALE as f32)
             });
             let gpu_ms = sim.gpu.gpu_time_ms().map_or("n/a".into(), |ms| format!("{ms:.3}"));
             let speed = if paused {

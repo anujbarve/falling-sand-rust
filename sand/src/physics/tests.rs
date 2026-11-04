@@ -331,16 +331,64 @@ use cpu::CpuSim;
     }
 
     #[test]
+    fn ice_melts_in_hot_water() {
+        // A 5 mm ice cell in 80°C water: melting interface ~1500 W/m²K, so it
+        // takes ~10-20 s to take up its fusion heat. In 1 s it is still ice.
+        let mut world = World::new(16, 16);
+        world.fill(0, 0, 16, 15, WATER);
+        for c in world.cells.iter_mut() {
+            if material(*c) == WATER {
+                *c = pack(WATER, 0, celsius(80));
+            }
+        }
+        world.set(8, 8, ICE);
+        let mut sim = CpuSim::new(&world);
+        let mut melted_at = None;
+        for step in 1..=40 * STEPS_PER_SECOND {
+            sim.step(&mut world);
+            if melted_at.is_none() && world.count(ICE) == 0 {
+                melted_at = Some(step as f64 / STEPS_PER_SECOND as f64);
+            }
+        }
+        let t = melted_at.expect("the ice should melt within 40 s");
+        assert!(t > 1.0, "melting should take its fusion heat, not be instant (melted at {t:.1} s)");
+    }
+
+    #[test]
+    fn boiling_water_reads_at_most_100c() {
+        // Latent heat sits in boiling water's field; its real temperature is 100°C.
+        let world_cell = pack(WATER, 0, celsius(100) + LATENT / 2);
+        assert_eq!(sens(world_cell), celsius(100));
+        assert_eq!(sens(pack(WATER, 0, -LATENT_F / 2)), 0, "freezing water is at 0°C");
+        assert_eq!(sens(pack(STEAM, 0, celsius(100) - LATENT / 2)), celsius(100), "wet steam is at 100°C");
+        assert_eq!(sens(pack(STEAM, 0, celsius(140))), celsius(140), "superheated steam");
+        assert_eq!(sens(pack(ICE, 0, LATENT_F / 2)), 0, "melting ice is at 0°C");
+    }
+
+    #[test]
     fn lava_at_bottom_keeps_water_boiling_through_hot_crust() {
         let mut world = World::new(120, 90);
         world.fill(0, 20, 120, 89, WATER);
         world.fill(40, 66, 80, 89, LAVA);
         world.fill(48, 58, 72, 66, LAVA);
         let mut sim = CpuSim::new(&world);
-        for _ in 0..3 * STEPS_PER_SECOND {
+        // After the first burst, heat comes through the rock crust (~12 W per
+        // crust cell), enough for ~1.7 steam parcels per second, each of which
+        // condenses in ~2 s. So a few parcels exist at any time: check that
+        // boiling never stops, rather than a fixed count.
+        for _ in 0..2 * STEPS_PER_SECOND {
             sim.step(&mut world);
         }
-        assert!(world.count(STEAM) >= 10, "hot crust around bottom lava should keep making steam");
+        let mut steps_with_steam = 0;
+        for _ in 0..STEPS_PER_SECOND {
+            sim.step(&mut world);
+            steps_with_steam += (world.count(STEAM) > 0) as u32;
+        }
+        assert!(
+            steps_with_steam * 10 >= STEPS_PER_SECOND * 8,
+            "hot crust around bottom lava should keep making steam (steam present in {steps_with_steam} of {STEPS_PER_SECOND} steps)"
+        );
+        assert!(world.count(LAVA) > 0, "the lava under the crust is still molten");
     }
 
     #[test]
@@ -480,22 +528,36 @@ use cpu::CpuSim;
         assert_eq!(material(out), STEAM);
         assert_eq!(temp(out), celsius(100));
 
+        // Freezing: water at 0°C stays water until it has lost its fusion heat (80 K).
         cells[0] = pack(WATER, 0, celsius(-2));
         let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
-        assert_eq!(material(out), ICE);
-        assert_eq!(temp(out), celsius(8));
+        assert_eq!(material(out), WATER, "water at -2 is still in its freezing plateau");
 
-        cells[0] = pack(ICE, 0, celsius(1));
+        cells[0] = pack(WATER, 0, -LATENT_F - 1);
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), ICE);
+        assert_eq!(temp(out), -1, "ice holds the fusion heat as an offset");
+
+        // Melting: ice at 0°C stays ice until it has absorbed its fusion heat.
+        cells[0] = pack(ICE, 0, 1);
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), ICE, "melting ice is still ice");
+        assert_eq!(sens(out), 0);
+        cells[0] = pack(ICE, 0, LATENT_F + 1);
         let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
         assert_eq!(material(out), WATER);
-        assert_eq!(temp(out), celsius(-9));
+        assert_eq!(temp(out), 1);
 
-        // Steam condenses below 50°C and gives its latent heat back to the water
-        // (steam is a gas, so ambient relaxation applies first: a tiny change).
+        // A steam parcel stays steam (at 100°C) while it gives back its latent
+        // heat; once it has given it all back it is water again.
         cells[0] = pack(STEAM, 0, celsius(49));
         let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
+        assert_eq!(material(out), STEAM, "a wet steam parcel at field 49°C still holds latent heat");
+        assert_eq!(sens(out), celsius(100));
+        cells[0] = pack(STEAM, 0, celsius(100) - LATENT - celsius(1));
+        let (out, _) = heat_cell(&cells, 1, 1, 0, 0, 0);
         assert_eq!(material(out), WATER);
-        assert!((temp(out) - celsius(49) - LATENT).abs() <= 2, "condensed water = 49°C + latent");
+        assert!(temp(out) <= celsius(99) && temp(out) >= celsius(98), "condensed water at ~99°C");
     }
 
     #[test]

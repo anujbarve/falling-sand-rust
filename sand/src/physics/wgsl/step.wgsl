@@ -83,7 +83,9 @@ fn step(@builtin(global_invocation_id) id: vec3<u32>) {
         let m = material(v);
         let same = a0 == v && a1 == v && l0 == v && c01 == v && r0 == v && l1 == v
             && c10 == v && c11 == v && r1 == v && b0 == v && b1 == v;
-        let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT);
+        // Boiling water (field above 100°C) uses its random number to bubble.
+        let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT)
+            && !(m == WATER && temp(v) > celsius(100));
         if (same && fixed) {
             let nv = heat(v, v, v, v, v, ux, uy, w, h, frame).cell;
             let idx = array<u32, 4>(i, i + 1u, j, j + 1u);

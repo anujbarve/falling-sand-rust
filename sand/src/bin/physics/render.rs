@@ -48,10 +48,21 @@ vec4 cell_at(vec2 c) {
 }
 float mat_of(vec4 c) { return mod(c.r, 16.0); }
 float aux_of(vec4 c) { return floor(c.r / 16.0) + mod(c.g, 16.0) * 16.0; }
-float temp_of(vec4 c) {
+// The raw temperature field in °C (includes stored latent heat).
+float temp_raw(vec4 c) {
     float t = floor(c.g / 16.0) + c.b * 16.0 + c.a * 4096.0;
     if (t >= 524288.0) { t -= 1048576.0; }
     return t / 256.0;
+}
+// The real temperature in °C.
+float temp_of(vec4 c) {
+    float t = temp_raw(c);
+    // Water's field also stores latent heat (boiling above 100, freezing below
+    // 0): its real temperature is pinned to 0..100°C (sens() in materials.rs).
+    if (abs(mod(c.r, 16.0) - 3.0) < 0.5) { t = clamp(t, 0.0, 100.0); }
+    if (abs(mod(c.r, 16.0) - 6.0) < 0.5) { t = max(t, 100.0); } // wet steam parcel
+    if (abs(mod(c.r, 16.0) - 9.0) < 0.5) { t = min(t, 0.0); }   // melting ice
+    return t;
 }
 bool is_mat(float m, float k) { return abs(m - k) < 0.5; }
 // AIR 0 STONE 1 SAND 2 WATER 3 OIL 4 LAVA 5 STEAM 6 WOOD 7 FIRE 8 ICE 9 SMOKE 10
@@ -151,7 +162,12 @@ void main() {
     else if (is_mat(m, 3.0)) { col = vec3(0.13, 0.36, 0.78); }
     else if (is_mat(m, 4.0)) { col = vec3(0.40, 0.29, 0.10); }
     else if (is_mat(m, 5.0)) { col = lava_color(t) * (1.0 + n * 0.25); }
-    else if (is_mat(m, 6.0)) { col = mix(sky, vec3(0.75, 0.78, 0.84), 0.45 + n * 0.2); }
+    else if (is_mat(m, 6.0)) {
+        // Steam: bright billowing white, thinner where the parcel is wet
+        // (partly condensed: field below 100°C).
+        float dry = clamp((temp_raw(c) - 100.0 + 541.0) / 541.0, 0.0, 1.0);
+        col = mix(sky, vec3(0.88, 0.9, 0.94), 0.55 + 0.3 * dry + n * 0.15);
+    }
     else if (is_mat(m, 7.0)) { col = vec3(0.42, 0.26, 0.13) * (1.0 + n * 0.2 + 0.08 * sin(cp.y * 0.9)); }
     else if (is_mat(m, 8.0)) { col = fire_color(a) * (1.0 + 0.15 * sin(Time * 30.0 + cp.x * 1.7 + cp.y)); }
     else if (is_mat(m, 9.0)) { col = vec3(0.72, 0.86, 0.98) * (1.0 + n * 0.08); }

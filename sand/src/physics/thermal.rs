@@ -62,31 +62,42 @@ pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
     } else {
         0
     };
-    // Water against a hot surface (lava, or stone/sand/wood at 300°C+) is a
-    // boundary layer, not a 5 mm cell: its heat transfer coefficient is much
-    // larger than conduction through a cell (natural convection: ~2000 W/m²K;
-    // nucleate boiling: ~50000 W/m²K). Both sides of the edge see the same value.
-    let hot_surface = |s: u32, ts: i32| matches!(s, LAVA | STONE | SAND | WOOD) && ts >= celsius(300);
+    // Boundary layers: a 5 mm cell is far thicker than the real layer that
+    // carries heat across these interfaces, so they get their own coefficient.
+    // Both sides of the edge see the same value (heat stays conserved).
+    // - Water against any surface hot enough to boil it (110°C+: a little
+    //   superheat starts nucleate boiling): h ~ 50000 W/m²K.
+    // - Water against ice (a melting interface): h ~ 1500 W/m²K.
+    let hot_surface = |s: u32, ts: i32| matches!(s, LAVA | STONE | SAND | WOOD) && ts >= celsius(110);
     if (a == WATER && hot_surface(b, tb)) || (b == WATER && hot_surface(a, ta)) {
-        let water_t = if a == WATER { ta } else { tb };
-        return if water_t >= celsius(99) { BOIL_CONDUCTANCE } else { CONVECTIVE_CONDUCTANCE };
+        return BOIL_CONDUCTANCE;
+    }
+    if (a == WATER && b == ICE) || (a == ICE && b == WATER) {
+        return MELT_CONDUCTANCE;
     }
     series + radiation
 }
 
+/// How quickly steam mixes into the room and condenses (2^20 / steps, for a
+/// 1 K gap): a puff gives up its 541 K of latent heat in ~2 s at an 80 K gap.
+pub const STEAM_RELAX_K: i32 = 2950;
+/// A boiling cell holding latent s releases a parcel with chance
+/// s / (LATENT * BOIL_SLOWDOWN) per step: half-charged cells bubble ~every 0.1 s.
+pub const BOIL_SLOWDOWN: u32 = 64;
+
 /// Boundary conductance (mW/(m K)) for water against a hot surface: h * dx
-/// with h = 2000 W/m²K (convection) or 50000 W/m²K (boiling), dx = 5 mm.
-pub const CONVECTIVE_CONDUCTANCE: i32 = 10_000;
+/// with h = 50000 W/m²K (nucleate boiling), dx = 5 mm.
 pub const BOIL_CONDUCTANCE: i32 = 250_000;
+/// Boundary conductance for water against ice: h = 1500 W/m²K times 5 mm.
+pub const MELT_CONDUCTANCE: i32 = 7_500;
 
 /// Per-step rate (times 2^24) at which a cell of material `m` follows a
 /// temperature gap across an edge of the given conductance: heat crossing
 /// the edge divided by the cell's own heat capacity.
-pub fn heat_rate(m: u32, conductance: i32) -> i32 {
+pub fn heat_rate(cap: i32, conductance: i32) -> i32 {
     // conductance * RATE_SCALE must fit in an i32: up to 37000 it does. Boundary
     // conductances (water against hot surfaces) are larger, and water's heat
     // capacity is a multiple of 8, so divide both by 8 there (exact).
-    let cap = CAP[m as usize];
     let rate = if conductance <= 37_000 {
         conductance * RATE_SCALE / cap
     } else {
@@ -109,7 +120,7 @@ pub(crate) fn sky_rate(m: u32, t: i32) -> i32 {
 /// Liquids expand too, much less, so a pot heated from below circulates.
 /// Flames keep a fixed density, or they would shoot off what they burn.
 pub fn density(cell: u32) -> i32 {
-    let (m, t) = (material(cell), temp(cell));
+    let (m, t) = (material(cell), sens(cell));
     let d = DENSITY[m as usize];
     let k = KIND[m as usize];
     if k == GAS && m != FIRE {
@@ -117,7 +128,7 @@ pub fn density(cell: u32) -> i32 {
         (d * 293 * T_SCALE / (t + 273 * T_SCALE).max(1)).max(1)
     } else if k == LIQUID {
         // Liquids expand a little: d * (1 - expansion * (t - 20°C)).
-        let warmer = (sens(cell) - AMBIENT) / T_SCALE;
+        let warmer = (t - AMBIENT) / T_SCALE;
         (d - d * (EXPANSION[m as usize] * warmer / 1000) / 1000).max(1)
     } else {
         d
@@ -198,6 +209,11 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     //    (gap = our temperature minus theirs) and negate it.
     let mut t = t0;
     let t0s = sens(me); // gap temperature (boiling water counts as 100°C)
+    // Heat capacity behind the field: a wet steam parcel is a water cell's worth
+    // of mass changing phase, so its field moves at water's rate.
+    // Melting ice likewise: its fusion heat is counted in water's units.
+    let phase_plateau = (m == STEAM && t0 < celsius(100)) || (m == ICE && t0 > 0);
+    let my_cap = if phase_plateau { CAP[WATER as usize] } else { CAP[m as usize] };
     let mut touches_water = false;
     let mut touches_air = false;
     let mut touches_lava = false;
@@ -218,7 +234,7 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
             return; // no gap, no flow (and no need for a random number)
         }
         maybe = true;
-        let rate = heat_rate(m, pair_conductance(m, mn, t0s, tn));
+        let rate = heat_rate(my_cap, pair_conductance(m, mn, t0s, tn));
         let roll = edge_roll(edge_cell, down, key);
         t += if ours { flow_24(tn - t0s, rate, roll) } else { -flow_24(t0s - tn, rate, roll) };
     };
@@ -253,8 +269,11 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     }
     // Gases mix with the room and drift back to 20°C.
     if KIND[m as usize] == GAS && m != FIRE {
-        t += ((AMBIENT - t0) * RELAX_K + (r & 0xF_FFFF) as i32) >> 20;
-        maybe |= t0 != AMBIENT;
+        // Steam mixes into the room much faster than its own conduction: a puff
+        // condenses into fog/droplets within ~2 s (STEAM_RELAX_K).
+        let (k, tg) = if m == STEAM { (STEAM_RELAX_K, t0s) } else { (RELAX_K, t0) };
+        t += ((AMBIENT - tg) * k + (r & 0xF_FFFF) as i32) >> 20;
+        maybe |= tg != AMBIENT || m == STEAM;
     }
 
     // 2. Gravity. A cell that is free to fall (or, for steam, to rise)
@@ -282,33 +301,52 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     }
 
     // 3. Phase changes.
-    let supported = below.is_none_or(|b| KIND[material(b) as usize] >= POWDER);
+    // Boiling water (field above 100°C) has absorbed part of its latent heat.
+    // It releases a steam parcel at random, more likely the more it holds; the
+    // parcel keeps exactly the energy absorbed so far (a wet parcel's field is
+    // below 100°C), so bubbles appear as soon as boiling starts and energy
+    // stays exact.
+    let stored = t - celsius(100);
+    let boils_now = m == WATER
+        && stored > 0
+        && pcg(r ^ 0xB011_B011) % (LATENT as u32 * BOIL_SLOWDOWN) < stored as u32;
+    if m == WATER && stored > 0 {
+        maybe = true;
+    }
     let mut next = m;
     match m {
-        // Boiling: water turns to steam once it has absorbed its latent heat.
-        WATER if t >= celsius(100) + LATENT => {
+        // Boiling: water turns to steam once it has absorbed its latent heat
+        // (or earlier as a wet parcel, see boils_now).
+        WATER if t >= celsius(100) + LATENT || boils_now => {
             next = STEAM;
             life = VT_GAS[STEAM as usize];
             t -= LATENT;
         }
-        WATER if t <= celsius(-2) => {
+        // Freezing: water releases its fusion heat as it reaches -80 K below 0°C.
+        WATER if t < -LATENT_F => {
             next = ICE;
-            t += celsius(10);
+            t += LATENT_F;
         }
-        ICE if t >= celsius(1) => {
+        // Melting: ice at 0°C absorbs its fusion heat (field 0..80 K), then is water.
+        ICE if t >= LATENT_F => {
             next = WATER;
-            t -= celsius(10);
+            t -= LATENT_F;
         }
-        // Condenses well below boiling, so steam rises a while before raining.
-        // Condensing releases the latent heat back into the water.
-        STEAM if t < celsius(50) => {
+        // Condensing: a steam parcel that has given back all its latent heat
+        // becomes water at 100°C or below.
+        STEAM if t < celsius(100) - LATENT => {
             next = WATER;
             t += LATENT;
         }
         // Lava resting on something sets into stone. Lava that cools while
         // falling or sinking through water shatters into gravel instead
         // (real lava does this in water), so no stone is left hanging in mid-air.
-        LAVA if t < celsius(1000) => next = if supported { STONE } else { SAND },
+        // Lava that cools in water while nothing holds it up shatters into gravel;
+        // lava resting on rock, lava or powder sets into rock (a crust conducts).
+        LAVA if t < celsius(1000) => {
+            let held = below.is_some_and(|b| matches!(material(b), LAVA | STONE) || KIND[material(b) as usize] >= POWDER);
+            next = if touches_water && !held { SAND } else { STONE };
+        }
         // Rock melts above eruption temperature, so lava cannot melt it.
         STONE if t >= celsius(1200) => next = LAVA,
         WOOD if t >= celsius(300) && (touches_air || touches_lava || touches_fire) => {
