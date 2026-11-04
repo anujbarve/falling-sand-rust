@@ -46,7 +46,8 @@ pub(crate) fn can_steam_vent(bottom: u32, top: u32, diagonal: u32) -> bool {
 pub(crate) fn spread_chance(left: u32, right: u32) -> u32 {
     let (ml, mr) = (material(left), material(right));
     let fluid = |m: u32| KIND[m as usize] == GAS || KIND[m as usize] == LIQUID;
-    if ml != mr && fluid(ml) && fluid(mr) && speed(left) == 0 && speed(right) == 0 {
+    // A flame is anchored: it does not mix sideways into air and die out.
+    if ml != mr && ml != FIRE && mr != FIRE && fluid(ml) && fluid(mr) && speed(left) == 0 && speed(right) == 0 {
         FLOW[ml as usize].min(FLOW[mr as usize])
     } else {
         0

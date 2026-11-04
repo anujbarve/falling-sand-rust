@@ -42,7 +42,8 @@ fn is_fluid(k: u32) -> bool {
 fn spread_chance(left: u32, right: u32) -> u32 {
     let ml = material(left);
     let mr = material(right);
-    if (ml != mr && is_fluid(kind(ml)) && is_fluid(kind(mr)) && speed(left) == 0u && speed(right) == 0u) {
+    // A flame is anchored: it does not mix sideways into air and die out.
+    if (ml != mr && ml != FIRE && mr != FIRE && is_fluid(kind(ml)) && is_fluid(kind(mr)) && speed(left) == 0u && speed(right) == 0u) {
         return min(flow(ml), flow(mr));
     }
     return 0u;
