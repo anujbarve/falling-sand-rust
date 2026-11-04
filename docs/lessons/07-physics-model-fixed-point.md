@@ -1,5 +1,13 @@
 # Lesson 07: The physics model (density, heat and phase changes in fixed point)
 
+> [!note] This lesson teaches the `31aed2d` version of the rules
+> Everything below, and the `heatgrid` you build, matches commit `31aed2d`. Commit `07fcf0b` later moved the rules to real units (1 cell = 5 mm, 1 step = 1/1200 s). For this lesson's topic that means:
+> - `COND` (out of 1024, truncating `/ 1024`) became `HEAT_K`, real thermal diffusivities scaled by $2^{20}$, combined with a harmonic mean (`pair_k`) instead of `min`, and rounded **stochastically** per edge (`edge_flow`, `edge_roll`).
+> - `DENSITY` is now in 0.1 kg/m³ (water = 10000), and hot gases follow the ideal gas law instead of "−1 per 40 °C".
+> - Fire and smoke life counts 53 ms ticks, and the tests run for seconds of world time (the lava test now needs 12 s = 14400 steps).
+>
+> See "What changed later (07fcf0b)" at the end of this lesson, and [[16-real-units-velocity-clock]] for the full story.
+
 > Source for this lesson: commit `31aed2d`, file `sand/src/physics/mod.rs`.
 > To read it without touching your working tree: `git show 31aed2d:sand/src/physics/mod.rs`
 
@@ -84,7 +92,7 @@ Truncation makes $\Delta = 0$ whenever $|T_j - T_i|\,k < 1024$. So there is a **
 | 16 | 4.3 °C | neighbouring air cells up to about 4 °C apart never equalise. Gradients freeze. |
 | 256 | 0.27 °C | the leftover gaps are too small to see |
 
-The temperature range is still fine at 256: 20 signed bits give $\pm 2^{19}/256 \approx \pm 2047$ °C, and lava starts at 1600 °C. That is why the doc comment in the source reads:
+The temperature range is still fine at 256: 20 signed bits give $\pm 2^{19}/256 \approx \pm 2047$ °C, and lava starts at 1600 °C. That is why the doc comment in the source read (at `31aed2d`):
 
 ```rust
 /// Temperatures are fixed point: 256 units per degree Celsius. Fine steps
@@ -122,7 +130,7 @@ On a grid, $\nabla^2 T$ at cell $i$ becomes "sum of (neighbour − me)". If we t
 
 $$T_i^{\text{new}} = T_i + \sum_{j \in N(i)} \alpha_{ij}\,(T_j - T_i), \qquad \alpha_{ij} = \frac{\min(k_i, k_j)}{1024}$$
 
-where $N(i)$ is the 4 neighbours (left, right, up, down) and $k$ is the material's conductivity from the `COND` table. Here is the real code:
+where $N(i)$ is the 4 neighbours (left, right, up, down) and $k$ is the material's conductivity from the `COND` table. Here is the real code (at `31aed2d`; `07fcf0b` replaced it, see the end of the lesson):
 
 ```rust
 // sand/src/physics/mod.rs @ 31aed2d, inside heat_cell
@@ -164,7 +172,7 @@ If you break the bound, the scheme overshoots. Take a checkerboard of $+A$ and $
 
 $$T^{\text{new}} = A\,(1 - 8\alpha)$$
 
-At $\alpha = 1/4$ ($k = 256$) you get exactly $-A$: the pattern flips sign forever without decaying, which is the borderline case. Above that, $|1 - 8\alpha| > 1$ and the amplitude **grows every step** until it overflows. The largest value in the table is ice at 150, which keeps the scheme comfortably inside the bound:
+At $\alpha = 1/4$ ($k = 256$) you get exactly $-A$: the pattern flips sign forever without decaying, which is the borderline case. Above that, $|1 - 8\alpha| > 1$ and the amplitude **grows every step** until it overflows. The largest value in the table (at `31aed2d`) is ice at 150, which keeps the scheme comfortably inside the bound:
 
 ```rust
 /// Thermal conductivity, out of 1024 per neighbour per step. Must stay
@@ -265,7 +273,7 @@ stateDiagram-v2
 
 Lava has the same kind of gap: it solidifies below 800 °C and stone melts above 1100 °C.
 
-**Fire and smoke use `aux` as a life counter.** On ignition, `life` gets a random value from the position hash, for example `40 + (r & 63)` for wood. `r & 63` keeps the low 6 bits, so it is a number from 0 to 63. Each frame:
+**Fire and smoke use `aux` as a life counter.** On ignition, `life` gets a random value from the position hash, for example `40 + (r & 63)` for wood (at `31aed2d`). `r & 63` keeps the low 6 bits, so it is a number from 0 to 63. Each frame (at `31aed2d`; later the life counts 53 ms ticks instead of steps):
 
 ```rust
 FIRE => {
@@ -292,7 +300,7 @@ if KIND[m as usize] == GAS && m != FIRE {
 }
 ```
 
-Each step, a gas cell closes $\frac{1}{64}$ of its gap to 20 °C, which is exponential decay toward ambient. This is why the conservation test uses only stone.
+Each step (at `31aed2d`), a gas cell closes $\frac{1}{64}$ of its gap to 20 °C, which is exponential decay toward ambient. This is why the conservation test uses only stone.
 
 ### 2.8 The debugging story: stone hanging in mid-air
 
@@ -331,9 +339,9 @@ fn density(cell: u32) -> i32 {
 }
 ```
 
-A gas loses 1 density point per 40 °C above ambient, but never drops below 1. Air at 100 °C has density $10 - 80/40 = 8$, so it rises through 20 °C air at density 10. Fire is excluded: if flames got lighter as they got hotter, they would shoot away from the wood they are burning.
+At `31aed2d`, a gas loses 1 density point per 40 °C above ambient, but never drops below 1. Air at 100 °C has density $10 - 80/40 = 8$, so it rises through 20 °C air at density 10. Fire is excluded: if flames got lighter as they got hotter, they would shoot away from the wood they are burning.
 
-**Sinking is a probability proportional to the density gap:**
+**Sinking is a probability proportional to the density gap** (at `31aed2d`; in `07fcf0b` the density gap only decides *whether* a pair may swap, and the speed stored in the cell decides how often, see lesson 08's last section):
 
 ```rust
 fn sinks(top: u32, bottom: u32, roll: u32) -> bool {
@@ -373,9 +381,11 @@ fn spreads(left: u32, right: u32, roll: u32) -> bool {
 }
 ```
 
-`FLOW` is water 230, oil 150 and lava 40 (out of 256), so water levels out fast and lava creeps. Note `ml != mr`: swapping two identical cells would do nothing, so the function doesn't report it as a move.
+At `31aed2d`, `FLOW` is water 230, oil 150 and lava 40 (out of 256), so water levels out fast and lava creeps. Note `ml != mr`: swapping two identical cells would do nothing, so the function doesn't report it as a move.
 
 ### 2.10 The three tests
+
+(As they were at `31aed2d`. `07fcf0b` runs them for seconds of world time instead of a fixed number of steps.)
 
 ```rust
 #[test]
@@ -670,13 +680,13 @@ Try editing `STEAM if t < celsius(50)` to `celsius(99)` in that worktree and wat
 **Exercise 3 (medium): supported lava.** Add a `GRAVEL` material. Change `phase` to take `supported: bool`, so that cooling lava becomes stone only when the cell below is stone, gravel or ice, or when the lava is on the bottom row. Otherwise it becomes gravel.
 *Hint:* compute `supported` in `step` with `y + 1 >= self.h || holds_up(self.cells[i + self.w].mat)`, and rely on `||` short-circuiting. `matches!` is handy for `holds_up`.
 
-**Exercise 4 (medium): buoyancy table.** Implement `density(m, t)` with the project's hot-gas rule, and `sink_chance(d_top, d_bottom) -> u32` returning the threshold out of 256. Assert the values from the table in section 2.9, including that 100 °C air has density 8.
+**Exercise 4 (medium): buoyancy table.** Implement `density(m, t)` with the project's hot-gas rule (as at `31aed2d`), and `sink_chance(d_top, d_bottom) -> u32` returning the threshold out of 256. Assert the values from the table in section 2.9, including that 100 °C air has density 8.
 *Hint:* the gas rule is `(d - (t - AMBIENT) / celsius(40)).max(1)`, and a gap of zero or less gives chance 0.
 
 **Exercise 5 (stretch): find the stability limit.** Model one checkerboard pair as a two-element array `[A, -A]`, where each cell sees 4 neighbours at the opposite value. Iterate 10 steps for `k = 200`, `256` and `300`. Assert that the amplitude decays, stays constant, and grows, in that order. Then derive $k \le 256$ on paper from $|1 - 8\alpha| \le 1$.
 *Hint:* one step is `d = (a[1] - a[0]) * k / 1024 * 4; a = [a[0] + d, a[1] - d];`.
 
-**Exercise 6 (stretch): gas relaxation, and why the test excludes it.** Add the project's rule `if m == AIR || m == STEAM { t += (AMBIENT - t) / 64; }` to `step`. Write a test showing that a grid of hot air *loses* total heat, while the stone-only conservation test still passes. Explain why in one sentence.
+**Exercise 6 (stretch): gas relaxation, and why the test excludes it.** Add the project's rule (as at `31aed2d`) `if m == AIR || m == STEAM { t += (AMBIENT - t) / 64; }` to `step`. Write a test showing that a grid of hot air *loses* total heat, while the stone-only conservation test still passes. Explain why in one sentence.
 
 <details><summary>Solution 1</summary>
 
@@ -872,3 +882,78 @@ Calling an `FnMut` closure needs `&mut` access to it, so write `let mut add = ..
 - Rust tools used: `const fn`, match guards, `FnMut` closures that capture by `&mut`, `||` short-circuiting for bounds, and reasoning about `i32` overflow.
 
 **Next, lesson 08: Margolus blocks and double buffering (CPU).** That lesson covers how `move_block` uses `sinks` and `spreads` on 2×2 blocks, why the block grid shifts by one cell every other frame, and how the heat pass's old and new buffers are swapped without copying, all of which lets every cell update in parallel.
+
+---
+
+## What changed later (07fcf0b)
+
+Commit `07fcf0b` kept the structure of this lesson (fixed point, one heat pass per cell, phase changes as a `match` with guards) but replaced every number with a real-world one. The full treatment is in [[16-real-units-velocity-clock]]. Here is what changed in this lesson's topic, and why.
+
+**Why: per-step constants had no physical meaning.** At `31aed2d`, `COND[WATER] = 120` meant "a pair moves $120/1024$ of its gap *per step*". A step was not any particular length of time, so nothing said how fast water *really* conducts, and you could not scale time: the viewer of `07fcf0b` runs as many steps per frame as the chosen speed (0.01x to 16x) needs, which only works if one step is a fixed amount of world time. So `07fcf0b` fixes the units:
+
+```rust
+// sand/src/physics/mod.rs @ 07fcf0b
+pub const CELL_METERS: f64 = 0.005;          // 1 cell = 5 mm
+pub const STEPS_PER_SECOND: u32 = 1200;      // 1 step = 1/1200 s
+/// Heat: thermal diffusivity alpha (m^2/s) turned into a per-step rate,
+/// alpha * STEP_SECONDS / CELL^2, times 2^20.
+pub const HEAT_K: [i32; MATERIAL_COUNT] = [769, 38, 9, 5, 3, 17, 699, 5, 6990, 42, 769];
+```
+
+The per-step rate of material $m$ is $\alpha_m \,\Delta t / \Delta x^2$. For air, $2.2\times10^{-5} \cdot \tfrac{1}{1200} / 0.005^2 \approx 7.3\times10^{-4}$, times $2^{20}$ is 769.
+
+**Why truncation had to go.** These real rates are tiny: water is $5/2^{20}$ per step. With the old truncating division, the flow `gap * 5 / 2^20` is 0 unless the gap is at least $2^{20}/5 \approx 210\,000$ units, which is about **820 °C**. The dead zone from section 2.1 would swallow nearly all conduction. The fix is **stochastic rounding**: add a random number in $[0, 2^{20})$ before shifting, so the result rounds up with exactly the probability of the fraction you dropped:
+
+```rust
+// sand/src/physics/mod.rs @ 07fcf0b
+fn edge_flow(t: i32, other: i32, k: i32, roll: i32) -> i32 {
+    ((other - t) * k + roll) >> 20
+}
+```
+
+$$\mathbb{E}\!\left[\left\lfloor \frac{g k + U}{2^{20}} \right\rfloor\right] = \frac{g k}{2^{20}}, \qquad U \sim \text{Uniform}\{0, \dots, 2^{20}-1\}$$
+
+so even a 1-unit gap moves heat *on average* at the right rate.
+
+**Conservation now comes from shared edges, not from odd rounding.** `>> 20` is a floor, which section 2.3 said would create heat. It does not here, because the two cells of an edge no longer each compute their own flow. Each edge is named by its left/upper cell `i` and a direction, and both cells use the same random number for it:
+
+```rust
+// sand/src/physics/mod.rs @ 07fcf0b, inside heat_cell
+fn edge_roll(i: usize, down: u32, key: u32) -> i32 {
+    (pcg((2 * i as u32 + down) ^ key) & 0xF_FFFF) as i32
+}
+// ours = the edge to our right or below; theirs = the edge to our left or above.
+t += if ours { edge_flow(t0, tn, k, roll) } else { -edge_flow(tn, t0, k, roll) };
+```
+
+The right-hand cell evaluates `edge_flow` with *exactly* the arguments the left-hand cell used and negates the result. So the two changes cancel bit for bit, whatever the rounding does. `conduction_conserves_heat` still asserts exact equality, now over 1 s (1200 steps).
+
+**Harmonic mean instead of `min`.** Two half-cells in series behave like two resistors in series, so the pair conductance is the harmonic mean:
+
+```rust
+fn pair_k(a: u32, b: u32) -> i32 {
+    let (ka, kb) = (HEAT_K[a as usize], HEAT_K[b as usize]);
+    2 * ka * kb / (ka + kb)
+}
+```
+
+It is still symmetric, which keeps both cells on the same `k`. Air on stone gives $2\cdot769\cdot38/807 = 72$, where `min` gave 38. Stability is no longer a worry: the largest rate (fire) is $6990/2^{20} \approx 0.007$ per edge, far below the $1/4$ bound from section 2.3.
+
+**Gas relaxation** got the same treatment: a 3 s time constant, `RELAX_K = 2^20 / (3 * 1200) = 291`, rounded with random low bits of the per-cell number `r`:
+
+```rust
+t += ((AMBIENT - t0) * RELAX_K + (r & 0xF_FFFF) as i32) >> 20;
+```
+
+**Densities in real units, ideal gas for hot gases.** `DENSITY` is now in 0.1 kg/m³ (air 12, water 10000, stone 26000, steam 8, at 20 °C). A gas's density times its absolute temperature is constant:
+
+```rust
+// d * 293 K / (t + 273 K), with t in fixed point.
+(d * 293 * T_SCALE / (t + 273 * T_SCALE).max(1)).max(1)
+```
+
+Air at 100 °C becomes $\lfloor 12 \cdot 293/373 \rfloor = 9$, so it still rises through 20 °C air (12). Flames still keep a fixed density. Density now only decides *whether* a pair may swap (`sinks(top, bottom)` lost its `roll` argument). How *fast* things fall comes from a speed stored in `aux` and accelerated by gravity: that is lesson 08's last section.
+
+**Life in ticks.** `aux` for fire and smoke now counts ticks of 64 steps (53 ms): each step the life drops by one with chance 1/64 (`pcg(r) % TICK_STEPS == 0`). A wood flame starts with `120 + (r & 127)` ticks, 6 to 13 s of burning.
+
+**The tests now take seconds of world time.** Real heat is slow at 5 mm per cell. `lava_boils_water_and_turns_to_stone` runs `12 * STEPS_PER_SECOND` steps (the lava falls in, then takes a few seconds to boil water), where 600 steps used to be enough. `oil_floats_on_water` runs 10 s. In `conduction_conserves_heat`, granite only warms about one cell (5 mm) in 1 s, so the test checks that the neighbour of the hot block warmed by more than 5 °C and that a cell 15 cells away is still exactly at 20 °C. `hot_fire_ignites_wood` became `lava_ignites_wood` (35 s): a painted flame no longer lasts long enough to light a plank, which is true of real wood too.

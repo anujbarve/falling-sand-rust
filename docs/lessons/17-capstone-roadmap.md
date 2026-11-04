@@ -1,6 +1,6 @@
 # Capstone: Build the Whole Thing Yourself
 
-The lessons showed you why each piece of the project looks the way it does. This roadmap takes the lessons away. Start from an empty folder and rebuild the project, one milestone at a time, until you have a GPU engine with chunk sleeping and an honest benchmark.
+The lessons showed you why each piece of the project looks the way it does. This roadmap takes the lessons away. Start from an empty folder and rebuild the project, one milestone at a time, until you have a GPU engine with chunk sleeping, an honest benchmark, and physics in real units that plays in real time.
 
 Each milestone has the same parts:
 
@@ -16,7 +16,7 @@ The performance numbers below come from the repo README (Apple M5, 10 CPU thread
 
 From M6 on, every step obeys one rule: **every cell is written by exactly one worker, and that worker reads only the old state.** Double buffering, Margolus blocks, rayon threads, GPU threads, chunk sleeping and the fused kernel are all ways of keeping that rule true. When a milestone feels hard, ask "who writes this cell, and what does it read?" The answer usually tells you what's wrong.
 
-The second rule is **all maths is integers, and randomness is a hash of (position, step).** That rule is what lets CPU and GPU agree bit for bit, so `assert_eq!` on two whole grids works as a test.
+The second rule is **all maths in a step is integers, and randomness is a hash of (position, step).** (From M11 on, `f64` appears only in `const` unit conversions and in the viewer's clock, never inside a step.) That rule is what lets CPU and GPU agree bit for bit, so `assert_eq!` on two whole grids works as a test.
 
 ```mermaid
 graph LR
@@ -30,6 +30,7 @@ graph LR
   M7 --> M9[M9 benchmark]
   M8 --> M9
   M9 --> M10[M10 sleeping + GPU viewer + fused kernel]
+  M10 --> M11[M11 real units, velocity, world clock]
 ```
 
 ---
@@ -160,20 +161,37 @@ Three parts. Do them in this order and keep every earlier test green throughout.
 - [ ] `pipelined_readback_and_paint_match_cpu` passes, and a test proves stale readbacks are discarded.
 - [ ] The HUD shows GPU ms/step, CPU ms/frame and frame time, and the CPU frame time no longer includes waiting for the GPU.
 
-**10c. Fused kernel.** One dispatch per step instead of two: one thread per 2x2 block, which heats its 4 cells from the old grid and then moves them. Add an interior fast path without bounds checks and a "uniform block" shortcut.
+**10c. Fused kernel, with sleeping.** One dispatch per step instead of two: one thread per 2x2 block, which heats its 4 cells from the old grid and then moves them. Add an interior fast path without bounds checks and a "uniform block" shortcut. Keep 10a's sleeping working inside it: each thread checks the awake flag of each of its 4 cells' chunks, a sleeping cell keeps its old value and isn't written, the move runs only if the block's owner chunk (top-left cell) is awake, and activity is stamped with atomics (load before store). The repo did this merge by hand in `6c1cebc`.
 
 - [ ] Every equivalence test still passes, especially the odd sizes (partial blocks at the edges are heated but not moved).
+- [ ] `sleeping_gives_identical_world_to_no_sleeping` and `settled_scene_sleeps_on_cpu_and_gpu` still pass with the fused kernel.
 - [ ] You measured each optimisation separately and kept only the ones that helped. (The real commit found that staging a tile in workgroup memory was 20-25% *slower* than reading the old grid directly on an Apple M5.)
+- [ ] You measured what sleeping costs when everything is awake. (In `6c1cebc` the bookkeeping cost about 30% on the busy scene vs fused alone, while a settled 4K world dropped to about 0.56 ms per step.)
 
-**Time:** 10-20 hours for all three. **Review:** [[13-chunk-sleeping]], [[14-gpu-perf-fused-kernel]], [[15-gpu-viewer-pipelined-readback]]. **Check against:** `1157366`, `d94ade6`, `9b8dd55` (the fused kernel is on a side branch built on the engine *without* sleeping, so combining 10a and 10c is your own work).
+**Time:** 10-20 hours for all three. **Review:** [[13-chunk-sleeping]], [[14-gpu-perf-fused-kernel]], [[15-gpu-viewer-pipelined-readback]]. **Check against:** `1157366`, `d94ade6`, `6c1cebc` (fused kernel merged with sleeping). The standalone fused experiment `9b8dd55` (without sleeping) exists only in the author's local clone as branch `fused-kernel-standalone`. It is not on GitHub, so use lesson 14's snippets or `6c1cebc`.
 
-**Total:** roughly 45-80 hours. Spread it over weeks, not days.
+## M11: Real units, velocity and a world clock
+
+**Goal:** Give the engine real units: 1 cell = 5 mm, 1 step = 1/1200 s, gravity 9.81 m/s². Moving cells store a speed level in their aux bits, gravity accelerates it every step in the heat pass, and liquids cap sinking at a terminal speed. Heat uses real diffusivities, with each edge's tiny flow rounded at random so the average is right and heat is still conserved exactly. Chunk sleeping must count a cell as active if it *could* change for some random number, not only if it did. In the viewer, replace steps-per-frame with a `Clock` that turns wall time into world time at a chosen speed (0.01x to 16x, real time by default), within a step budget taken from the GPU timestamps.
+
+**Done when:**
+- [ ] A free-fall test passes: grains dropped through about 1.2 m of air land within 10% of $t = \sqrt{2h/g}$.
+- [ ] A sinking test passes: sand dropped into 0.6 m of water reaches the bottom in 4.5-9 s (about 0.1 m/s), where the same drop through air takes well under a second.
+- [ ] `conduction_conserves_heat` still passes with random rounding: the total stays *exactly* the same, because each edge's rounded flow is added to one side and subtracted from the other.
+- [ ] Every equivalence test still passes: CPU == GPU, rayon == one thread, sleeping == no sleeping, odd sizes.
+- [ ] Clock tests pass: real time at 60 fps gives about 20 steps per frame, 0.01x carries fractions over (one step every 5 frames, never zero forever), fast forward respects the budget without building up a backlog, and a 2 s hitch counts as 0.1 s.
+- [ ] The 640x360 viewer runs at real time (the HUD shows world time and the achieved speed reaching 1.00x), and `,` `.` `/` change the speed.
+- [ ] The bench prints a "gpu max speed" column: how many times faster than real time the GPU alone could run.
+
+**Time:** 8-15 hours. **Review:** [[16-real-units-velocity-clock]]. **Check against:** `07fcf0b` (`sand/src/physics/clock.rs`, `mod.rs` tests `free_fall_takes_the_right_time` and `sand_sinks_slowly_through_water`).
+
+**Total:** roughly 55-95 hours. Spread it over weeks, not days.
 
 ---
 
 ## Stretch goals
 
-None of these exist in the repo. Each one needs you to keep the two rules: one writer per cell, and integer-only, deterministic maths. That keeps CPU and GPU in agreement.
+None of these exist in the repo (except number 7, kept as an optional exercise). Each one needs you to keep the two rules: one writer per cell, and integer-only, deterministic maths. That keeps CPU and GPU in agreement.
 
 1. **Water pressure.** Water in the current engine levels out slowly and can't push up a U-tube. Add a per-cell pressure value in the spare bits (or a second buffer) that builds up with depth and lets liquid move upward when pressure on the far side is higher. Test it: a U-tube filled from one side should end with equal levels.
 2. **Latent heat and heat capacity.** Right now water flips to steam the moment it crosses 100°C. Give each material a heat capacity $c$ so a temperature change is $\Delta T = Q / c$, and a latent heat $L$: a cell at its boiling point soaks up $L$ units of energy before changing phase. A pot of water should then stay at 100°C for a while as it boils. Keep `conduction_conserves_heat` passing; update it to conserve *energy*, not temperature.
@@ -181,7 +199,7 @@ None of these exist in the repo. Each one needs you to keep the two rules: one w
 4. **Audio from material counts.** Count fire, water and lava cells each frame (on the GPU, a small reduction pass) and use `macroquad::audio` to fade loops in and out: crackling grows with the number of fire cells, hissing plays when steam appears.
 5. **Render straight from GPU buffers.** Swap macroquad for `winit` + `wgpu` in the viewer, and draw with a render pipeline that reads the cell storage buffer directly. The readback disappears, so "gpu + readback" should become "gpu". Measure it.
 6. **Indirect dispatch of awake chunks.** Instead of launching a workgroup for every chunk and letting sleepers return at once, build a list of awake chunk ids on the GPU and use `dispatch_workgroups_indirect`. A settled 4K scene should then cost close to nothing.
-7. **Sleeping inside the fused kernel.** Bring 10a's sleeping rule into 10c's single dispatch and prove it's still bit-exact.
+7. **Optional exercise: merge sleeping into the fused kernel yourself.** The repo has done this (`6c1cebc`), and 10c now asks for it. If you built 10c without sleeping first, do the merge on your own before reading `6c1cebc`, then compare. Try to beat its ~30% all-awake overhead, for example by checking awake flags once per workgroup when a workgroup lies inside a single chunk.
 
 ## Self-assessment checklist
 

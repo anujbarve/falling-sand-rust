@@ -1,5 +1,13 @@
 # Lesson 11: The WGSL port and bit-exact determinism
 
+> [!note] This lesson teaches the `31aed2d` version of `sim.wgsl`
+> The porting rules and the bit-exact test are unchanged, and the crate you build here keeps working. Commit `07fcf0b` (real units) changed the shader in ways that touch this lesson:
+> - `heat` returns a `HeatOut { cell, maybe }` struct (WGSL has no tuples), mirroring Rust's `heat_cell -> (u32, bool)`.
+> - Tables whose values no longer fit in a byte (`DENSITY` up to 26000, `HEAT_K` up to 6990) are `switch` functions; the small ones stay packed bytes.
+> - Conduction rounds **stochastically** with one `pcg` per grid edge, keyed by cell index, and uses `>> 20` (a floor) on purpose: conservation now comes from both cells sharing the edge's number, not from truncation being odd.
+>
+> See "What changed later (07fcf0b)" at the end of this lesson, and [[16-real-units-velocity-clock]].
+
 > Source for this lesson: commit `31aed2d`. Read the two files side by side:
 > `git show 31aed2d:sand/src/physics/mod.rs` (the Rust rules) and
 > `git show 31aed2d:sand/src/physics/sim.wgsl` (the GPU copy).
@@ -73,7 +81,7 @@ pub const COND: [i32; MATERIAL_COUNT] = [15, 100, 40, 120, 40, 80, 20, 40, 80, 1
 let k_self = COND[m as usize];
 ```
 
-The WGSL spec only lets you index a `const` array with a value known at compile time. Some compilers accept `COND[m]` with a runtime `m` anyway, and some reject it. The portable fix is to make the table a module-scope variable in the `private` address space. That means every invocation gets its own copy, which it can index freely:
+The WGSL spec only lets you index a `const` array with a value known at compile time. Some compilers accept `COND[m]` with a runtime `m` anyway, and some reject it. The portable fix (used at `31aed2d`; later commits replaced it, see the end of the lesson) is to make the table a module-scope variable in the `private` address space. That means every invocation gets its own copy, which it can index freely:
 
 ```wgsl
 // sand/src/physics/sim.wgsl @ 31aed2d
@@ -293,15 +301,15 @@ In Rust, `||` stops early, so `cells[i + w]` is never read on the bottom row. WG
 
 Every rule below follows from the fact stated at the top: same integer operations in the same order give the same bits.
 
-1. **Integer-only maths.** Temperatures are fixed point, $T_{\text{stored}} = 256 \cdot T_{°C}$ (`T_SCALE = 256`). Densities, flow chances and conductivities are small integers. Probabilities are "roll < k out of 256".
+1. **Integer-only maths.** Temperatures are fixed point, $T_{\text{stored}} = 256 \cdot T_{°C}$ (`T_SCALE = 256`). Densities, flow chances and conductivities are small integers (at `31aed2d`; since `07fcf0b` some are up to 26000). Probabilities are "roll < k out of 256".
 
-2. **Signed division truncates toward zero, on both sides.** Rust's `i32 / i32` rounds toward zero: $-7/2 = -3$. WGSL's `i32 / i32` does the same. The conduction term
+2. **Signed division truncates toward zero, on both sides** (this is the `31aed2d` conduction; `07fcf0b` deliberately switched to `>> 20` with shared per-edge rounding, see the end of the lesson). Rust's `i32 / i32` rounds toward zero: $-7/2 = -3$. WGSL's `i32 / i32` does the same. The conduction term
    $$\Delta = \left\lfloor \frac{(T_j - T_i)\cdot k}{1024} \right\rfloor_{\to 0}$$
    is therefore identical, and it is also exactly antisymmetric: the heat flowing $j \to i$ is minus the heat flowing $i \to j$, so conduction conserves heat (the `conduction_conserves_heat` test). If you "optimise" `/ 1024` into `>> 10`, you get *floor* division instead ($-7 \gg 1 = -4$). That breaks heat conservation, and if you change only one side it breaks CPU/GPU equality too.
 
 3. **Right shift on a signed integer is arithmetic.** It copies the sign bit down, in both languages. That is how `temp()` gets a negative temperature back out of bits 12–31. Without it, $-40\,°C$ would come out as a huge positive number.
 
-4. **Identical hash.** No `rand` crate, no running RNG state. Every random number is `hash3(position, frame)`, a pure function. The GPU has thousands of threads with no shared state, so this is the only kind of randomness it can reproduce, and the CPU uses the same kind. The *inputs* must match too: heat uses `hash3(x, y, frame ^ 0xA511E9B3)`, and the move pass uses `hash3(bx, by, frame)` with **block** coordinates (not cell coordinates) on both sides.
+4. **Identical hash.** No `rand` crate, no running RNG state. Every random number is `hash3(position, frame)`, a pure function. The GPU has thousands of threads with no shared state, so this is the only kind of randomness it can reproduce, and the CPU uses the same kind. The *inputs* must match too: at `31aed2d` heat uses `hash3(x, y, frame ^ 0xA511E9B3)` (since `07fcf0b`, `pcg(i ^ pcg(frame ^ CELL_SALT))` plus one hash per edge), and the move pass uses `hash3(bx, by, frame)` with **block** coordinates (not cell coordinates) on both sides.
 
 5. **Identical evaluation order inside a block.** `move_block` runs three phases in order: fall per column, then slide diagonally, then spread sideways. Each phase reads the cells the previous phase changed. The WGSL keeps the same phases, the same `col` loop order, and the same bit slices of `r` and `r2` (`(r >> (col * 8)) & 255` and so on).
 
@@ -354,7 +362,7 @@ Design choices worth copying:
 
 #### The maintenance risk
 
-The material tables (`KIND`, `DENSITY`, `FLOW`, `COND`), the constants (`T_SCALE`, `AMBIENT`, `T_MIN/T_MAX`), the bit layout and every rule now exist **twice**: once in Rust and once in WGSL. Nothing in the compiler connects them. Change `DENSITY[OIL]` in `mod.rs` and forget `sim.wgsl`, and both files still compile and the game still looks plausible. Both files carry a warning comment ("keep the two in sync"), but the real protection is `gpu_gives_identical_world_to_cpu`. Run `cargo test` after every rule change. (Exercise 6 shows a way to generate the WGSL tables from Rust so they cannot drift.)
+The material tables (`KIND`, `DENSITY`, `FLOW`, `COND` at `31aed2d`; `HEAT_K`, `VT_LIQUID`, `VT_GAS` and more since `07fcf0b`), the constants (`T_SCALE`, `AMBIENT`, `T_MIN/T_MAX`), the bit layout and every rule now exist **twice**: once in Rust and once in WGSL. Nothing in the compiler connects them. Change `DENSITY[OIL]` in `mod.rs` and forget `sim.wgsl`, and both files still compile and the game still looks plausible. Both files carry a warning comment ("keep the two in sync"), but the real protection is `gpu_gives_identical_world_to_cpu`. Run `cargo test` after every rule change. (Exercise 6 shows a way to generate the WGSL tables from Rust so they cannot drift.)
 
 ---
 
@@ -821,13 +829,84 @@ Read the `label` to find the file, then the line/column caret that naga prints u
 ## 7. Recap
 
 - WGSL maps closely onto Rust: `let` = `let`, `var` = `let mut`, `const` = `const`. No implicit conversions, `bitcast` for bit reinterpretation, `select(f, t, c)` for an inline `if`.
-- Tables indexed at runtime are `var<private>` arrays. Inputs are `var<storage, read>`, outputs are `var<storage, read_write>`, parameters are `var<uniform>`, each at an `@group/@binding` that matches the Rust bind group layout.
+- Tables indexed at runtime are `var<private>` arrays (at `31aed2d`; later packed constants and `switch` functions). Inputs are `var<storage, read>`, outputs are `var<storage, read_write>`, parameters are `var<uniform>`, each at an `@group/@binding` that matches the Rust bind group layout.
 - A compute entry point is the *body* of the CPU's nested loops. `global_invocation_id` replaces the loop counters, and an early `return` handles the overhang.
 - Porting rewrites Rust features WGSL lacks (match guards → `if` chains, closures → loops over a small array, `swap` → three assignments, `wrapping_mul` → `*`) **while keeping the order of operations**.
-- Determinism comes from integers only: truncating signed division on both sides, arithmetic right shift, a pure hash of (position, frame), no races, and no floats (FMA, loose float accuracy and reordering would all break exactness).
+- Determinism comes from integers only: truncating signed division on both sides (at `31aed2d`; per-edge shared rounding since `07fcf0b`), arithmetic right shift, a pure hash of (position, frame), no races, and no floats (FMA, loose float accuracy and reordering would all break exactness).
 - The test runs both engines on a busy scene for 200 steps and reports **how many cells differ**. That number has to be zero, and it is the only thing keeping two hand-maintained copies of the rules in sync.
 
 **Next lesson (12, Benchmarking honestly):** now that you know the GPU computes exactly the same world, you can compare speeds fairly. That means warm-up, waiting for the GPU before you stop the clock, measuring steps per second at several grid sizes, and not fooling yourself with an asynchronous `submit`.
+
+---
+
+## What changed later (07fcf0b)
+
+`07fcf0b` rewrote the rules in real units (lesson 16, [[16-real-units-velocity-clock]]), and `sim.wgsl` was ported again line by line. Every principle of this lesson held. Here is what the new port had to do differently.
+
+**A struct for a tuple return.** `heat_cell` now returns `(u32, bool)`: the new cell, and whether it *could* have changed for some random number. Chunk sleeping (lesson 13) needs the second value, because with random rounding "unchanged this step" no longer means "settled". WGSL has no tuples, so the port declares a struct:
+
+```wgsl
+// sand/src/physics/sim.wgsl @ 07fcf0b
+struct HeatOut {
+    cell: u32,
+    maybe: bool, // could a random number have changed it? (chunk sleeping)
+}
+// ... at the end of heat():
+let new_cell = pack(next, life, t);
+return HeatOut(new_cell, maybe || new_cell != me);
+```
+
+and the kernel marks a chunk active on `maybe[k]` instead of `cells[k] != old[k]`.
+
+**`switch` tables for values that do not fit in a byte.** By `6c1cebc` the `var<private>` arrays of section 2.1 had already been replaced by bytes packed into `vec3<u32>` constants (`table_byte`), because a private array is copied into every thread's local memory. That still works for `KIND`, `FLOW`, `VT_LIQUID` and `VT_GAS`. But real densities (stone 26000) and heat rates (fire 6990) need more than 8 bits, so those two tables became `switch` functions of constants:
+
+```wgsl
+fn heat_k(m: u32) -> i32 {
+    switch m {
+        case 0u: { return 769; }
+        case 1u: { return 38; }
+        // ... one case per material ...
+        default: { return 769; }
+    }
+}
+```
+
+The Rust side is still a plain `const` array. The equality test is what checks that the two spellings hold the same numbers.
+
+**One `pcg` per edge, named by cell index.** Conduction now rounds each edge's flow at random (lesson 07's last section). Both cells of an edge must use the *same* random number, or heat would not be conserved. An edge is named by the index `i = y * w + x` of its left/upper cell and a direction bit, hashed with a key computed once per step:
+
+```wgsl
+let key = pcg(frame ^ EDGE_SALT);
+fn edge_roll(i: u32, down: u32, key: u32) -> i32 {
+    return i32(pcg((2u * i + down) ^ key) & 0xFFFFFu);
+}
+// left neighbour's edge: named by i - 1, and we take minus its flow
+t -= edge_flow(temp(left), t0, pair_k(m, material(left)), edge_roll(i - 1u, 0u, key));
+```
+
+One `pcg` per edge instead of a three-level `hash3` keeps the GPU fast (each cell evaluates 4 edges per step). The per-cell number is also keyed by index now: `pcg(i ^ pcg(frame ^ CELL_SALT))` instead of `hash3(x, y, frame ^ 0xA511E9B3)`. Index-based keys are only identical on both sides because `w` is the same; the odd-size GPU tests check that.
+
+**`>> 20` on purpose.** Rule 2 of section 2.3 warned that turning `/ 1024` into a shift gives floor division and breaks conservation. The new `edge_flow` *is* a shift:
+
+```wgsl
+// >> on i32 rounds toward minus infinity, like Rust's >> on i32.
+fn edge_flow(t: i32, other: i32, k: i32, roll: i32) -> i32 {
+    return ((other - t) * k + roll) >> 20u;
+}
+```
+
+That is fine now because the right/lower cell does not recompute the flow with swapped arguments; it evaluates the very same call and negates it. Floor is needed for stochastic rounding to be unbiased, and arithmetic `>>` on `i32` is a floor in both languages (rule 3), so CPU and GPU still agree bit for bit.
+
+**The fast path excludes more.** The kernel's shortcut for a block whose cell and all neighbours hold one identical value computes `heat` once and copies it. That is only valid if no random number can matter. Uniform cells have no temperature gaps and nothing free to fall, but a gas away from 20 °C rounds its relaxation at random and smoke ticks its life at random, so they are excluded too:
+
+```wgsl
+let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT);
+if (same && fixed) { /* compute heat once */ }
+```
+
+At `6c1cebc` the condition was only `m != WOOD && m != OIL && m != FIRE`.
+
+**The tests still demand equality.** `gpu_gives_identical_world_to_cpu` (200 steps on the busy scene), the odd-size variants, and the sleeping tests (9000 steps, CPU with sleeping = CPU without = GPU, cell for cell) all pass at `07fcf0b` (`cargo test --release --lib`: 18 passed). The two hand-maintained copies grew by a few hundred lines each, and the equality test is still the only thing that keeps them in sync.
 
 ---
 

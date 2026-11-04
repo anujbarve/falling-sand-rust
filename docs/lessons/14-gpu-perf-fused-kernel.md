@@ -3,6 +3,15 @@
 > Source for this lesson: commit `9b8dd55` ("GPU: fuse heat and move passes into one dispatch per step") on branch `worktree-agent-a6297577531b68f08`. Its parent `0df358e` is the two-pass baseline. See the whole change with
 > `git diff 0df358e 9b8dd55 -- sand/src/physics`.
 
+> [!note] This lesson's commit is local-only, and the fused kernel now lives on `main`'s line
+> This lesson teaches `9b8dd55`, an experiment on a side branch built on the two-pass engine **without chunk sleeping**. That branch is now kept locally as `fused-kernel-standalone` and is **not pushed to GitHub**. If you cloned the repo from GitHub, `git show 9b8dd55` will fail. Read the snippets in this lesson, or study the merged version in `6c1cebc`.
+>
+> Later history:
+> - `6c1cebc` merged the fused kernel with chunk sleeping ([[13-chunk-sleeping]]) by hand. GPU steps got faster at every size, and sleeping inside the fused kernel costs about 30% on a fully awake world.
+> - `07fcf0b` ([[16-real-units-velocity-clock]]) made the physics heavier (real units, speed per cell, random heat rounding). GPU steps cost more after that, and the uniform fast path got stricter conditions.
+>
+> Details are in "What changed later" at the end.
+
 ---
 
 ## 1. What you will build
@@ -888,7 +897,7 @@ Read this honestly: the toy speeds up only about **1.3×**, not 2×. The toy's t
 
 ## 4. Live examples
 
-**A. The real thing, before vs after.** Check the commits out side by side without touching your working tree:
+**A. The real thing, before vs after.** Check the commits out side by side without touching your working tree. (`0df358e` and `9b8dd55` exist only in the author's local clone, on branch `fused-kernel-standalone`. From a GitHub clone, compare `d94ade6` (two passes, with sleeping) with `6c1cebc` (fused, with sleeping) instead.)
 
 ```sh
 cd /Users/anujbarve/Documents/rusty
@@ -959,7 +968,7 @@ cd /tmp/sand-fused/sand && cargo test --release gpu_matches_cpu_on_odd_sizes
 - Fast paths (interior, uniform neighbourhood, can't-move) pay off when whole SIMD groups take them together. Lookup tables packed into constants beat `var<private>` arrays.
 - Shared-memory tiling, the textbook trick, was **20–25% slower** here. Workgroup shape mostly didn't matter, except two shapes that were about 5× slower. Measure, don't assume.
 - Correctness first: test odd sizes, exact tile multiples and tiny grids, cover both offsets, and break the code on purpose to prove the test can fail.
-- Result: 4.77 → ~2.25 ms at 4K and 2.10 → ~1.0 ms at 2560×1440, about 2.1×, bit-identical to the CPU.
+- Result (at `9b8dd55`, no sleeping): 4.77 → ~2.25 ms at 4K and 2.10 → ~1.0 ms at 2560×1440, about 2.1×, bit-identical to the CPU.
 
 **Next, lesson 15, the GPU-only viewer.** The simulation is now fast enough that the expensive part is copying the grid back to the CPU every frame to draw it. Lesson 15 keeps the world on the GPU, pipelines the readback so the CPU never waits, and paints straight into GPU buffers.
 
@@ -1105,3 +1114,74 @@ In WGSL `blur_cell`:
 This shortcut is only safe because the value is a fixed point: $(4v + 4v)/8 = v$ exactly in integer arithmetic, and the sink rule only swaps when `a > b`. The odd-size test passes (verified). Whether it is faster depends on how much of the grid is uniform: on a half-constant start grid the gain was small and noisy, because noise frames keep breaking uniformity. In the sand game, large areas of air and stone stay uniform for thousands of frames, which is why the project's version pays.
 
 </details>
+
+---
+
+## What changed later
+
+### 1. Where the fused kernel lives now
+
+`9b8dd55` was built on `0df358e`, an import of the engine from *before* chunk sleeping. Meanwhile `main`'s line gained sleeping (`1157366`) and the pipelined viewer (`d94ade6`). So the two could not just be merged with git. In `6c1cebc` the fused kernel was ported **by hand** onto the sleeping engine. That commit is what the repo runs today.
+
+`9b8dd55` and its parent `0df358e` are kept only as the local branch `fused-kernel-standalone`, which is not on GitHub. If you don't have it, everything this lesson quotes from `9b8dd55` is also in the snippets above, and `git diff d94ade6 6c1cebc -- sand/src/physics` shows the same fusion applied to the sleeping engine.
+
+### 2. How sleeping was folded in (`6c1cebc`)
+
+At `1157366` sleeping relied on "one move workgroup = one chunk", so a whole workgroup returned together. A fused thread owns a 2×2 block whose cells may lie in up to 4 chunks, so each thread now checks its cells one by one (`sim.wgsl` @ `6c1cebc`):
+
+```wgsl
+if (in_x[dx] && in_y[dy]) {
+    chunk[k] = chunk_of(ux + dx, uy + dy);
+    wake[k] = awake[chunk[k]] != 0u;
+    any_awake = any_awake || wake[k];
+}
+// ...
+if (!any_awake) {
+    return; // everything this thread owns is asleep: cells_out already holds it
+}
+```
+
+After that come the same 12 reads as in this lesson. Heat runs only for awake cells (`if (wake[k]) { cells[k] = heat(...); }`). A sleeping cell keeps its old value and is not written. The move is gated by the block's **owner chunk**, the one holding its top-left cell:
+
+```wgsl
+let whole = x >= 0 && y >= 0 && in_x[1] && in_y[1];
+if (whole && wake[0] && may_move(cells) && block_can_move(cells)) {
+    mark_active(chunk[0]);
+    move_block(&cells, hash3((ux - o) / 2u, (uy - o) / 2u, frame));
+    write = array<bool, 4>(true, true, true, true);
+}
+```
+
+Activity is stamped straight into the global `array<atomic<u32>>` by `mark_active`, which loads before it stores so already-stamped chunks don't get contended writes. A separate `wake` dispatch still follows each `step` dispatch. On the Rust side, `GpuSim::step` records `step` plus (when sleeping) `wake`, and the dispatch size is still `(w + o).div_ceil(tile)`.
+
+### 3. The uniform fast path, then and now
+
+At `9b8dd55` the condition was `same && m != WOOD && m != OIL && m != FIRE`, and the thread wrote `nv` to all 4 cells. At `6c1cebc` it writes only the awake cells and stamps their chunks if `nv != v`. At `07fcf0b` random heat rounding and gas relaxation mean more materials depend on a per-cell random number, so the condition got stricter:
+
+```wgsl
+// sim.wgsl @ 07fcf0b
+let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS || temp(v) == AMBIENT);
+if (same && fixed) {
+    let nv = heat(v, v, v, v, v, ux, uy, w, h, frame).cell;
+    // write nv to each awake cell, mark_active if nv != v
+}
+```
+
+Smoke uses its random number every step (its life ticks down at random). A gas away from 20°C relaxes with random rounding. Both can now give 4 *different* results from 4 equal inputs, so they leave the fast path. `heat` also returns a `HeatOut { cell, maybe }` struct now ([[13-chunk-sleeping]], "What changed later").
+
+### 4. The numbers after the merge
+
+Clean bench at `6c1cebc` (Apple M5, ms per GPU step, busy scene, sleeping on):
+
+| grid | before all perf work | fused + sleeping (`6c1cebc`) | after real units (`07fcf0b`) |
+|---|---|---|---|
+| 640×360 | 0.087 | 0.059 | 0.123 |
+| 1280×720 | 0.314 | 0.209 | |
+| 1920×1080 | 0.703 | 0.437 | 0.794 |
+| 2560×1440 | 1.268 | 0.855 | |
+| 3840×2160 | 2.911 | 2.168 | 2.87 |
+
+- A settled 4K world with sleeping costs **0.557 ms** per step (471 / 8160 chunks awake).
+- On an all-awake world the sleeping bookkeeping (awake checks, atomic stamps, the `wake` pass) costs **about 30%** compared with the fused kernel alone. It is still the right default, because real scenes are mostly at rest.
+- Don't compare this table with the A/B at the top of this lesson (4.77 → ~2.25 ms at 4K): they are different measurement runs. Compare ratios within one table.
+- `07fcf0b` made each step do more work (speed per cell, random rounding per edge), so step costs rose. The bench now also prints a "gpu max speed" column: how many times faster than real time the GPU alone could run. At `07fcf0b` that is about 6.8× at 640×360, about 1× at 1080p and 0.3× at 4K ([[16-real-units-velocity-clock]]).

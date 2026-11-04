@@ -5,6 +5,9 @@
 > - new viewer: `git show d94ade6:sand/src/bin/physics.rs`
 > - readback machinery: `git show d94ade6:sand/src/physics/gpu.rs` (`Readback`, `step_and_readback`, `latest`, `upload`, `write_cells`, `gpu_time_ms`)
 
+> [!note] The viewer's step count changed later
+> This lesson teaches `d94ade6`, where the viewer ran a fixed `steps_per_frame` (keys `-` / `=`, 1 to 64). In `07fcf0b` ([[16-real-units-velocity-clock]]) a world-time `Clock` replaced it: the viewer runs as many steps as the chosen speed needs (real time by default), within a budget computed from the GPU timestamps of this lesson. New keys: `,` slower, `.` faster, `/` real time. The HUD shows world time and the speed actually reached. The readback pipeline, epochs and `write_cells` are unchanged. In between, `6c1cebc` swapped the GPU step for the fused kernel ([[14-gpu-perf-fused-kernel]]), which `GpuSim`'s API hides from the viewer. See "What changed later" at the end.
+
 ---
 
 ## 1. What you will build
@@ -874,7 +877,7 @@ cargo run --release --bin physics
 
 Things to try:
 
-- **`+` / `=` repeatedly** up to 64 steps/frame. Watch `gpu ms/step` (GPU clock) against `cpu ms/frame`. The CPU number stays small while the GPU does more work. That gap is what pipelining buys you.
+- **`+` / `=` repeatedly** up to 64 steps/frame (at `d94ade6`; since `07fcf0b` press `.` for a faster world clock instead, up to 16x). Watch `gpu ms/step` (GPU clock) against `cpu ms/frame`. The CPU number stays small while the GPU does more work. That gap is what pipelining buys you.
 - **Paint while it runs.** Paint appears about a frame later and the sand keeps falling under the brush. Nothing rewinds.
 - **Tab / R** while sand is falling. The new scene appears with no flash of the old one. That is the epoch check.
 - **H** switches to the thermal camera palette. Paint lava (`8`) on ice (`9`) and watch the blue-black-red-yellow-white gradient.
@@ -976,7 +979,7 @@ The callback must be `'static`, and `self` is only borrowed for this call. Fix: 
 - Drawing: `Image` bytes → `texture.update` → `draw_texture_ex` with `FilterMode::Nearest`. Colours come from `lerp` by temperature. The HUD uses `format!`, `Option::map_or`, match guards, and GPU timestamps read back the same way as the grid.
 - `std::process::exit(1)` returns `!`, which allows the clean "no GPU" exit. The old viewer's `Option<GpuSim>` allowed a graceful fallback instead.
 
-**Next, lesson 16 (course index and capstone roadmap):** a map of all fifteen lessons, how the pieces depend on each other, and suggested capstone projects, such as rendering directly from the wgpu buffers so the readback round trip disappears entirely.
+**Next, [[16-real-units-velocity-clock]]:** real units (1 cell = 5 mm, 1 step = 1/1200 s), gravity with a stored speed, and the world-time clock that now decides how many steps each frame runs. After that, [[17-capstone-roadmap]] has suggested capstone projects, such as rendering directly from the wgpu buffers so the readback round trip disappears entirely.
 
 ---
 
@@ -1141,3 +1144,72 @@ if !edits.is_empty() {
 
 With `dy` outside / `dx` inside, a 7×7 brush is 49 cells in about 7 writes (one per row). Swap the loops and consecutive edits sit `W` apart, so each one becomes its own write: about 49. `bool as usize` is 0 or 1, which makes counting easy.
 </details>
+
+---
+
+## What changed later
+
+### 1. The clock decides the step count (`07fcf0b`)
+
+At `d94ade6` the viewer ran a fixed number of steps per frame, so how fast the world moved depended on the frame rate and on which key you'd pressed. In `07fcf0b` each step became a fixed slice of world time, $1/1200$ s ([[16-real-units-velocity-clock]]), and a `Clock` (`sand/src/physics/clock.rs`) turns wall time into steps. From `sand/src/bin/physics.rs` @ `07fcf0b`:
+
+```rust
+let mut clock = Clock::default(); // replaces `let mut steps_per_frame = 4u32;`
+// ...
+// As many steps as the chosen speed needs for the time this frame
+// took, but no more than about 12 ms of GPU work per frame.
+let budget = match gpu.gpu_time_ms() {
+    Some(ms) if ms > 0.0 => (12.0 / ms).clamp(1.0, 20_000.0) as u32,
+    _ => 2_000,
+};
+let mut steps = clock.steps_for_frame(get_frame_time() as f64, budget, paused);
+if paused && is_key_pressed(KeyCode::N) {
+    steps = STEPS_PER_SECOND / 60; // advance 1/60 s of world time
+    clock.add_steps(steps);
+}
+if steps > 0 || !edits.is_empty() {
+    gpu.step_and_readback(steps); // returns at once, exactly as in this lesson
+}
+```
+
+Two things from this lesson now carry more weight:
+
+- **GPU timestamps set the budget.** `gpu_time_ms()` (§2.13) is no longer only a HUD number. It caps the steps per frame at about 12 ms of GPU work, so a slow GPU drops steps instead of piling up work. Back-pressure in `claim_readback_slot` is still the safety net behind it.
+- **`steps` varies every frame.** At real time and 60 fps it is 20 steps per frame. At 0.01× it is one step every 5 frames: `Clock` keeps the fraction in a `debt` field and carries it to the next frame. `step_and_readback(0)` still works, for frames that only show paint.
+
+`N` while paused now advances $1/60$ s of world time (20 steps) instead of one step. Loading a scene calls `clock.reset()` next to `gpu.upload(&world)`.
+
+### 2. Keys and HUD (`07fcf0b`)
+
+| key | at `d94ade6` | at `07fcf0b` |
+|---|---|---|
+| `-` / `=` | halve / double steps per frame (1..64) | removed |
+| `,` / `.` | | slower / faster world clock: 0.01× … 16× |
+| `/` | | back to real time (1×) |
+| `N` (paused) | one step | 1/60 s of world time |
+
+The HUD's second line went from `"{adapter} | {n} steps/frame | {gpu_ms} | cpu .. ms/frame | frame .. ms, .. fps"` to:
+
+```rust
+format!(
+    "world time {:.2} s | speed {}x{} | {} steps/frame | {gpu_ms} | cpu {:.2} ms/frame | {} fps",
+    clock.world_seconds,
+    clock.speed(),
+    if paused {
+        String::new()
+    } else if clock.behind {
+        format!(" (GPU too slow: reaching {:.2}x)", clock.achieved)
+    } else {
+        format!(" (reaching {:.2}x)", clock.achieved)
+    },
+    steps,
+    cpu_ms,
+    get_fps(),
+),
+```
+
+`clock.achieved` is a smoothed "world seconds per wall second". When the budget cuts steps, `clock.behind` is true and the HUD says so. In the real 640×360 viewer on an Apple M5 the GPU step costs about 0.12 ms at `07fcf0b`, so real time (1200 steps per second) fits easily. At 4K it would not (about 0.3×). The bottom right of the window also has a 10 cm scale bar (20 cells, since a cell is 5 mm).
+
+### 3. What did not change
+
+`Readback`, the `FREE → PENDING → READY` slots, epochs, `latest`, `write_cells` with its run merging and `wake_all`, and the timestamp machinery are the same at `07fcf0b` as at `d94ade6`. In `6c1cebc` only the GPU step behind `step_and_readback` changed, from two passes to the fused kernel with sleeping ([[14-gpu-perf-fused-kernel]]).

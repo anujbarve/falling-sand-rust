@@ -75,11 +75,16 @@ Where your code differs, ask which version is clearer and why. Both can be right
 **[[13-chunk-sleeping]]**: 32x32 chunks that go to sleep when nothing changes, why skipping them is provably exact, and the same rule on CPU and GPU.
 *Concepts:* designing for invariants, more tests as proofs (sleeping == no sleeping), bit flags.
 
-**[[14-gpu-perf-fused-kernel]]**: Fusing the heat and move passes into one dispatch: one thread per 2x2 block, interior fast paths, uniform-block shortcuts, and measuring what helped (and what didn't: workgroup tiles were slower).
+**[[14-gpu-perf-fused-kernel]]**: Fusing the heat and move passes into one dispatch: one thread per 2x2 block, interior fast paths, uniform-block shortcuts, and measuring what helped (and what didn't: workgroup tiles were slower). Taught from the standalone experiment `9b8dd55`; the version merged with chunk sleeping is `6c1cebc`.
 *Concepts:* profiling-driven changes, testing odd grid sizes, edge cases at boundaries.
 
 **[[15-gpu-viewer-pipelined-readback]]**: A GPU-only viewer, three staging buffers in rotation so the CPU never waits, epoch-based discarding of stale readbacks, GPU timestamp queries, release LTO.
 *Concepts:* `Option` state machines, `Arc<AtomicU8>` to share a buffer's state with a `map_async` callback, Cargo profiles (`lto`, `codegen-units`, `panic = "abort"`).
+
+### Part 4: real physics
+
+**[[16-real-units-velocity-clock]]**: Real units (1 cell = 5 mm, 1 step = 1/1200 s), gravity that accelerates a stored speed per cell, real heat diffusivities with stochastic rounding that still conserves heat exactly, and a world-time `Clock` with slow motion (0.01x) to fast forward (16x). Tests compare free fall and sinking with real physics.
+*Concepts:* fixed-timestep loops (wall time vs world time, carrying fractions), units as `const` values, `const fn` with `f64`, stochastic rounding, tests against physics formulas.
 
 **[[17-capstone-roadmap]]**: Build the whole thing yourself, milestone by milestone, with acceptance criteria and stretch goals.
 
@@ -98,15 +103,19 @@ Where your code differs, ask which version is clearer and why. Both can be right
 | Closures and `impl Fn*` | 04, 07, 09, 12 |
 | Iterators | 04, 09 |
 | Modules, `pub`, `use`, lib + bins | 06 |
-| `const`, `const fn`, lookup tables | 04, 06, 07 |
+| `const`, `const fn`, lookup tables | 04, 06, 07, 16 |
+| `const fn` with `f64` (units computed at compile time) | 16 |
+| Fixed-timestep loops (world time vs wall time) | 16 |
+| Physical units in integer code | 16 |
+| Stochastic rounding (exact on average, conserved exactly) | 16 |
 | Bit manipulation | 06, 13 |
-| Testing (`#[test]`, `cargo test`, equivalence tests) | 05, 11, 13, 14, 15 |
+| Testing (`#[test]`, `cargo test`, equivalence tests) | 05, 11, 13, 14, 15, 16 |
 | Async (`async fn`, `.await`, `block_on`) | 01, 10 |
 | Threads, `Send`/`Sync`, rayon | 09 |
 | Safe GPU interop with `bytemuck` (no `unsafe`) | 10 |
 | `Drop` and RAII | 10 |
 | Shared state across callbacks | 15 |
-| Measuring performance | 12, 13, 14, 15 |
+| Measuring performance | 12, 13, 14, 15, 16 |
 
 ## Lesson dependencies
 
@@ -129,8 +138,9 @@ graph TD
   L12 --> L13[13 chunk sleeping]
   L13 --> L14[14 fused GPU kernel]
   L13 --> L15[15 GPU viewer, pipelined readback]
-  L14 --> L17[17 capstone]
-  L15 --> L17
+  L14 --> L16[16 real units, velocity, world clock]
+  L15 --> L16
+  L16 --> L17[17 capstone]
 ```
 
 Lessons 09 and 10 are independent of each other: both rely only on lesson 08's "every cell has exactly one writer" rule.
@@ -144,13 +154,15 @@ graph LR
   subgraph old["Old engine (lessons 01-05)"]
     MAIN["src/main.rs<br/>Cell enum, Grid, particles,<br/>scenes, macroquad UI, tests"]
   end
-  subgraph lib["Library crate (lessons 06-15)"]
+  subgraph lib["Library crate (lessons 06-16)"]
     LIBRS["src/lib.rs<br/>pub mod physics"]
     MOD["physics/mod.rs<br/>materials, pack/unpack, World,<br/>heat_cell, move_block, scenes, tests"]
     CPU["physics/cpu.rs<br/>CpuSim: step, step_parallel"]
     GPU["physics/gpu.rs<br/>GpuSim: wgpu setup, step,<br/>readback, timestamps"]
     WGSL["physics/sim.wgsl<br/>compute shader"]
+    CLOCK["physics/clock.rs<br/>Clock: world time vs wall time"]
     LIBRS --> MOD
+    MOD --> CLOCK
     MOD --> CPU
     MOD --> GPU
     GPU -- include_str! --> WGSL
@@ -160,6 +172,7 @@ graph LR
     BENCH["src/bin/bench.rs<br/>CPU vs GPU timing"]
   end
   VIEW --> GPU
+  VIEW --> CLOCK
   BENCH --> CPU
   BENCH --> GPU
 ```
@@ -176,7 +189,9 @@ graph LR
 | `31aed2d` | Pack material, aux and temperature into one `u32` per cell | 06, 07 |
 | `1157366` | Chunk sleeping on GPU and CPU, bit-exact with no sleeping | 13 |
 | `d94ade6` | GPU-only viewer, pipelined readback, GPU timestamps, release LTO | 15 |
-| `9b8dd55` | Fused single-dispatch GPU kernel (side branch; its parent `0df358e` imports the engine *without* chunk sleeping, so read it as an experiment on the two-pass engine) | 14 |
+| `9b8dd55` | Fused single-dispatch GPU kernel as a standalone experiment (side branch; its parent `0df358e` imports the engine *without* chunk sleeping). **Local only**: kept as branch `fused-kernel-standalone`, not pushed to GitHub, so a fresh clone won't have it | 14 |
+| `6c1cebc` | Fused kernel merged by hand with chunk sleeping: per-cell awake checks, owner-chunk move gate, atomic activity stamps, separate `wake` pass | 13, 14 |
+| `07fcf0b` | Real units, gravity with stored speed, stochastic heat rounding, world-time `Clock` (`physics/clock.rs`), viewer keys `,` `.` `/`, "gpu max speed" bench column; chunk sleeping counts "could change for some random number" | 16 (and the "What changed later" sections of 13, 14, 15) |
 
 Lesson 06 teaches bit packing together with the module split, though in history it came one commit later (`31aed2d`). If you want to see the unpacked first version, read `2fbcad6`.
 
@@ -187,6 +202,8 @@ git worktree add ../rusty-stage05 a022b3c     # checkout of that commit in ../ru
 cd ../rusty-stage05/sand && cargo run && cargo test
 git worktree remove ../rusty-stage05          # when you're done
 ```
+
+If you cloned from GitHub you won't have `9b8dd55` or `0df358e`. Lesson 14 quotes everything you need from them, and `6c1cebc` contains the same fused kernel, merged with sleeping.
 
 `git checkout <sha>` also works, but it moves your main working tree to that commit ("detached HEAD"). Return with `git checkout main`.
 
@@ -207,6 +224,8 @@ Use these next to the lessons, not instead of them.
 | 10 Generic Types, Traits, and Lifetimes | 10 |
 | 16 Fearless Concurrency | 09, 15 |
 | 14 More about Cargo | 15 |
+
+| 3.1 Variables (constants), 5 Structs (methods) | 16 |
 
 The Book's chapter on async/await is newer and its number has changed between editions. Look it up by name when you reach lesson 10.
 

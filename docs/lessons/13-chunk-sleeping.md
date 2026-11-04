@@ -4,6 +4,13 @@
 > Files: `sand/src/physics/mod.rs` (the rule and its proof), `cpu.rs`, `gpu.rs`, `sim.wgsl`, `bin/bench.rs`.
 > Read any of them with `git show 1157366:sand/src/physics/mod.rs`.
 
+> [!note] Later commits changed parts of this
+> This lesson teaches commit `1157366`, where the GPU still ran **two passes** (heat, then move) and a whole workgroup slept or ran together. Two later commits touch the sleeping code:
+> - `6c1cebc` merged sleeping into the fused one-dispatch kernel of [[14-gpu-perf-fused-kernel]]. Each GPU thread now checks the chunks of its own 4 cells, and activity is stamped with atomics.
+> - `07fcf0b` ([[16-real-units-velocity-clock]]) added random rounding to the heat pass. "Did the heat pass change the cell?" is no longer enough: a chunk is now active when a heat update **could change for some random number**. `heat_cell` returns `(u32, bool)`.
+>
+> The rule and the proof in this lesson still hold. See "What changed later" at the end for the current code.
+
 ---
 
 ## 1. What you will build
@@ -14,7 +21,7 @@ This lesson adds **chunk sleeping**:
 
 - Cut the grid into fixed 32×32 **chunks**.
 - Keep a little bookkeeping per chunk: was anything going on here recently?
-- Skip chunks where nothing can happen. On the GPU, a skipped chunk's workgroups return straight away. On the CPU, the loop moves on to the next chunk.
+- Skip chunks where nothing can happen. On the GPU (at `1157366`), a skipped chunk's workgroups return straight away. On the CPU, the loop moves on to the next chunk.
 
 There is a hard requirement. **Sleeping must never change the result.** A run with sleeping must be bit-identical to a run without it. Otherwise the CPU and GPU would drift apart depending on which chunks each one skipped, and every test from lessons 11–12 would stop meaning anything.
 
@@ -84,7 +91,7 @@ pub fn block_can_move(cells: &[u32; 4]) -> bool {
 
 The trick: `sinks(top, bottom, roll)` is "the densities allow it **and** `roll < threshold`". Pass `roll = 0`, the smallest possible roll. Then the test is true exactly when *some* roll would make it true. One check covers all $2^{32}$ possible random numbers.
 
-The heat pass has a matching property, stated in the comment block. When a heat update leaves a cell unchanged, it did not depend on the random number. The random number is only used by updates that always change the cell: ignition, and fire/smoke, which change every step. So for heat, "did change" really is enough.
+The heat pass has a matching property, stated in the comment block. When a heat update leaves a cell unchanged, it did not depend on the random number. The random number is only used by updates that always change the cell: ignition, and fire/smoke, which change every step. So for heat (at `1157366`), "did change" really is enough. Since `07fcf0b` this is no longer true: heat uses random rounding, so a cell can come out unchanged by luck. The rule became "could change for some random number" (see "What changed later").
 
 ### 2.3 The exact rule
 
@@ -241,6 +248,8 @@ move_block(&mut cells, hash3(bx as u32, by as u32, frame));
 Note that `live = true` comes *before* `move_block`. The chunk counts as active whether or not the roll made the block move. That line is §2.2 in code.
 
 ### 2.8 GPU side: early return, atomics, a tiny wake pass
+
+(This section describes the two-pass GPU code at `1157366`. Since `6c1cebc` the GPU uses one fused dispatch with per-cell checks: see "What changed later".)
 
 The GPU has two storage buffers, one `u32` per chunk: `chunk_active` (stamps) and `awake` (flags). Workgroups map onto chunks. A 16×16 heat workgroup is a quarter chunk, and a 16×16 move workgroup of 2×2 blocks is exactly one chunk.
 
@@ -762,7 +771,7 @@ A three-way zip yields `(a, (b, c))`, not `(a, b, c)`. Match the nesting in the 
 
 **Sand hangs in mid-air after painting.** You edited `world.cells` without waking the chunk. Either go through `paint`, compare against a snapshot (exercise 4), or reset everything (`Sim::new`) as `GpuSim::upload` does.
 
-**Off-by-one ownership.** If you pick the owner from the block's *bottom-right* cell for activity, but skip by the *top-left* cell's chunk, then an asleep chunk can skip a block that an awake chunk was counting on. Use one owner rule everywhere. The GPU gets it for free because one move workgroup = one chunk.
+**Off-by-one ownership.** If you pick the owner from the block's *bottom-right* cell for activity, but skip by the *top-left* cell's chunk, then an asleep chunk can skip a block that an awake chunk was counting on. Use one owner rule everywhere. At `1157366` the GPU gets it for free because one move workgroup = one chunk. The fused kernel since `6c1cebc` uses the top-left cell's chunk explicitly (`wake[0]`).
 
 **`workgroupBarrier` inside non-uniform control flow (WGSL).** If you early-return with a per-thread value (`if (awake[chunk] == 0u) { return; }` read by each thread separately), naga may reject the later barrier as non-uniform. `workgroupUniformLoad` exists to give you a value the compiler knows is uniform.
 
@@ -775,7 +784,7 @@ A three-way zip yields `(a, (b, c))`, not `(a, b, c)`. Match the nesting in the 
 - **Active** = heat changed a cell, or an owned block could move. **Awake** = self or one of the 8 neighbours was active in step $n-1$ or $n-2$. Two steps, because the block offset and the ping-pong buffers both have period 2.
 - One `u32` stamp per chunk with `wrapping_sub(...) < 2`. Unknown history is written as "stamp = frame − 1".
 - CPU: a `snapshot` plus `Option<u32>` expected frame catches edits made behind its back. `chunks`/`chunks_mut` zips let the serial and rayon versions share one closure.
-- GPU: per-workgroup early return via `workgroupUniformLoad`, a workgroup-local atomic flag so one thread writes the global stamp, and a tiny `wake` pass.
+- GPU (at `1157366`): per-workgroup early return via `workgroupUniformLoad`, a workgroup-local atomic flag so one thread writes the global stamp, and a tiny `wake` pass.
 - Result: a settled 4K world goes from ~4.1–4.5 ms to ~0.5–1.1 ms per GPU step with 471/8160 chunks awake. The busy scene is still a bit faster.
 
 **Next, lesson 14 (GPU performance tuning: the fused kernel):** three dispatches per step (heat, move, wake) each pay launch and memory-traffic costs. Lesson 14 fuses them into a single dispatch per step (branch commit `9b8dd55`) and measures what that buys.
@@ -972,3 +981,87 @@ Why slicing from row `o` works: chunk row `cy` owns blocks with top-left rows `c
 
 `move_block` only looks at `r % 4`. Rolls `0..8` cover every residue twice, so they cover *every* behaviour the function can have. Together with all 81 blocks the test is a complete proof for this tiny sim, not a sample. The real `move_block` compares `r`, and values derived from it with `pcg`, against several thresholds, across $2^{32}$ possible values. Exhaustive testing is impossible there, so the real test samples 20,000 blocks × 64 rolls. The argument in `block_can_move`'s doc comment (the roll-0 trick) carries the real proof.
 </details>
+
+---
+
+## What changed later
+
+The rule ("a chunk runs if it or a neighbour was active in the last two steps") and the proof did not change. What changed is **how the GPU applies it** (`6c1cebc`) and **what counts as active in the heat pass** (`07fcf0b`).
+
+### 1. "Could change", not "did change" (`07fcf0b`)
+
+Lesson [[16-real-units-velocity-clock]] gives heat conduction **random rounding**. Each edge's tiny flow is rounded up or down by a random number, and gravity rounds a cell's speed-up the same way. So a cell can now come out of the heat pass *unchanged by luck*. With a different random number it would have changed. If its chunk then fell asleep, the run with sleeping would differ from the run without it.
+
+The fix is the same idea as `block_can_move`. `heat_cell` now returns a second value: could this update have changed the cell for *some* random number? From `sand/src/physics/mod.rs` @ `07fcf0b`:
+
+```rust
+pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u32) -> (u32, bool) {
+    // ...
+    let mut maybe = false; // could a random number have changed something?
+    let mut edge = |j: usize, ours: bool, edge_cell: usize, down: u32| {
+        // ...
+        if tn == t0 {
+            return; // no gap, no flow (and no need for a random number)
+        }
+        maybe = true;
+        // ... random-rounded flow across this edge
+    };
+    // gases relaxing to 20°C:   maybe |= t0 != AMBIENT;
+    // gravity speed-up:         maybe = true; // the random rounding of the speed-up
+    // FIRE and SMOKE:           maybe = true;
+    // ...
+    (new, maybe || new != me)
+}
+```
+
+The CPU chunk loop uses the flag instead of comparing values (`cpu.rs` @ `07fcf0b`):
+
+```rust
+// Active if it changed, or if a random number could have
+// changed it (stochastic rounding, fire, gravity): see mod.rs.
+let (v, maybe) = heat_cell(cells, w, h, x, y, frame);
+changed |= maybe;
+out[ly * w + x] = v;
+```
+
+The WGSL `heat` returns a struct `HeatOut { cell: u32, maybe: bool }` with the same meaning. A settled heap still sleeps, because cells at one temperature with nowhere to fall need no random number at all.
+
+### 2. Sleeping inside the fused kernel (`6c1cebc`)
+
+In `6c1cebc` the GPU step became one dispatch: one thread per 2×2 block, which heats its 4 cells and then moves them ([[14-gpu-perf-fused-kernel]]). A thread's block can straddle up to 4 chunks, so the "one workgroup = one chunk" shortcut from §2.8 is gone. Instead each thread checks its own cells (`sim.wgsl` @ `6c1cebc`):
+
+```wgsl
+for (var k = 0u; k < 4u; k += 1u) {
+    let dx = k & 1u;
+    let dy = k >> 1u;
+    if (in_x[dx] && in_y[dy]) {
+        chunk[k] = chunk_of(ux + dx, uy + dy);
+        wake[k] = awake[chunk[k]] != 0u;
+        any_awake = any_awake || wake[k];
+    }
+}
+// Everything this thread owns is asleep: cells_out already holds it.
+if (!any_awake) {
+    return;
+}
+```
+
+The three rules from this lesson map onto the fused thread like this:
+
+- **A sleeping cell keeps its old value.** Its heat result *is* its old value, and the ping-pong argument says `cells_out` already holds it. So heat is computed only `if (wake[k])` and the cell isn't written.
+- **The owner chunk gates the move.** The move runs only if the block's top-left cell's chunk is awake: `if (whole && wake[0] && may_move(cells) && block_can_move(cells))`. That is the same owner rule as on the CPU, and when a block moves, all 4 cells are written.
+- **Activity is stamped with atomics, load before store.** There is no workgroup-local flag any more. Each thread stamps the global array directly, but reads first, because most active chunks already hold this frame's stamp and a load is cheaper than contended stores:
+
+```wgsl
+fn mark_active(chunk: u32) {
+    if (atomicLoad(&chunk_active[chunk]) != params.frame) {
+        atomicStore(&chunk_active[chunk], params.frame);
+    }
+}
+```
+
+The `wake` pass is still a separate small dispatch after `step`, unchanged from §2.8. And `write_cells` (paint) still wakes every chunk, because the edit only lands in the current buffer and both ping-pong buffers must be rewritten.
+
+The CPU engine is unchanged in `6c1cebc`: it still runs heat and move as two chunk-row passes, as in this lesson.
+
+**Numbers after the merge** (Apple M5, 3840×2160): the settled world costs **0.557 ms** per GPU step with 471 / 8160 chunks awake. The busy scene costs about 30% more with sleeping than the fused kernel alone, because every thread pays for the awake checks and the stamps. Lesson 14's "What changed later" has the full table.

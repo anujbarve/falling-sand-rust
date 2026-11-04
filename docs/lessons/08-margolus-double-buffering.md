@@ -1,5 +1,13 @@
 # Lesson 08: Margolus blocks and double buffering (CPU)
 
+> [!note] This lesson teaches the `31aed2d` version of `move_block`
+> The Margolus blocks, the alternating offset, the pure hash and the double buffering are unchanged, and the code you build here keeps working. What commit `07fcf0b` changed inside the block rules:
+> - Moving cells (sand, water, oil, lava, steam) store a **speed level** in their `aux` byte, and gravity accelerates it in the per-cell heat pass, not in `move_block`.
+> - A column swaps with chance $p = 2s/(1+s)$ for speed $s$ (`move_chance`), instead of "density gap / top density".
+> - A cell pushed out of the way loses its speed (`displace`), and only resting cells slide or spread.
+>
+> See "What changed later (07fcf0b)" at the end of this lesson, and [[16-real-units-velocity-clock]].
+
 > Sources: commit `31aed2d`, files `sand/src/physics/mod.rs` (`pcg`, `hash3`, `move_block`, `block_offset`) and `sand/src/physics/cpu.rs` (`CpuSim::step`). The original engine is in `sand/src/main.rs` at `8da72fa`.
 
 ---
@@ -141,7 +149,7 @@ flowchart TD
     P --> E
 ```
 
-The real code:
+The real code (at `31aed2d`):
 
 ```rust
 // sand/src/physics/mod.rs @ 31aed2d
@@ -202,7 +210,7 @@ Things to notice:
   | 24-31 | slide, column 1 |
 
   `r2 = pcg(r)` gives fresh bits for the two sideways rolls. `(r >> 8) & 255` means "shift right by 8, keep the low 8 bits".
-- **Probability from a roll.** `sinks` returns `roll < ((dt - db) * 256 / dt) as u32`. With `roll` uniform on 0..=255, the chance of sinking is about
+- **Probability from a roll.** At `31aed2d`, `sinks` returns `roll < ((dt - db) * 256 / dt) as u32`. With `roll` uniform on 0..=255, the chance of sinking is about
   $$P(\text{sink}) \approx \frac{d_{top} - d_{bottom}}{d_{top}}$$
   Sand (150) through air (10): $140/150 \approx 0.93$. Sand through water (100): $50/150 \approx 0.33$. That is buoyancy in one line. In step 2 the roll passed to `sinks` is `0`, so `sinks` only asks "is top heavier?". The chance comes from the `FLOW` roll instead.
 - **Temperature moves for free.** Each `u32` packs material, aux and temperature (lesson 06), so swapping cells carries the heat with them.
@@ -768,12 +776,89 @@ The first test is the payoff of this lesson: the single-thread and all-core vers
 
 - The original engine reads cells that other cells already moved this frame, writes to cells other cells may also write, and pulls numbers from a shared, changing RNG. Its result *is* its scan order, so it cannot be parallelised.
 - **Margolus blocks**: a 2x2 block reads and writes only its own 4 cells, so all blocks are independent. **Alternating the offset** between (0,0) and (1,1) each frame (`frame & 1`) lets material cross block borders.
-- Inside a block: **gravity/buoyancy** per column (chance $\approx (d_t - d_b)/d_t$), then a **diagonal slide** gated by `FLOW`, then **sideways spread** if nothing moved down. Only `swap`s are used, so matter is conserved by construction.
+- Inside a block: **gravity/buoyancy** per column (chance $\approx (d_t - d_b)/d_t$ at `31aed2d`; a speed-based chance since `07fcf0b`), then a **diagonal slide** gated by `FLOW`, then **sideways spread** if nothing moved down. Only `swap`s are used, so matter is conserved by construction.
 - **Randomness is a pure hash** `hash3(bx, by, frame)` with `wrapping_*` arithmetic. Results are independent of visiting order, which is what makes parallel equal sequential, and CPU equal GPU.
 - **Double buffering** for per-cell rules that read neighbours: read old, write new, then `std::mem::swap` the two `Vec`s (a 24-byte header swap, no copying). Allocate the scratch buffer once.
 - Rust tools: `[u32; 4]` (length in the type), `array.map`, `slice.swap`, `std::mem::swap`, `wrapping_mul`/`wrapping_add`, `usize` for indices with `as u32` at the hash boundary.
 
 **Next, lesson 09: Parallel CPU with rayon.** You'll take `CpuSim::step` and turn it into `step_parallel`: `par_chunks_mut(w)` hands each heat-pass row to a thread, `par_chunks_mut(2 * w)` hands each row of blocks to a thread, and the borrow checker proves the chunks don't overlap. The test `single_thread_and_rayon_give_identical_worlds` already tells you it will work, because of everything in this lesson.
+
+---
+
+## What changed later (07fcf0b)
+
+The block machinery of this lesson survived `07fcf0b` untouched: 2x2 blocks, `block_offset(frame)`, `hash3(bx, by, frame)` for the dice, the move pass in place and the heat pass double-buffered. What changed is the *physics inside* the blocks. At `31aed2d` a grain of sand fell with a fixed 93% chance per step, forever: no acceleration, and no link to real time. `07fcf0b` gives moving cells a real speed. Details in [[16-real-units-velocity-clock]].
+
+**The `aux` byte now holds a speed.** Sand, water, oil, lava and steam store a speed level 0..=255 in `aux`. Level 256 would be one cell per step, 5 mm × 1200/s = 6 m/s. Fire and smoke keep using `aux` as their life.
+
+```rust
+// sand/src/physics/mod.rs @ 07fcf0b
+pub const fn has_speed(m: u32) -> bool {
+    matches!(m, SAND | WATER | OIL | LAVA | STEAM)
+}
+pub const fn speed(cell: u32) -> u32 {
+    if has_speed(material(cell)) { aux(cell) } else { 0 }
+}
+/// Gravity adds this much speed per step, in 1/256 of a level
+/// (9.81 m/s^2 * 1/1200 s = 8.2 mm/s per step = 0.349 levels = 89/256).
+pub const G_Q: i32 = (GRAVITY * STEP_SECONDS / MAX_SPEED * 65536.0) as i32;
+```
+
+**Gravity moved into the per-cell (heat) pass.** Why not accelerate inside `move_block`? Because of the alternating offset from section 2.3: a cell is the *top* cell of a block column only every other step (unless it keeps moving, see below). Accelerating there would add $g\,\Delta t$ on some steps and not others. The heat pass visits every cell every step and already reads the cell below from the old grid, so it is the right place for "$v \mathrel{+}= g\,\Delta t$":
+
+```rust
+// sand/src/physics/mod.rs @ 07fcf0b, inside heat_cell
+if has_speed(m) {
+    let roll = (r >> 20) & 255;
+    let (free, other) = if sinker(m) {
+        (below.is_some_and(|b| sinks(me, b)), below)
+    } else {
+        (above.is_some_and(|a| sinks(a, me)), above) // steam rises
+    };
+    life = match (free, other) {
+        (true, Some(o)) => {
+            let (heavy, light) = if sinker(m) { (me, o) } else { (o, me) };
+            maybe = true; // the random rounding of the speed-up
+            accelerate(me, heavy, light, o, roll)
+        }
+        (_, Some(o)) => blocked_speed(me, o), // no faster than what is in the way
+        (_, None) => 0,                       // the world's edge stops it
+    };
+}
+```
+
+`accelerate` adds `G_Q * (heavy - light) / heavy` (buoyancy, the same Archimedes fraction as section 2.4, but now applied to the *acceleration*), rounds the 1/256 part at random, and caps the speed at a terminal velocity (`VT_LIQUID` when moving through a liquid, about 0.1 m/s for sand in water, or `VT_GAS`).
+
+**Speed becomes a chance: $p = 2s/(1+s)$.** In the move pass the column swap now fires with a chance set by the moving body's speed:
+
+```rust
+pub fn move_chance(s: u32) -> u32 {
+    512 * s / (256 + s)
+}
+```
+
+Why not just $p = s$? Write $s$ as a fraction of a cell per step. If the top cell moves down one row, the offset flips at the same time, so next step it is a top cell again. If it does not move, next step it is a bottom cell and must wait one step. Let $T$ be the fraction of steps spent as a top cell: $T = Tp + (1 - T)$ gives $T = 1/(2-p)$. The mean speed is $pT = p/(2-p)$. Setting that equal to $s$ gives
+
+$$p = \frac{2s}{1+s}$$
+
+so the cell covers exactly $s$ cells per step on average. With levels out of 256 that is `512 * s / (256 + s)`. At $s = 256$ (6 m/s) $p = 1$, every step. The test `free_fall_takes_the_right_time` drops grains 1.19 m and checks they land within 10% of $\sqrt{2h/g} = 0.493$ s.
+
+Fire, smoke and hot air have no stored speed. `pair_chance` gives them `move_chance(GAS_RISE * (dt - db) / dt)`, with `GAS_RISE = 42` (1 m/s at a full density gap).
+
+**`displace` instead of `swap`.** A cell that is shoved aside did not choose that motion, so it loses its speed:
+
+```rust
+fn displace(cells: &mut [u32; 4], mover: usize, pushed: usize) {
+    if has_speed(material(cells[pushed])) {
+        cells[pushed] = with_aux(cells[pushed], 0);
+    }
+    cells.swap(mover, pushed);
+}
+```
+
+Gravity and diagonal slides use `displace`. Sideways spreading still uses a plain `swap`, and it, like the diagonal slide, only happens for cells at rest (`speed == 0`, see `can_slide` and `spread_chance`): a falling drop does not also spread. `FLOW` is now a speed level too (water 42 = 1 m/s) and is still used as a roll threshold out of 256.
+
+**The rolls.** `move_block` slices `r` exactly as in the table of section 2.4 (bits 0-15 gravity per column, 16-31 slides, `r2 = pcg(r)` for spreading); only the threshold changed from a density fraction to `pair_chance`. The per-cell pass has its own number, `r = pcg(i ^ pcg(frame ^ CELL_SALT))`: the low 20 bits round gas relaxation, bits 20-27 round the gravity speed-up, `r & 127` / `r & 31` give fire and smoke lives, and `pcg(r) % 64 == 0` is the life tick. Heat conduction uses a separate hash per grid edge (lesson 07's last section).
 
 ---
 
