@@ -12,6 +12,23 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> cells_in: array<u32>;
 @group(0) @binding(2) var<storage, read_write> cells_out: array<u32>;
+// Chunk sleeping (see "Chunk sleeping" in mod.rs for the rule and why it is
+// exact). Per chunk: the last frame in which it was active ...
+@group(0) @binding(3) var<storage, read_write> chunk_active: array<atomic<u32>>;
+// ... and whether it runs in the current step (written by `wake`).
+@group(0) @binding(4) var<storage, read_write> awake: array<u32>;
+
+const CHUNK: u32 = 32u; // = CHUNK in mod.rs
+fn chunks_x() -> u32 { return (params.width + CHUNK - 1u) / CHUNK; }
+fn chunks_y() -> u32 { return (params.height + CHUNK - 1u) / CHUNK; }
+
+// Every workgroup belongs to exactly one chunk. Thread 0 reads the chunk's
+// awake flag into `wg_awake`; `workgroupUniformLoad` hands it to all threads
+// as a uniform value, so the whole workgroup can return early together.
+// `wg_active` collects "something here is active" so that only one thread
+// per workgroup touches the global `chunk_active` stamp.
+var<workgroup> wg_awake: u32;
+var<workgroup> wg_active: atomic<u32>;
 
 const AIR: u32 = 0u;
 const STONE: u32 = 1u;
@@ -66,17 +83,41 @@ fn hash3(a: u32, b: u32, c: u32) -> u32 {
 // Pass 1: heat. One thread per cell, old grid in, new grid out.
 // ---------------------------------------------------------------------------
 
+// A 16x16 heat workgroup is a quarter of a 32x32 chunk.
 @compute @workgroup_size(16, 16)
-fn heat(@builtin(global_invocation_id) id: vec3<u32>) {
-    let w = params.width;
-    let h = params.height;
-    let x = id.x;
-    let y = id.y;
-    if (x >= w || y >= h) {
+fn heat(
+    @builtin(global_invocation_id) id: vec3<u32>,
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_index) li: u32,
+) {
+    let chunk = (wg.y / 2u) * chunks_x() + wg.x / 2u;
+    if (li == 0u) {
+        wg_awake = awake[chunk];
+        atomicStore(&wg_active, 0u);
+    }
+    if (workgroupUniformLoad(&wg_awake) == 0u) {
+        // Asleep: cells_out already holds these cells' values (mod.rs, point 4).
         return;
     }
+    if (id.x < params.width && id.y < params.height) {
+        let i = id.y * params.width + id.x;
+        let old = cells_in[i];
+        let new_cell = heat_cell(id.x, id.y, old);
+        cells_out[i] = new_cell;
+        if (new_cell != old) {
+            atomicStore(&wg_active, 1u);
+        }
+    }
+    workgroupBarrier();
+    if (li == 0u && atomicLoad(&wg_active) != 0u) {
+        atomicStore(&chunk_active[chunk], params.frame);
+    }
+}
+
+fn heat_cell(x: u32, y: u32, me: u32) -> u32 {
+    let w = params.width;
+    let h = params.height;
     let i = y * w + x;
-    let me = cells_in[i];
     let m = material(me);
     var life = aux(me);
     let t0 = temp(me);
@@ -137,7 +178,7 @@ fn heat(@builtin(global_invocation_id) id: vec3<u32>) {
     if (next == AIR) {
         life = 0u;
     }
-    cells_out[i] = pack(next, life, t);
+    return pack(next, life, t);
 }
 
 // ---------------------------------------------------------------------------
@@ -177,25 +218,66 @@ fn spreads(left: u32, right: u32, roll: u32) -> bool {
     return ml != mr && is_fluid(KIND[ml]) && is_fluid(KIND[mr]) && roll < min(FLOW[ml], FLOW[mr]);
 }
 
+// Could the block change for SOME random number? Copy of `block_can_move`.
+fn block_can_move(c: array<u32, 4>) -> bool {
+    var diag = false;
+    for (var col = 0u; col < 2u; col += 1u) {
+        let m = material(c[col]);
+        if ((KIND[m] == POWDER || KIND[m] == LIQUID) && FLOW[m] > 0u && sinks(c[col], c[3u - col], 0u)) {
+            diag = true;
+        }
+    }
+    return sinks(c[0], c[2], 0u) || sinks(c[1], c[3], 0u) || diag
+        || spreads(c[0], c[1], 0u) || spreads(c[2], c[3], 0u);
+}
+
+// A 16x16 workgroup of 2x2 blocks covers exactly one chunk: block (bx, by)
+// has its top-left cell at (2bx + o, 2by + o), which is in chunk
+// (bx / 16, by / 16) for both offsets. That chunk owns the block.
 @compute @workgroup_size(16, 16)
-fn move_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
+fn move_blocks(
+    @builtin(global_invocation_id) id: vec3<u32>,
+    @builtin(workgroup_id) wg: vec3<u32>,
+    @builtin(local_invocation_index) li: u32,
+) {
+    let chunk = wg.y * chunks_x() + wg.x;
+    if (li == 0u) {
+        wg_awake = awake[chunk];
+        atomicStore(&wg_active, 0u);
+    }
+    if (workgroupUniformLoad(&wg_awake) == 0u) {
+        return;
+    }
+    if (move_block(id.x, id.y)) {
+        atomicStore(&wg_active, 1u);
+    }
+    workgroupBarrier();
+    if (li == 0u && atomicLoad(&wg_active) != 0u) {
+        atomicStore(&chunk_active[chunk], params.frame);
+    }
+}
+
+// Returns whether the block could move (that makes its chunk active).
+fn move_block(bx: u32, by: u32) -> bool {
     let w = params.width;
     let h = params.height;
-    let bx = id.x;
-    let by = id.y;
     if (bx >= w / 2u || by >= h / 2u) {
-        return;
+        return false;
     }
     let o = params.frame & 1u;
     let x = 2u * bx + o;
     let y = 2u * by + o;
     if (x + 1u >= w || y + 1u >= h) {
-        return;
+        return false;
     }
     let idx = array<u32, 4>(y * w + x, y * w + x + 1u, (y + 1u) * w + x, (y + 1u) * w + x + 1u);
     var cells: array<u32, 4>;
     for (var k = 0u; k < 4u; k += 1u) {
         cells[k] = cells_out[idx[k]];
+    }
+    // Cannot move for any random number: nothing to do, nothing to write.
+    if (!block_can_move(cells)) {
+        return false;
     }
 
     let r = hash3(bx, by, params.frame);
@@ -242,4 +324,29 @@ fn move_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var k = 0u; k < 4u; k += 1u) {
         cells_out[idx[k]] = cells[k];
     }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 3: wake. One thread per chunk, after the move pass of step `frame`.
+// A chunk runs in step frame+1 if it or a neighbour was active in step
+// frame or frame-1. (Wrapping u32 maths, like the CPU's `is_awake`.)
+// ---------------------------------------------------------------------------
+
+@compute @workgroup_size(8, 8)
+fn wake(@builtin(global_invocation_id) id: vec3<u32>) {
+    let cw = chunks_x();
+    let ch = chunks_y();
+    if (id.x >= cw || id.y >= ch) {
+        return;
+    }
+    var a = 0u;
+    for (var ny = max(id.y, 1u) - 1u; ny < min(id.y + 2u, ch); ny += 1u) {
+        for (var nx = max(id.x, 1u) - 1u; nx < min(id.x + 2u, cw); nx += 1u) {
+            if (params.frame - atomicLoad(&chunk_active[ny * cw + nx]) < 2u) {
+                a = 1u;
+            }
+        }
+    }
+    awake[id.y * cw + id.x] = a;
 }

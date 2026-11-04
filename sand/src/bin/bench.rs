@@ -12,12 +12,19 @@
 //!                  This is what a game that draws on the CPU pays per frame.
 //!
 //! Before timing, it checks that all backends produce the identical world.
+//!
+//! A second table measures chunk sleeping on the GPU: the busy benchmark
+//! scene, and a "settled" world (scene 0 run until most of it has come to
+//! rest), each with sleeping on and off, plus how many chunks are awake.
 
 use sand::physics::{cpu::CpuSim, gpu::GpuSim, scene, World};
 use std::time::{Duration, Instant};
 
 const SIZES: [(usize, usize); 5] = [(640, 360), (1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)];
 const BENCH_SCENE: usize = 4;
+/// Scene that mostly comes to rest, and how long to let it settle first.
+const SETTLED_SCENE: usize = 0;
+const SETTLE_STEPS: u32 = 6000;
 
 /// Run `step` repeatedly for at least `budget`; return the mean ms per call.
 /// `step` returns how many steps it ran, so batched GPU calls count right.
@@ -122,4 +129,51 @@ fn main() {
         );
     }
     println!("\nms = milliseconds per simulation step (lower is better). 60 fps leaves 16.7 ms per frame.");
+
+    if GpuSim::new(&World::new(8, 8)).is_err() {
+        return;
+    }
+    println!("\nGPU chunk sleeping (32x32 chunks). settled = scene {SETTLED_SCENE} after {SETTLE_STEPS} steps.");
+    println!(
+        "{:>11} | {:>12} | {:>12} | {:>14} | {:>14} | {:>15}",
+        "grid", "busy sleep", "busy no-slp", "settled sleep", "settled no-slp", "settled awake"
+    );
+    println!("{}", "-".repeat(94));
+    let gpu_ms = |g: &mut GpuSim| {
+        time_it(budget, || {
+            g.step(32);
+            g.wait();
+            32
+        })
+    };
+    for (w, h) in SIZES {
+        // Each measurement starts from the same world, so sleeping on/off
+        // time the same work (the results are identical either way).
+        let mut busy = GpuSim::new(&scene(BENCH_SCENE, w, h)).expect("gpu");
+        let busy_sleep = gpu_ms(&mut busy);
+        let mut busy = GpuSim::new(&scene(BENCH_SCENE, w, h)).expect("gpu");
+        busy.set_sleeping(false);
+        let busy_plain = gpu_ms(&mut busy);
+
+        let mut g = GpuSim::new(&scene(SETTLED_SCENE, w, h)).expect("gpu");
+        g.step(SETTLE_STEPS);
+        let mut settled = World::new(w, h);
+        g.download(&mut settled);
+        let awake = g.awake_chunks();
+        let settled_sleep = gpu_ms(&mut g);
+        // The sleep state is not in `World`: re-upload and let it sleep again
+        // before timing would mix in the wake-up. Off: every chunk runs.
+        g.upload(&settled);
+        g.set_sleeping(false);
+        let settled_plain = gpu_ms(&mut g);
+        println!(
+            "{:>11} | {:>9.3} ms | {:>9.3} ms | {:>11.3} ms | {:>11.3} ms | {:>15}",
+            format!("{w}x{h}"),
+            busy_sleep,
+            busy_plain,
+            settled_sleep,
+            settled_plain,
+            format!("{awake}/{}", g.chunk_count()),
+        );
+    }
 }

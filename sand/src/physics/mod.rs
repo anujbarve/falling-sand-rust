@@ -395,6 +395,86 @@ pub fn block_offset(frame: u32) -> usize {
 }
 
 // ---------------------------------------------------------------------------
+// Chunk sleeping: skip regions where nothing can happen.
+//
+// CHOICE: sleeping is a pure optimisation. It never changes the result: a
+// chunk is only skipped when every one of its cells provably comes out of the
+// step unchanged. A run with sleeping is bit-identical to a run without it
+// (tests check this), so the CPU and the GPU agree no matter which chunks each
+// one happens to skip.
+//
+// The grid is cut into fixed CHUNK x CHUNK chunks (independent of the block
+// offset). During step n a chunk is ACTIVE if
+//   - the heat pass changed one of its cells (new value != old value), or
+//   - a 2x2 block it OWNS (the chunk holding the block's top-left cell) could
+//     move for SOME random number (`block_can_move`), whether it moved or not.
+// Counting "could move" and not just "did move" matters: a water/oil pair
+// that happened not to swap for two steps is not settled, it is unlucky.
+//
+// Rule: chunk c is AWAKE in step n if c or any of its 8 neighbours was active
+// in step n-1 or n-2. Asleep chunks run neither pass (no reads, no writes).
+//
+// Why skipping an asleep chunk c in step n is exact (by induction on n):
+// 1. Every cell within 2 cells of c lies in c's 3x3 chunk neighbourhood N(c)
+//    (CHUNK >= 3). Such a cell can only be changed by its own heat update or
+//    by a block whose top-left is within 3 cells of c, i.e. owned by a chunk
+//    in N(c). So "N(c) inactive in steps n-1 and n-2" means those cells are
+//    the same at the start of steps n-2, n-1 and n.
+// 2. Heat: a cell's heat update reads it and its 4 neighbours (all within 2
+//    of c). When the update leaves a cell unchanged it does not depend on the
+//    frame (the random number is only used by updates that change the cell:
+//    ignition, and fire/smoke, which change every step). Same inputs as in
+//    step n-1, where it changed nothing => it changes nothing in step n. So
+//    the post-heat values within 1 cell of c equal those of step n-2.
+// 3. Move: step n uses the same block offset as step n-2. Every block that
+//    touches c (including blocks owned by an awake neighbour that straddle
+//    into c) has its top-left in N(c), sees the same post-heat cells as in
+//    step n-2, and could not move then for any random number => cannot now.
+// 4. Ping-pong buffers: the heat pass writes into the buffer that holds the
+//    state from the start of step n-1. c did not change in step n-1, so that
+//    buffer already holds exactly what the skipped heat pass would write.
+//    (The CPU swaps two Vecs the same way, so the same argument holds.)
+// Waking is always safe, only sleeping needs the argument above. When the
+// history is unknown (a fresh upload, a world painted or swapped behind the
+// simulator's back) the touched chunks are marked active in the previous
+// step, which wakes them and their neighbours for two steps, and both
+// buffers get rewritten there before anything sleeps.
+//
+// The bookkeeping is a per-chunk stamp: the last frame number in which the
+// chunk was active. "Active in step n-1 or n-2" is `(n - 1) - stamp < 2`,
+// in wrapping u32 maths. (A stale stamp that wraps around after 2^32 steps
+// only wakes a chunk for nothing, which is harmless.)
+// ---------------------------------------------------------------------------
+
+/// Chunk side, in cells. `sim.wgsl` repeats it; its workgroups map onto
+/// chunks (a 16x16 heat workgroup is a quarter chunk; a 16x16 move
+/// workgroup of 2x2 blocks is exactly one chunk), so keep it at 32.
+pub const CHUNK: usize = 32;
+
+/// Number of chunks across and down for a `w` x `h` grid.
+pub fn chunk_dims(w: usize, h: usize) -> (usize, usize) {
+    (w.div_ceil(CHUNK), h.div_ceil(CHUNK))
+}
+
+/// Could `move_block` change this block for SOME random number `r`?
+/// `sinks(.., 0)` / `spreads(.., 0)` are true exactly when some roll would
+/// make them true, and if no first-stage swap is possible the later stages
+/// see the same cells, so checking all six candidate swaps on the input is
+/// enough. When this is false, `move_block` leaves the block as it is.
+pub fn block_can_move(cells: &[u32; 4]) -> bool {
+    let diagonal = |col: usize| {
+        let m = material(cells[col]) as usize;
+        (KIND[m] == POWDER || KIND[m] == LIQUID) && FLOW[m] > 0 && sinks(cells[col], cells[3 - col], 0)
+    };
+    sinks(cells[0], cells[2], 0)
+        || sinks(cells[1], cells[3], 0)
+        || diagonal(0)
+        || diagonal(1)
+        || spreads(cells[0], cells[1], 0)
+        || spreads(cells[2], cells[3], 0)
+}
+
+// ---------------------------------------------------------------------------
 // Scenes. They are built from fractions of the size, so they work at any
 // resolution (the benchmark runs them up to 4K).
 // ---------------------------------------------------------------------------
@@ -510,6 +590,131 @@ mod tests {
         assert_eq!(cpu_world.frame, gpu_world.frame);
         let diff = (0..cpu_world.cells.len()).filter(|&i| cpu_world.cells[i] != gpu_world.cells[i]).count();
         assert_eq!(diff, 0, "{diff} cells differ between CPU and GPU");
+    }
+
+    fn gpu_or_skip(world: &World) -> Option<gpu::GpuSim> {
+        match gpu::GpuSim::new(world) {
+            Ok(g) => Some(g),
+            Err(e) => {
+                eprintln!("no GPU adapter, skipping: {e}");
+                None
+            }
+        }
+    }
+
+    /// A scene that reaches a true fixed point: still water filling whole
+    /// rows of a tank, and a heap of sand dropped on dry ground beside it.
+    fn settling_scene(w: usize, h: usize) -> World {
+        let mut g = World::new(w, h);
+        let (wi, hi) = (w as i32, h as i32);
+        let floor = hi - 1;
+        g.fill(wi / 2, hi / 2, wi / 2 + 3, floor, STONE);
+        g.fill(wi - 3, hi / 2, wi, floor, STONE);
+        g.fill(wi / 2 + 3, hi * 3 / 4, wi - 3, floor, WATER);
+        g.fill(wi / 8, hi / 4, wi / 3, hi / 2, SAND);
+        g
+    }
+
+    #[test]
+    fn block_can_move_is_never_wrong() {
+        // If block_can_move says no, move_block must leave the block alone
+        // for every random number.
+        let mut seen_stuck = 0;
+        for s in 0..20_000u32 {
+            let cells: [u32; 4] = std::array::from_fn(|k| {
+                let r = hash3(s, k as u32, 77);
+                let m = r % MATERIAL_COUNT as u32;
+                pack(m, default_aux(m), AMBIENT + ((r >> 8) % 4096) as i32 * 4 - 8192)
+            });
+            if block_can_move(&cells) {
+                continue;
+            }
+            seen_stuck += 1;
+            for t in 0..64 {
+                let mut moved = cells;
+                move_block(&mut moved, hash3(s, t, 5));
+                assert_eq!(moved, cells, "block said stuck but moved: {cells:x?}");
+            }
+        }
+        assert!(seen_stuck > 1000);
+    }
+
+    #[test]
+    fn sleeping_gives_identical_world_to_no_sleeping() {
+        // Odd sizes on purpose: partial chunks at the right and bottom edges.
+        for index in 0..SCENES.len() {
+            let mut reference = scene(index, 257, 161);
+            let mut world = reference.clone();
+            let mut plain = CpuSim::new(&reference);
+            let mut sim = CpuSim::new(&world);
+            for step in 0..800 {
+                if step == 500 {
+                    // Paint behind the simulator's back, like the viewer does.
+                    for w in [&mut world, &mut reference] {
+                        w.fill(20, 10, 30, 20, WATER);
+                        w.fill(200, 100, 205, 104, LAVA);
+                    }
+                }
+                plain.step_no_sleep(&mut reference);
+                if step % 3 == 0 { sim.step_parallel(&mut world) } else { sim.step(&mut world) }
+                if step % 100 == 99 {
+                    assert_eq!(world, reference, "scene {index}, step {step}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gpu_gives_identical_world_to_cpu_at_odd_size() {
+        for index in [0, 4] {
+            let mut cpu_world = scene(index, 257, 161);
+            let mut gpu_world = cpu_world.clone();
+            let Some(mut gpu) = gpu_or_skip(&gpu_world) else { return };
+            let mut sim = CpuSim::new(&cpu_world);
+            for _ in 0..1500 {
+                sim.step_no_sleep(&mut cpu_world);
+            }
+            gpu.step(1500);
+            gpu.download(&mut gpu_world);
+            let diff = (0..cpu_world.cells.len()).filter(|&i| cpu_world.cells[i] != gpu_world.cells[i]).count();
+            assert_eq!(diff, 0, "scene {index}: {diff} cells differ between CPU and GPU");
+            assert_eq!(cpu_world.frame, gpu_world.frame);
+        }
+    }
+
+    #[test]
+    fn settled_scene_sleeps_on_cpu_and_gpu() {
+        let start = settling_scene(512, 320);
+        let mut world = start.clone();
+        let mut sim = CpuSim::new(&world);
+        let total = sim.chunk_count();
+        assert_eq!(total, 16 * 10);
+        assert_eq!(sim.awake_chunks(), total, "everything starts awake");
+        for _ in 0..3000 {
+            sim.step_parallel(&mut world);
+        }
+        let cpu_awake = sim.awake_chunks();
+        assert!(cpu_awake * 10 < total, "only {cpu_awake} of {total} chunks should still be awake");
+
+        // Exactly what an unsleeping run gives.
+        let mut reference = start.clone();
+        let mut plain = CpuSim::new(&reference);
+        for _ in 0..3000 {
+            plain.step_no_sleep(&mut reference);
+        }
+        assert_eq!(world, reference);
+
+        // The GPU agrees, cell for cell and chunk for chunk.
+        let Some(mut gpu) = gpu_or_skip(&start) else { return };
+        assert_eq!(gpu.chunk_count(), total);
+        gpu.step(3000);
+        let mut gpu_world = start.clone();
+        gpu.download(&mut gpu_world);
+        assert_eq!(gpu_world, world);
+        assert_eq!(gpu.awake_chunks(), cpu_awake);
+        // A fresh upload wakes everything again.
+        gpu.upload(&gpu_world);
+        assert_eq!(gpu.awake_chunks(), total);
     }
 
     #[test]
