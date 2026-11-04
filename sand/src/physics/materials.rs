@@ -1,7 +1,5 @@
 //! Part of the physics engine (see mod.rs).
 
-use super::*;
-
 
 // ---------------------------------------------------------------------------
 // Materials

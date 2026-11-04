@@ -6,9 +6,11 @@ default-run = "sand"
 
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
+cpal = "0.18.2"
 macroquad = "0.4.16"
 pollster = "1.0.1"
 rayon = "1.12.0"
+rtrb = "0.4.1"
 wgpu = "30.0.1"
 
 # Optimise dependencies and our own code a bit even in debug builds.

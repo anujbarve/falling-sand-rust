@@ -166,7 +166,7 @@ impl Menu {
         let skin = self.skin.get_or_insert_with(skin);
         let mut ui = root_ui();
         ui.push_skin(skin);
-        let size = vec2(380.0, 600.0);
+        let size = vec2(380.0, 680.0);
         let pos = vec2(screen_width() - size.x - 16.0, BAR_HEIGHT + 12.0);
         let before = settings.clone();
         ui.window(hash!(), pos, size, |ui| {
@@ -201,6 +201,11 @@ impl Menu {
             ui.combo_box(hash!(), "Frame cap", &FPS_CAP_NAMES, &mut settings.fps_cap);
             ui.checkbox(hash!(), "Heat view (H)", &mut settings.heat_view);
             ui.checkbox(hash!(), "Performance stats", &mut settings.show_stats);
+
+            ui.separator();
+            ui.label(None, "AUDIO");
+            ui.checkbox(hash!(), "Sound (M)", &mut settings.audio);
+            ui.slider(hash!(), "Volume", 0.0..1.0, &mut settings.volume);
 
             ui.separator();
             ui.label(None, "SIMULATION");

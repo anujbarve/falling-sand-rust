@@ -7,8 +7,10 @@
 //!   newest copy that has come back, never waiting for the GPU.
 //! - Drawing also runs on the GPU (OpenGL shaders, see `render.rs`): the
 //!   CPU only hands over the bytes it got back.
+//! - Sound (`sand::audio`): each frame the readback is measured and the
+//!   result drives a procedural ASMR mix on the audio thread. M mutes.
 //! - Settings (Esc): quality presets, bloom/lighting toggles, window size,
-//!   fullscreen, simulation grid size, GPU budget.
+//!   fullscreen, sound, simulation grid size, GPU budget.
 //!
 //! Developer aid: `SAND_SCREENSHOT=out.png SAND_FRAMES=120 [SAND_SCENE=1]
 //! [SAND_MENU=1] [SAND_HEAT=1]` runs that many frames, saves the screen and
@@ -20,6 +22,7 @@ mod ui;
 
 use macroquad::prelude::*;
 use render::Renderer;
+use sand::audio::{analysis::Analyzer, output::AudioOut};
 use sand::physics::{clock::Clock, gpu::GpuSim, *};
 use settings::{Settings, GRIDS, WINDOWS};
 use ui::{Action, Menu, BAR_HEIGHT, BRUSHES};
@@ -97,6 +100,12 @@ async fn main() {
     let mut cpu_ms = 0.0f64;
     let screenshot: Option<(String, u32)> = std::env::var("SAND_SCREENSHOT").ok().map(|p| (p, env("SAND_FRAMES").unwrap_or(120)));
     let mut frame = 0u32;
+    // Sound. No device (or SAND_SCREENSHOT runs): the game runs silent.
+    let mut audio = if screenshot.is_some() { None } else {
+        AudioOut::start().map_err(|e| eprintln!("no sound: {e}")).ok()
+    };
+    let mut analyzer = Analyzer::default();
+    let mut audio_world_seconds = 0.0f64;
 
     loop {
         let frame_start = std::time::Instant::now();
@@ -128,6 +137,9 @@ async fn main() {
         }
         if is_key_pressed(KeyCode::H) {
             settings.heat_view = !settings.heat_view;
+        }
+        if is_key_pressed(KeyCode::M) {
+            settings.audio = !settings.audio;
         }
         if is_key_pressed(KeyCode::Period) {
             clock.faster();
@@ -179,16 +191,19 @@ async fn main() {
                     };
                     sim.replace_world(scene(scene_index, grid.0, grid.1));
                     clock.reset();
+                    analyzer.reset();
                 }
                 Action::Clear => {
                     sim.replace_world(World::new(grid.0, grid.1));
                     clock.reset();
+                    analyzer.reset();
                 }
                 Action::SetGrid(_) => {
                     // A new grid size needs new GPU buffers and textures:
                     // build them all fresh; the old ones are freed on drop.
                     sim = Sim::new(scene_index, &settings);
                     clock.reset();
+                    analyzer.reset();
                 }
                 Action::SetWindow(i) => {
                     if !settings.fullscreen {
@@ -235,6 +250,19 @@ async fn main() {
         }
         if sim.gpu.latest(&mut sim.world) {
             sim.renderer.upload(&sim.world.cells); // drawn next frame
+            if let Some(out) = audio.as_mut() {
+                // World time since the last measured frame (for event rates).
+                let dt = (clock.world_seconds - audio_world_seconds).max(0.0) as f32;
+                audio_world_seconds = clock.world_seconds;
+                let speed = if paused { 0.0 } else { clock.achieved as f32 };
+                let volume = if settings.audio { settings.volume } else { 0.0 };
+                out.send(analyzer.analyze(&sim.world, dt, speed, volume));
+            }
+        } else if paused {
+            // No new readbacks while paused: tell the audio thread directly.
+            if let Some(out) = audio.as_mut() {
+                out.send(sand::audio::AudioFrame { speed: 0.0, ..Default::default() });
+            }
         }
         let now = start.elapsed().as_secs_f64() * 1000.0;
         cpu_ms = if cpu_ms == 0.0 { now } else { cpu_ms * 0.95 + now * 0.05 };

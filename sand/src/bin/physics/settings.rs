@@ -106,6 +106,10 @@ pub struct Settings {
     pub sleeping: bool,
     pub heat_view: bool,
     pub show_stats: bool,
+    /// Sound driven by the simulation (on by default; M toggles).
+    pub audio: bool,
+    /// Master volume 0..1.
+    pub volume: f32,
 }
 
 impl Default for Settings {
@@ -121,6 +125,8 @@ impl Default for Settings {
             sleeping: true,
             heat_view: false,
             show_stats: true,
+            audio: true,
+            volume: 0.7,
         }
     }
 }

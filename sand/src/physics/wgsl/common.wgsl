@@ -1,4 +1,4 @@
-// GPU copy of the rules in mod.rs (`heat_cell` and `move_block`).
+// GPU copy of the rules in physics/thermal.rs and motion.rs (`heat_cell`, `move_block`).
 // Every number and every branch must match the Rust version exactly:
 // the tests `gpu_gives_identical_world_to_cpu` and
 // `gpu_matches_cpu_on_odd_sizes` check that they do.
@@ -9,7 +9,7 @@
 // the 4 heat results, moves the block in registers and writes its 4 cells
 // to the new grid.
 //
-// Chunk sleeping (rule and exactness proof: "Chunk sleeping" in mod.rs):
+// Chunk sleeping (rule and exactness proof: "Chunk sleeping" in physics/chunks.rs):
 // a cell in a sleeping 32x32 chunk is not recomputed. Its heat result is
 // provably its old value, and cells_out already holds that value, so
 // the thread uses the old value and does not write it. A block is moved
@@ -32,7 +32,7 @@ struct Params {
 // ... and whether it runs in the current step (written by `wake`).
 @group(0) @binding(4) var<storage, read_write> awake: array<u32>;
 
-const CHUNK: u32 = 32u; // = CHUNK in mod.rs
+const CHUNK: u32 = 32u; // = CHUNK in chunks.rs
 fn chunks_x() -> u32 { return (params.width + CHUNK - 1u) / CHUNK; }
 fn chunks_y() -> u32 { return (params.height + CHUNK - 1u) / CHUNK; }
 fn chunk_of(x: u32, y: u32) -> u32 { return (y / CHUNK) * chunks_x() + x / CHUNK; }
@@ -66,7 +66,7 @@ const AMBIENT: i32 = 5120; // 20°C
 const T_MIN: i32 = -524288; // -(1 << 19)
 const T_MAX: i32 = 524287;  //  (1 << 19) - 1
 
-// Real units: see "Units" in mod.rs. 1 cell = 5 mm, 1 step = 1/1200 s.
+// Real units: see "Units" in materials.rs. 1 cell = 5 mm, 1 step = 1/1200 s.
 const G_Q: i32 = 89;          // gravity per step, 1/256 of a speed level
 const GAS_RISE: i32 = 42;     // 1 m/s
 const RELAX_K: i32 = 291;     // gases back to 20°C, 3 s time constant
@@ -74,7 +74,7 @@ const TICK_STEPS: u32 = 64u;  // fire/smoke life tick
 const EDGE_SALT: u32 = 0x5EED1234u;
 const CELL_SALT: u32 = 0xA511E9B3u;
 
-// The material tables of mod.rs. Small ones are packed into constants
+// The material tables of materials.rs. Small ones are packed into constants
 // (a `var<private>` array is copied into every thread's local memory, and
 // indexing it costs memory accesses; shifting a constant is a few ALU ops).
 //
@@ -135,7 +135,7 @@ fn base_density(m: u32) -> i32 {
         default: { return 12; }
     }
 }
-// Thermal conductivity, mW/(m K). Copy of COND in mod.rs.
+// Thermal conductivity, mW/(m K). Copy of COND in materials.rs.
 fn cond(m: u32) -> i32 {
     switch m {
         case 0u: { return 26; }
