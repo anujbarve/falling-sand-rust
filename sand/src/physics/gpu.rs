@@ -17,7 +17,15 @@ use std::sync::atomic::{AtomicU8, Ordering};
 const MAX_BATCH: u32 = 256;
 /// Uniform buffer offsets must be multiples of this (WebGPU's default limit).
 const PARAMS_STRIDE: u64 = 256;
-const SHADER: &str = include_str!("sim.wgsl");
+/// The shader is split by system (see physics/wgsl/) and joined here: WGSL
+/// allows module-level declarations in any order.
+const SHADER: &str = concat!(
+    include_str!("wgsl/common.wgsl"),
+    include_str!("wgsl/thermal.wgsl"),
+    include_str!("wgsl/motion.wgsl"),
+    include_str!("wgsl/step.wgsl"),
+    include_str!("wgsl/wake.wgsl"),
+);
 const WAKE_WORKGROUP: u32 = 8; // must match @workgroup_size of `wake`
 
 /// Workgroup shape (threads) declared in sim.wgsl as `const GROUP_W: u32 = ..u;`.
@@ -107,7 +115,7 @@ impl GpuSim {
             .map_err(|e| e.to_string())?;
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("sim.wgsl"),
+            label: Some("physics.wgsl"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
 
