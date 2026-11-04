@@ -23,7 +23,7 @@ A second engine that runs on the CPU and on the GPU (wgpu compute shaders). The 
 
 ```bash
 cd sand
-cargo run --release --bin physics   # GPU window: , slower  . faster  / real time  H heat view
+cargo run --release --bin physics   # GPU window: Esc settings, , slower  . faster  / real time  H heat view
 cargo run --release --bin bench     # CPU vs GPU timing table; add a number for seconds per measurement
 ```
 
@@ -50,3 +50,22 @@ The physics engine runs in real units: 1 cell = 5 mm (the 640x360 window is 3.2 
 - **Fire and smoke lifetimes** are in seconds.
 - **Viewer clock:** the viewer runs as many steps per frame as the chosen speed needs, from 0.01x slow motion through 1x real time to 16x. If the GPU can't keep up, the HUD shows the speed it actually reached.
 - **Bench:** the `gpu max speed` column says how much faster than real time each grid size can run. On the M5: 640x360 ≈ 6.8x, 1920x1080 ≈ 1x, 4K ≈ 0.3x.
+
+### Viewer: GPU rendering and settings
+
+The viewer (`src/bin/physics/`) draws on the GPU too. Each frame, the cells read back from the simulation are uploaded unchanged as an RGBA8 texture, so the CPU does no per-pixel work. GLSL shaders then decode the cell bits and draw:
+
+- material colour with stable per-grain variation
+- surface lighting and contact shadows
+- liquid depth and surface highlights
+- black-body glow of hot matter
+- bloom, rendered at 1/2, 1/4 or 1/8 resolution with a separable blur
+- tone mapping and a vignette
+
+Settings (press `Esc` or click the toolbar button):
+
+- **Graphics:** quality presets Low, Medium, High and Ultra (changing any option makes it Custom), with each effect on or off, bloom resolution, bloom strength and exposure.
+- **Display:** window size (1280x720 to 2560x1440), fullscreen (`F11`), frame cap (default 120 fps; VSync is requested but macOS ignores it), heat view and performance stats.
+- **Simulation:** grid size from 320x180 (1.6 m) to 1280x720 (6.4 m), how much GPU time per frame the simulation may use, and skipping still regions.
+
+The toolbar has a material palette, pause, and speed controls `<` `1x` `>`. The mouse never paints through the UI. In steady state the frame loop allocates nothing: the edit and action buffers are reused, and textures and render targets are only rebuilt when the grid or bloom size changes.
