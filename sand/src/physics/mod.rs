@@ -112,17 +112,36 @@ pub const FLOW: [u32; MATERIAL_COUNT] = [256, 0, 21, 42, 17, 2, 42, 0, 21, 0, 12
 /// Top speed (level) when sinking or rising through a liquid: viscous drag.
 /// About 0.1 m/s for sand, water, oil; 0.3 lava; a steam bubble 0.25 m/s.
 pub const VT_LIQUID: [u32; MATERIAL_COUNT] = [0, 0, 4, 4, 4, 12, 10, 0, 0, 0, 0];
+/// Top speed (level) anything can reach moving THROUGH this medium. Lava is
+/// ~10^5 times more viscous than water: real flow through it is mm/s,
+/// below one speed level (2.3 cm/s), so it is 0 (no convection in lava).
+pub const VT_MEDIUM: [u32; MATERIAL_COUNT] = [255, 0, 0, 255, 255, 0, 255, 0, 255, 0, 255];
 /// Top speed (level) through a gas. No air resistance is modelled, so
 /// falling things are only limited by MAX_SPEED; steam is capped at 2 m/s.
 pub const VT_GAS: [u32; MATERIAL_COUNT] = [0, 0, 255, 255, 255, 255, 85, 0, 0, 0, 0];
 /// Rising speed (level) of gases that do not store a speed (fire, smoke,
 /// hot air), at a full density gap: 1 m/s.
 pub const GAS_RISE: i32 = 42;
-/// Heat: thermal diffusivity alpha (m^2/s) turned into a per-step rate,
-/// alpha * STEP_SECONDS / CELL^2, times 2^20. Real values: air 2.2e-5,
-/// granite 1.1e-6, dry sand 2.5e-7, water 1.43e-7, oil 9e-8, lava 5e-7,
-/// steam 2e-5, wood 1.5e-7, flame gas 2e-4, ice 1.2e-6, smoke 2.2e-5.
-pub const HEAT_K: [i32; MATERIAL_COUNT] = [769, 38, 9, 5, 3, 17, 699, 5, 6990, 42, 769];
+/// Heat, part 1: thermal conductivity in mW/(m K). How easily heat crosses
+/// a boundary. Air 0.026 W/(m K), granite 2.5, dry sand 0.3, water 0.6,
+/// oil 0.15, lava 1.5, steam 0.025, wood 0.15, flame gas 0.08, ice 2.2.
+pub const COND: [i32; MATERIAL_COUNT] = [26, 2500, 300, 600, 150, 1500, 25, 150, 80, 2200, 26];
+/// Heat, part 2: volumetric heat capacity rho*c in units of 10 J/(m^3 K).
+/// How much heat it takes to warm a cell by 1 K: air 1.2 kJ/(m^3 K),
+/// granite 2100, sand 1300, water 4180, oil 1700, lava 3000, wood 1020,
+/// flame gas 0.35, ice 1900. Air holds ~3500x less heat than water, so air
+/// next to something hot warms up in a fraction of a second.
+pub const CAP: [i32; MATERIAL_COUNT] = [120, 210000, 130000, 418000, 170000, 300000, 120, 102000, 35, 190000, 120];
+/// Thermal expansion of liquids in ppm per K: hot water is lighter than
+/// cold water, which makes liquids heated from below circulate.
+pub const EXPANSION: [i32; MATERIAL_COUNT] = [0, 0, 0, 300, 700, 100, 0, 0, 0, 0, 0];
+/// Turns conductance (mW/(m K)) / CAP into a per-step rate times 2^24:
+/// 2^24 * STEP_SECONDS / CELL^2 / (1000 mW/W * 10 J/unit).
+pub const RATE_SCALE: i32 = 55924;
+/// Largest per-step rate (times 2^24): 1.6% of a temperature gap per edge.
+/// Only flames (almost no heat capacity) reach it; they are kept at 900°C
+/// by burning anyway. It also keeps `flow_24` free of overflow.
+pub const RATE_MAX: i32 = (1 << 18) - 1;
 /// Gases mix with the room and drift back to 20°C with a 3 s time
 /// constant: 2^20 / (3 s * 1200 steps/s).
 pub const RELAX_K: i32 = 291;
@@ -177,7 +196,7 @@ pub const TICK_STEPS: u32 = 64;
 /// Starting temperature of a freshly placed cell.
 pub fn default_temp(m: u32) -> i32 {
     match m {
-        LAVA => celsius(1600),
+        LAVA => celsius(1150), // basaltic lava erupts at ~1100-1200°C
         FIRE => celsius(900),
         ICE => celsius(-40),
         STEAM => celsius(120),
@@ -293,35 +312,86 @@ const CELL_SALT: u32 = 0xA511_E9B3;
 /// `key` is `pcg(frame ^ EDGE_SALT)`, computed once per step: one hash per
 /// edge is enough here and keeps the GPU fast.
 fn edge_roll(i: usize, down: u32, key: u32) -> i32 {
-    (pcg((2 * i as u32 + down) ^ key) & 0xF_FFFF) as i32
+    (pcg((2 * i as u32 + down) ^ key) & 0xFF_FFFF) as i32
 }
 
-/// Heat that flows from the cell with temperature `from` into the cell
-/// with temperature `to`'s neighbour... precisely: the change of the
-/// left/upper cell of an edge when its partner has temperature `other`.
-/// Stochastic rounding: on average exactly (other - t) * k / 2^20, so even
-/// tiny real-world rates add up correctly instead of rounding to zero.
-/// The partner changes by exactly minus this, so heat is conserved.
-fn edge_flow(t: i32, other: i32, k: i32, roll: i32) -> i32 {
-    ((other - t) * k + roll) >> 20
+/// floor((d * rate + roll) / 2^24) without overflowing an i32, for
+/// |d| <= 2^20, 0 <= rate <= RATE_MAX and roll < 2^24. (WGSL has no 64-bit
+/// integers, so the CPU does it the same way.) Split d = hi * 4096 + lo
+/// with 0 <= lo < 4096: then d * rate = (hi * rate) * 4096 + lo * rate, and
+/// floor((a * 4096 + b) / 2^24) = floor((a + floor(b / 4096)) / 4096).
+pub fn flow_24(d: i32, rate: i32, roll: i32) -> i32 {
+    let (hi, lo) = (d >> 12, d & 4095);
+    (hi * rate + ((lo * rate + roll) >> 12)) >> 12
 }
 
-/// Heat conductance between two materials: the harmonic mean of their
-/// rates (two layers in series, like resistors).
-fn pair_k(a: u32, b: u32) -> i32 {
-    let (ka, kb) = (HEAT_K[a as usize], HEAT_K[b as usize]);
-    2 * ka * kb / (ka + kb)
+/// Condensed matter (solid, powder, liquid) radiates and absorbs heat;
+/// gases are treated as transparent (except flames).
+const fn condensed(m: u32) -> bool {
+    KIND[m as usize] != GAS
+}
+
+/// Radiative conductance between two touching surfaces, in mW/(m K):
+/// 4 * emissivity * sigma * T^3 * CELL, with emissivity 0.9 and T the mean
+/// absolute temperature. Negligible at room temperature, larger than
+/// rock's conduction above ~1000°C. Computed with T/10 so it fits an i32:
+/// (T/10)^3 * 1000 * 1.02e-6 = (T/10)^3 * 1045 / 2^20.
+pub fn radiation_k(ta: i32, tb: i32) -> i32 {
+    let kelvin = (ta + tb) / 2 / T_SCALE + 273;
+    let t10 = (kelvin / 10).max(0);
+    (((t10 * t10 * t10) >> 6) * 1045) >> 14
+}
+
+/// How much heat crosses the edge between materials `a` and `b` (at
+/// temperatures `ta`, `tb`), in mW/(m K): their conductivities in series
+/// (the harmonic mean), plus radiation across the boundary between two
+/// different materials (inside one continuous body there is no gap to
+/// radiate across). A flame radiates onto a surface at about a third of
+/// that (emissivity ~0.3).
+pub fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
+    let (ka, kb) = (COND[a as usize], COND[b as usize]);
+    let series = 2 * ka * kb / (ka + kb);
+    let radiation = if a != b && condensed(a) && condensed(b) {
+        radiation_k(ta, tb)
+    } else if (a == FIRE && condensed(b)) || (b == FIRE && condensed(a)) {
+        radiation_k(ta, tb) / 3
+    } else {
+        0
+    };
+    series + radiation
+}
+
+/// Per-step rate (times 2^24) at which a cell of material `m` follows a
+/// temperature gap across an edge of the given conductance: heat crossing
+/// the edge divided by the cell's own heat capacity.
+pub fn heat_rate(m: u32, conductance: i32) -> i32 {
+    (conductance * RATE_SCALE / CAP[m as usize]).min(RATE_MAX)
+}
+
+/// Rate (times 2^24, per exposed face) at which a hot surface loses heat by
+/// radiating into open air, emissivity 0.9: sigma*eps*(T^2+T0^2)(T+T0) is
+/// the exact linearisation of T^4 - T0^4, so loss = rate * (T - T0).
+fn sky_rate(m: u32, t: i32) -> i32 {
+    let t10 = ((t / T_SCALE + 273) / 10).max(0);
+    let x = (t10 * t10 + 29 * 29) * (t10 + 29); // in (10 K)^3
+    (x / 100) * 1427 / CAP[m as usize]
 }
 
 /// Density of a cell. Gases expand when heated (ideal gas law: density
 /// times absolute temperature is constant), so hot air rises: convection.
+/// Liquids expand too, much less, so a pot heated from below circulates.
 /// Flames keep a fixed density, or they would shoot off what they burn.
 pub fn density(cell: u32) -> i32 {
     let (m, t) = (material(cell), temp(cell));
     let d = DENSITY[m as usize];
-    if KIND[m as usize] == GAS && m != FIRE {
+    let k = KIND[m as usize];
+    if k == GAS && m != FIRE {
         // d * 293 K / (t + 273 K), with t in fixed point.
         (d * 293 * T_SCALE / (t + 273 * T_SCALE).max(1)).max(1)
+    } else if k == LIQUID {
+        // Liquids expand a little: d * (1 - expansion * (t - 20°C)).
+        let warmer = (t - AMBIENT) / T_SCALE;
+        (d - d * (EXPANSION[m as usize] * warmer / 1000) / 1000).max(1)
     } else {
         d
     }
@@ -342,9 +412,15 @@ pub fn sinks(top: u32, bottom: u32) -> bool {
 fn accelerate(cell: u32, heavy: u32, light: u32, medium: u32, roll: u32) -> u32 {
     let (dh, dl) = (density(heavy), density(light));
     let q = (G_Q * (dh - dl) / dh) as u32;
-    let m = material(cell) as usize;
-    let cap = if KIND[material(medium) as usize] == LIQUID { VT_LIQUID[m] } else { VT_GAS[m] };
-    (speed(cell) + ((q + roll) >> 8)).min(cap)
+    (speed(cell) + ((q + roll) >> 8)).min(speed_cap(cell, medium))
+}
+
+/// Top speed of `cell` moving through `medium`: its own drag limit in
+/// that kind of medium, and the medium's own limit (viscous lava: 0).
+fn speed_cap(cell: u32, medium: u32) -> u32 {
+    let (m, mm) = (material(cell) as usize, material(medium) as usize);
+    let own = if KIND[mm] == LIQUID { VT_LIQUID[m] } else { VT_GAS[m] };
+    own.min(VT_MEDIUM[mm])
 }
 
 /// The speed the cell may keep when it cannot move: it may not be faster
@@ -375,22 +451,30 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     let t0 = temp(me);
     let mut maybe = false; // could a random number have changed something?
 
-    // 1. Conduction across the 4 edges, each rounded at random (see
-    //    edge_flow). Edges to the right and below are "ours"; edges to the
-    //    left and above belong to the neighbour, so we take minus its flow.
+    // 1. Heat across the 4 edges (conduction + radiation), each rounded at
+    //    random (see flow_24). The heat crossing an edge is the same for
+    //    both cells; each one's temperature changes by that heat over its
+    //    own heat capacity. The edge's random number is shared, so between
+    //    two cells of the same material heat is conserved exactly (between
+    //    different materials, on average). Edges to the right and below are
+    //    "ours"; for edges to the left and above we take the neighbour's view
+    //    (gap = our temperature minus theirs) and negate it.
     let mut t = t0;
     let mut touches_water = false;
+    let mut open_faces = 0; // neighbours that are clear gas (sky for radiation)
     let key = pcg(frame ^ EDGE_SALT);
     let mut edge = |j: usize, ours: bool, edge_cell: usize, down: u32| {
         let other = cells[j];
         let (tn, mn) = (temp(other), material(other));
         touches_water |= mn == WATER;
+        open_faces += (KIND[mn as usize] == GAS && mn != FIRE) as i32;
         if tn == t0 {
             return; // no gap, no flow (and no need for a random number)
         }
         maybe = true;
-        let (k, roll) = (pair_k(m, mn), edge_roll(edge_cell, down, key));
-        t += if ours { edge_flow(t0, tn, k, roll) } else { -edge_flow(tn, t0, k, roll) };
+        let rate = heat_rate(m, pair_conductance(m, mn, t0, tn));
+        let roll = edge_roll(edge_cell, down, key);
+        t += if ours { flow_24(tn - t0, rate, roll) } else { -flow_24(t0 - tn, rate, roll) };
     };
     if x + 1 < w {
         edge(i + 1, true, i, 0);
@@ -406,7 +490,14 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
     }
 
     let r = pcg(i as u32 ^ pcg(frame ^ CELL_SALT));
-    let tick = pcg(r) % TICK_STEPS == 0; // one tick of fire/smoke life passes
+    let r2 = pcg(r);
+    let tick = r2 % TICK_STEPS == 0; // one tick of fire/smoke life passes
+    // Hot (or cold) surfaces facing open air radiate to the surroundings.
+    // This is how lava really cools: air itself carries little heat.
+    if condensed(m) && open_faces > 0 && t0 != AMBIENT {
+        maybe = true;
+        t += flow_24(AMBIENT - t0, sky_rate(m, t0) * open_faces, (r2 >> 8) as i32);
+    }
     // Gases mix with the room and drift back to 20°C.
     if KIND[m as usize] == GAS && m != FIRE {
         t += ((AMBIENT - t0) * RELAX_K + (r & 0xF_FFFF) as i32) >> 20;
@@ -428,7 +519,8 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         life = match (free, other) {
             (true, Some(o)) => {
                 let (heavy, light) = if sinker(m) { (me, o) } else { (o, me) };
-                maybe = true; // the random rounding of the speed-up
+                // The random rounding of the speed-up can only matter below the cap.
+                maybe |= speed(me) < speed_cap(me, o);
                 accelerate(me, heavy, light, o, roll)
             }
             (_, Some(o)) => blocked_speed(me, o),
@@ -448,8 +540,9 @@ pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u
         // Lava resting on something sets into stone. Lava that cools while
         // falling or sinking through water shatters into gravel instead
         // (real lava does this in water), so no stone is left hanging in mid-air.
-        LAVA if t < celsius(800) => next = if supported { STONE } else { SAND },
-        STONE if t >= celsius(1100) => next = LAVA,
+        LAVA if t < celsius(1000) => next = if supported { STONE } else { SAND },
+        // Rock melts above eruption temperature, so lava cannot melt it.
+        STONE if t >= celsius(1200) => next = LAVA,
         WOOD if t >= celsius(300) => {
             next = FIRE;
             life = 120 + (r & 127); // 6-13 s of burning
@@ -997,7 +1090,7 @@ mod tests {
 
     #[test]
     fn conduction_conserves_heat() {
-        // Only stone (no phase change below 1100°C, no gas cooling).
+        // Only stone (no phase change below 1200°C, no gas cooling).
         let mut world = World::new(64, 64);
         world.fill(0, 0, 64, 64, STONE);
         for y in 20..30 {
@@ -1031,29 +1124,100 @@ mod tests {
     }
 
     #[test]
-    fn lava_boils_water_and_turns_to_stone() {
+    fn lava_heats_water_and_turns_to_stone() {
+        // Real 1150°C lava quenches in water: it shatters into gravel or
+        // sets into stone within seconds, heating the water around it.
+        // (Real sea-entry steam comes from boiling in a sub-millimetre film
+        // at the lava surface, which 5 mm cells do not resolve.)
         let mut world = scene(1, 200, 120);
         let mut sim = CpuSim::new(&world);
-        let mut most_steam = 0;
+        let mut hottest_water = AMBIENT;
         for _ in 0..12 * STEPS_PER_SECOND {
-            // 12 s: the lava falls in, then takes a few seconds to boil water.
             sim.step(&mut world);
-            most_steam = most_steam.max(world.count(STEAM));
+            for &c in &world.cells {
+                if material(c) == WATER {
+                    hottest_water = hottest_water.max(temp(c));
+                }
+            }
         }
-        assert!(most_steam > 20, "boiling makes steam (saw at most {most_steam})");
-        assert!(world.count(STONE) > World::new(200, 120).count(STONE), "lava cools into stone");
+        let hottest = hottest_water / T_SCALE;
+        assert!(hottest > 60, "water touching lava should get hot (hottest {hottest}°C)");
+        let start = scene(1, 200, 120);
+        assert!(world.count(LAVA) < start.count(LAVA), "lava should solidify");
+        assert!(world.count(STONE) + world.count(SAND) > start.count(STONE), "into stone or gravel");
     }
 
     #[test]
     fn lava_ignites_wood() {
         // A painted flame lasts seconds and does not light a plank (true in
-        // real life too); lava sitting on wood heats it to 300°C in ~20 s.
+        // real life too). Lava sitting on wood mostly radiates into it and
+        // gets its surface to 300°C within seconds.
         let mut world = World::new(64, 64);
         world.fill(10, 40, 50, 63, WOOD);
         world.fill(20, 30, 40, 40, LAVA);
         let wood_before = world.count(WOOD);
-        run(&mut world, 35 * STEPS_PER_SECOND as usize);
-        assert!(world.count(WOOD) < wood_before, "the wood should burn");
+        run(&mut world, 10 * STEPS_PER_SECOND as usize);
+        assert!(world.count(WOOD) < wood_before, "the wood should burn within 10 s");
+    }
+
+    #[test]
+    fn heat_between_different_materials_is_conserved_on_average() {
+        // Hot stone in cold water, no gas anywhere (gases lose heat to the
+        // room on purpose). Energy = sum of heat capacity * temperature.
+        let mut world = World::new(64, 64);
+        world.fill(0, 0, 64, 64, WATER);
+        world.fill(24, 24, 40, 40, STONE);
+        for y in 24..40 {
+            for x in 24..40 {
+                world.cells[y * 64 + x] = pack(STONE, 0, celsius(90));
+            }
+        }
+        let energy = |w: &World| {
+            w.cells.iter().map(|&c| CAP[material(c) as usize] as f64 * (temp(c) - AMBIENT) as f64).sum::<f64>()
+        };
+        let before = energy(&world);
+        run(&mut world, 5 * STEPS_PER_SECOND as usize);
+        let after = energy(&world);
+        let drift = (after - before).abs() / before;
+        assert!(drift < 0.01, "energy drifted by {:.2}%", drift * 100.0);
+        // And it really moved: the water next to the stone warmed up.
+        // (Slowly: a 5 mm water cell beside 90°C rock has a time constant of
+        // ~100 s, so it gains only a few degrees in 5 s.)
+        assert!(temp(world.cells[32 * 64 + 23]) > celsius(21), "water beside the stone should warm");
+    }
+
+    #[test]
+    fn water_heated_from_below_turns_over() {
+        // Hot water under cold water. Conduction alone can only even the
+        // two out; with thermal expansion the hot (lighter) water rises, so
+        // the top ends up warmer than the bottom.
+        let mut world = World::new(32, 66);
+        world.fill(0, 1, 32, 65, WATER);
+        for y in 33..65 {
+            for x in 0..32 {
+                world.cells[y * 32 + x] = pack(WATER, 0, celsius(80));
+            }
+        }
+        run(&mut world, 10 * STEPS_PER_SECOND as usize);
+        let mean = |rows: std::ops::Range<usize>| {
+            let n = rows.len() * 32;
+            rows.flat_map(|y| (0..32).map(move |x| y * 32 + x)).map(|i| temp(world.cells[i]) as f64).sum::<f64>()
+                / n as f64
+                / T_SCALE as f64
+        };
+        let (top, bottom) = (mean(1..33), mean(33..65));
+        assert!(top > bottom + 10.0, "top {top:.1}°C should be warmer than bottom {bottom:.1}°C");
+    }
+
+    #[test]
+    fn lava_in_open_air_crusts_over() {
+        // Radiation to the surroundings cools exposed lava; air alone would
+        // take far longer. Lava resting on the floor sets into stone.
+        let mut world = World::new(64, 64);
+        world.fill(16, 54, 48, 63, LAVA);
+        let stone_before = world.count(STONE);
+        run(&mut world, 30 * STEPS_PER_SECOND as usize);
+        assert!(world.count(STONE) > stone_before + 20, "a crust should form within 30 s");
     }
 
     /// Steps until a grain dropped from rest reaches the floor, averaged

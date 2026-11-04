@@ -108,6 +108,14 @@ const VT_GAS_T = vec3<u32>(
     255u | (255u << 8u) | (85u << 16u) | (0u << 24u),
     0u,
 );
+// Top speed of anything moving through this medium (VT_MEDIUM in mod.rs):
+// 255 for air, water, oil, steam, fire, smoke; 0 for lava and solids.
+const VT_MEDIUM_T = vec3<u32>(
+    255u | (0u << 8u) | (0u << 16u) | (255u << 24u),
+    255u | (0u << 8u) | (255u << 16u) | (0u << 24u),
+    255u | (0u << 8u) | (255u << 16u),
+);
+fn vt_medium(m: u32) -> u32 { return table_byte(VT_MEDIUM_T, m); }
 fn flow(m: u32) -> u32 { return table_byte(FLOW_T, m); }
 fn vt_liquid(m: u32) -> u32 { return table_byte(VT_LIQUID_T, m); }
 fn vt_gas(m: u32) -> u32 { return table_byte(VT_GAS_T, m); }
@@ -127,21 +135,49 @@ fn base_density(m: u32) -> i32 {
         default: { return 12; }
     }
 }
-fn heat_k(m: u32) -> i32 {
+// Thermal conductivity, mW/(m K). Copy of COND in mod.rs.
+fn cond(m: u32) -> i32 {
     switch m {
-        case 0u: { return 769; }
-        case 1u: { return 38; }
-        case 2u: { return 9; }
-        case 3u: { return 5; }
-        case 4u: { return 3; }
-        case 5u: { return 17; }
-        case 6u: { return 699; }
-        case 7u: { return 5; }
-        case 8u: { return 6990; }
-        case 9u: { return 42; }
-        default: { return 769; }
+        case 0u: { return 26; }
+        case 1u: { return 2500; }
+        case 2u: { return 300; }
+        case 3u: { return 600; }
+        case 4u: { return 150; }
+        case 5u: { return 1500; }
+        case 6u: { return 25; }
+        case 7u: { return 150; }
+        case 8u: { return 80; }
+        case 9u: { return 2200; }
+        default: { return 26; }
     }
 }
+// Heat capacity rho*c, 10 J/(m^3 K). Copy of CAP in mod.rs.
+fn cap(m: u32) -> i32 {
+    switch m {
+        case 0u: { return 120; }
+        case 1u: { return 210000; }
+        case 2u: { return 130000; }
+        case 3u: { return 418000; }
+        case 4u: { return 170000; }
+        case 5u: { return 300000; }
+        case 6u: { return 120; }
+        case 7u: { return 102000; }
+        case 8u: { return 35; }
+        case 9u: { return 190000; }
+        default: { return 120; }
+    }
+}
+// Liquid thermal expansion, ppm/K. Copy of EXPANSION in mod.rs.
+fn expansion(m: u32) -> i32 {
+    switch m {
+        case 3u: { return 300; }
+        case 4u: { return 700; }
+        case 5u: { return 100; }
+        default: { return 0; }
+    }
+}
+const RATE_SCALE: i32 = 55924;
+const RATE_MAX: i32 = 262143; // (1 << 18) - 1
 
 // Cell layout: bits 0-3 material, 4-11 aux, 12-31 signed temperature.
 fn celsius(c: i32) -> i32 { return c * T_SCALE; }
@@ -180,23 +216,52 @@ const GROUP_H: u32 = 16u;
 // ---------------------------------------------------------------------------
 
 fn edge_roll(i: u32, down: u32, key: u32) -> i32 {
-    return i32(pcg((2u * i + down) ^ key) & 0xFFFFFu);
+    return i32(pcg((2u * i + down) ^ key) & 0xFFFFFFu);
 }
-// >> on i32 rounds toward minus infinity, like Rust's >> on i32.
-fn edge_flow(t: i32, other: i32, k: i32, roll: i32) -> i32 {
-    return ((other - t) * k + roll) >> 20u;
+// floor((d * rate + roll) / 2^24) without overflow. Copy of flow_24.
+// (& on a negative i32 works on its two's complement bits, like Rust.)
+fn flow_24(d: i32, rate: i32, roll: i32) -> i32 {
+    let hi = d >> 12u;
+    let lo = d & 4095;
+    return (hi * rate + ((lo * rate + roll) >> 12u)) >> 12u;
 }
-fn pair_k(a: u32, b: u32) -> i32 {
-    let ka = heat_k(a);
-    let kb = heat_k(b);
-    return 2 * ka * kb / (ka + kb);
+fn condensed(m: u32) -> bool { return kind(m) != GAS; }
+fn radiation_k(ta: i32, tb: i32) -> i32 {
+    let kelvin = (ta + tb) / 2 / T_SCALE + 273;
+    let t10 = max(kelvin / 10, 0);
+    return (((t10 * t10 * t10) >> 6u) * 1045) >> 14u;
+}
+fn pair_conductance(a: u32, b: u32, ta: i32, tb: i32) -> i32 {
+    let ka = cond(a);
+    let kb = cond(b);
+    let series = 2 * ka * kb / (ka + kb);
+    var radiation = 0;
+    if (a != b && condensed(a) && condensed(b)) {
+        radiation = radiation_k(ta, tb);
+    } else if ((a == FIRE && condensed(b)) || (b == FIRE && condensed(a))) {
+        radiation = radiation_k(ta, tb) / 3;
+    }
+    return series + radiation;
+}
+fn heat_rate(m: u32, conductance: i32) -> i32 {
+    return min(conductance * RATE_SCALE / cap(m), RATE_MAX);
+}
+fn sky_rate(m: u32, t: i32) -> i32 {
+    let t10 = max((t / T_SCALE + 273) / 10, 0);
+    let x = (t10 * t10 + 29 * 29) * (t10 + 29);
+    return (x / 100) * 1427 / cap(m);
 }
 
 fn density(cell: u32) -> i32 {
     let m = material(cell);
     let d = base_density(m);
-    if (kind(m) == GAS && m != FIRE) {
+    let k = kind(m);
+    if (k == GAS && m != FIRE) {
         return max(d * 293 * T_SCALE / max(temp(cell) + 273 * T_SCALE, 1), 1);
+    }
+    if (k == LIQUID) {
+        let warmer = (temp(cell) - AMBIENT) / T_SCALE;
+        return max(d - d * (expansion(m) * warmer / 1000) / 1000, 1);
     }
     return d;
 }
@@ -211,9 +276,14 @@ fn accelerate(cell: u32, heavy: u32, light: u32, medium: u32, roll: u32) -> u32 
     let dh = density(heavy);
     let dl = density(light);
     let q = u32(G_Q * (dh - dl) / dh);
+    return min(speed(cell) + ((q + roll) >> 8u), speed_cap(cell, medium));
+}
+
+fn speed_cap(cell: u32, medium: u32) -> u32 {
     let m = material(cell);
-    let cap = select(vt_gas(m), vt_liquid(m), kind(material(medium)) == LIQUID);
-    return min(speed(cell) + ((q + roll) >> 8u), cap);
+    let mm = material(medium);
+    let own = select(vt_gas(m), vt_liquid(m), kind(mm) == LIQUID);
+    return min(own, vt_medium(mm));
 }
 
 fn blocked_speed(cell: u32, in_way: u32) -> u32 {
@@ -242,38 +312,56 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     let i = y * w + x;
     let key = pcg(frame ^ EDGE_SALT);
     // Same as heat_cell: an edge with no temperature gap carries no heat
-    // and needs no random number.
+    // and needs no random number. The rate is OURS (our heat capacity).
+    var open_faces = 0;
     if (x + 1u < w) {
-        touches_water = touches_water || material(right) == WATER;
-        if (temp(right) != t0) {
+        let mn = material(right);
+        let tn = temp(right);
+        touches_water = touches_water || mn == WATER;
+        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        if (tn != t0) {
             maybe = true;
-            t += edge_flow(t0, temp(right), pair_k(m, material(right)), edge_roll(i, 0u, key));
+            t += flow_24(tn - t0, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i, 0u, key));
         }
     }
     if (x > 0u) {
-        touches_water = touches_water || material(left) == WATER;
-        if (temp(left) != t0) {
+        let mn = material(left);
+        let tn = temp(left);
+        touches_water = touches_water || mn == WATER;
+        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        if (tn != t0) {
             maybe = true;
-            t -= edge_flow(temp(left), t0, pair_k(m, material(left)), edge_roll(i - 1u, 0u, key));
+            t -= flow_24(t0 - tn, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i - 1u, 0u, key));
         }
     }
     if (y + 1u < h) {
-        touches_water = touches_water || material(down) == WATER;
-        if (temp(down) != t0) {
+        let mn = material(down);
+        let tn = temp(down);
+        touches_water = touches_water || mn == WATER;
+        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        if (tn != t0) {
             maybe = true;
-            t += edge_flow(t0, temp(down), pair_k(m, material(down)), edge_roll(i, 1u, key));
+            t += flow_24(tn - t0, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i, 1u, key));
         }
     }
     if (y > 0u) {
-        touches_water = touches_water || material(up) == WATER;
-        if (temp(up) != t0) {
+        let mn = material(up);
+        let tn = temp(up);
+        touches_water = touches_water || mn == WATER;
+        open_faces += select(0, 1, kind(mn) == GAS && mn != FIRE);
+        if (tn != t0) {
             maybe = true;
-            t -= edge_flow(temp(up), t0, pair_k(m, material(up)), edge_roll(i - w, 1u, key));
+            t -= flow_24(t0 - tn, heat_rate(m, pair_conductance(m, mn, t0, tn)), edge_roll(i - w, 1u, key));
         }
     }
 
     let r = pcg(i ^ pcg(frame ^ CELL_SALT));
-    let tick = pcg(r) % TICK_STEPS == 0u;
+    let r2 = pcg(r);
+    let tick = r2 % TICK_STEPS == 0u;
+    if (condensed(m) && open_faces > 0 && t0 != AMBIENT) {
+        maybe = true;
+        t += flow_24(AMBIENT - t0, sky_rate(m, t0) * open_faces, i32(r2 >> 8u));
+    }
     if (kind(m) == GAS && m != FIRE) {
         t += ((AMBIENT - t0) * RELAX_K + i32(r & 0xFFFFFu)) >> 20u;
         maybe = maybe || t0 != AMBIENT;
@@ -296,7 +384,7 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
             free = has_above && sinks(up, me);
         }
         if (free) {
-            maybe = true;
+            maybe = maybe || speed(me) < speed_cap(me, other);
             if (sinker(m)) {
                 life = accelerate(me, me, other, other, roll);
             } else {
@@ -321,9 +409,9 @@ fn heat(me: u32, left: u32, right: u32, up: u32, down: u32, x: u32, y: u32, w: u
     } else if (m == STEAM) {
         if (t < celsius(50)) { next = WATER; }
     } else if (m == LAVA) {
-        if (t < celsius(800)) { next = select(SAND, STONE, supported); }
+        if (t < celsius(1000)) { next = select(SAND, STONE, supported); }
     } else if (m == STONE) {
-        if (t >= celsius(1100)) { next = LAVA; }
+        if (t >= celsius(1200)) { next = LAVA; }
     } else if (m == WOOD) {
         if (t >= celsius(300)) { next = FIRE; life = 120u + (r & 127u); }
     } else if (m == OIL) {
@@ -392,14 +480,17 @@ fn block_can_move(c: array<u32, 4>) -> bool {
         || spread_chance(c[0], c[1]) > 0u || spread_chance(c[2], c[3]) > 0u;
 }
 
-// Cheap first filter: four cells of one material whose density is fixed,
-// or four identical cells, can never move (block_can_move would say no).
+// Cheap first filter: four cells of one material whose density is fixed
+// (solids, powders, fire), or four identical cells, can never move
+// (block_can_move would say no). Gases and liquids of one material can:
+// their density depends on temperature, so hot under cold swaps.
 fn may_move(c: array<u32, 4>) -> bool {
     let m = material(c[0]);
     if (material(c[1]) != m || material(c[2]) != m || material(c[3]) != m) {
         return true;
     }
-    if (kind(m) != GAS || m == FIRE) {
+    let k = kind(m);
+    if (k == SOLID || k == POWDER || m == FIRE) {
         return false;
     }
     return !(c[1] == c[0] && c[2] == c[0] && c[3] == c[0]);
