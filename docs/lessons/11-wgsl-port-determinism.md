@@ -361,7 +361,7 @@ fn gpu_gives_identical_world_to_cpu() {
 
 Design choices worth copying:
 
-- **A busy scene** (`scene(4)`, "benchmark"). It contains every material and every phase change, so every branch of both shaders runs. A test on an empty world would pass even with a broken port.
+- **A busy scene** (`scene(4)`, "benchmark"). At this commit it contains every material and every phase change, so every branch of both shaders runs. (Later materials, metal, coal, jet and freezer, are not in it; lesson 19's GPU parity test covers them.) A test on an empty world would pass even with a broken port.
 - **Many steps (200).** A bug in a rare branch (fire burning out, smoke dying) needs time to fire. Because the simulation is chaotic, one wrong cell spreads into many, which makes the bug easy to see.
 - **Compare every cell, report the count.** `assert_eq!(a, b)` on two 40,960-element `Vec`s would print a wall of numbers. A count is easy to read. *0* means pass. *A handful* points to a rare branch or an edge (look at boundaries). *Nearly all* points to something global, such as a wrong constant, the wrong hash input or a wrong bit layout.
 - **Check `frame` too.** If one side ran 199 steps, every cell would differ, and this assert tells you why.
@@ -865,7 +865,7 @@ return HeatOut(new_cell, maybe || new_cell != me);
 
 and the kernel marks a chunk active on `maybe[k]` instead of `cells[k] != old[k]`.
 
-**`switch` tables for values that do not fit in a byte.** By `6c1cebc` the `var<private>` arrays of section 2.1 had already been replaced by bytes packed into `vec3<u32>` constants (`table_byte`), because a private array is copied into every thread's local memory. That still works for `KIND`, `FLOW`, `VT_LIQUID` and `VT_GAS`. But real densities (stone 26000) and heat rates (fire 6990) need more than 8 bits, so those two tables became `switch` functions of constants:
+**`switch` tables for values that do not fit in a byte.** By `6c1cebc` the `var<private>` arrays of section 2.1 had already been replaced by bytes packed into `vec3<u32>` constants (`table_byte`; with 16 materials the current shader uses `vec4<u32>`, see lesson 19, section 2.9), because a private array is copied into every thread's local memory. That still works for `KIND`, `FLOW`, `VT_LIQUID` and `VT_GAS`. But real densities (stone 26000) and heat rates (fire 6990) need more than 8 bits, so those two tables became `switch` functions of constants:
 
 ```wgsl
 fn heat_k(m: u32) -> i32 {

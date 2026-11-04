@@ -198,6 +198,7 @@ const KIND_BITS: u32 = (GAS << 0u) | (SOLID << 2u) | (POWDER << 4u) | /* ... */ 
 fn kind(m: u32) -> u32 { return (KIND_BITS >> (2u * m)) & 3u; }
 
 // Byte tables: 4 materials per u32. Materials 0-3 in x, 4-7 in y, 8-10 in z.
+// (Eleven materials here. The current table is vec4 for 16: see "What changed later" §5.)
 fn table_byte(t: vec3<u32>, m: u32) -> u32 {
     let word = select(select(t.x, t.y, m >= 4u), t.z, m >= 8u);
     return (word >> ((m & 3u) * 8u)) & 0xFFu;
@@ -1185,3 +1186,13 @@ Clean bench at `6c1cebc` (Apple M5, ms per GPU step, busy scene, sleeping on):
 - On an all-awake world the sleeping bookkeeping (awake checks, atomic stamps, the `wake` pass) costs **about 30%** compared with the fused kernel alone. It is still the right default, because real scenes are mostly at rest.
 - Don't compare this table with the A/B at the top of this lesson (4.77 → ~2.25 ms at 4K): they are different measurement runs. Compare ratios within one table.
 - `07fcf0b` made each step do more work (speed per cell, random rounding per edge), so step costs rose. The bench now also prints a "gpu max speed" column: how many times faster than real time the GPU alone could run. At `07fcf0b` that is about 6.8× at 640×360, about 1× at 1080p and 0.3× at 4K ([[16-real-units-velocity-clock]]).
+
+### 5. Current state: 16 materials, wider tables, two more exclusions
+
+Working tree after `3b45133`. Lesson 19 covers the materials; these are the GPU changes.
+
+- **Byte tables are `vec4<u32>`.** Eleven materials needed three words. Sixteen need four: `table_byte` selects among `t.x`, `t.y`, `t.z` and `t.w` (`common.wgsl`), four bytes per word.
+- **`KIND_BITS` uses all 32 bits.** It holds 2 bits for each of the 16 materials, so the table has no spare room.
+- **The fast path excludes `COAL` and `EXHAUST`.** `step.wgsl` now reads `let fixed = m != WOOD && m != OIL && m != COAL && m != FIRE && m != SMOKE && m != EXHAUST && ...`. Both use their random number in a way that can differ between four identical cells (coal when it ignites, exhaust for its life tick), so four equal inputs no longer give four equal outputs.
+- **Directed moves are copied into `motion.wgsl`.** `block_partner` and `directed_can_act` mirror the Rust functions in `motion.rs`, so the fused kernel moves jets and exhaust exactly as the CPU does. The parity test `gpu_matches_cpu_with_jets_freezers_metal_and_coal` runs 600 steps of a scene with all the new materials and requires zero differing cells.
+

@@ -90,6 +90,12 @@ Where your code differs, ask which version is clearer and why. Both can be right
 **[[18-heat-latent-boundary-layers]]**: Heat as energy: conductivities in series and per-material heat capacity, radiation, latent heat stored in the temperature field (boiling plateau, wet steam parcels, melting ice), `sens()` for the real temperature, boundary-layer conductances for water at hot surfaces and ice, and 24-bit stochastic rounding without overflowing an `i32`.
 *Concepts:* enthalpy encoding (one field holds temperature *and* phase energy), boundary layers, overflow-safe fixed point, conservation exact vs on average, tests against physical behaviour.
 
+**[[19-jets-freezers-and-the-full-material-field]]**: Directed motion (a jet's exhaust moves one cell along its direction, inside a Margolus block), anchored cells that never fall or spread, pinned reservoirs (a jet at 700°C, a freezer at -30°C), a freezer contact coefficient that matches ice, and the 4-bit material field, which is full at 16 ids.
+*Concepts:* a directed move as a pass over one 2x2 block, pinned boundary conditions, what "the field is full" costs (temperature range, aux resolution, memory), the GPU fast path and random numbers.
+
+**[[20-recorded-audio-and-loops]]**: How the grid becomes sound: a measured `AudioFrame` sent through a lock-free ring buffer, events drawn at the measured rates, synthesised sounds where no recording exists, embedded CC0 recordings, and a loop whose wrap is crossfaded so it does not click. The one-shot bank is built once at startup, not in the audio callback.
+*Concepts:* `include_bytes!` for embedded assets, lock-free hand-over between threads (why not a mutex), crossfades, Poisson event rates, allocation-free real-time code.
+
 **[[17-capstone-roadmap]]**: Build the whole thing yourself, milestone by milestone, with acceptance criteria and stretch goals.
 
 ## Rust concepts, and where they are taught
@@ -125,6 +131,13 @@ Where your code differs, ask which version is clearer and why. Both can be right
 | Overflow-safe fixed point (split multiply, no `i64` in WGSL) | 16, 18 |
 | GLSL render pipeline (texture upload, bloom, tone mapping) | 15 |
 | Multi-file binaries (`src/bin/<name>/main.rs`) | 15 |
+| Directed moves inside a 2x2 block (a neighbour that is in the same block) | 19 |
+| Pinned boundary conditions (fixed temperature reservoirs) | 19 |
+| A bit field that is full: layout trade-offs | 06, 19 |
+| `include_bytes!` for embedded assets | 20 |
+| Lock-free hand-over between threads (`rtrb`), why not a mutex | 20 |
+| Crossfaded loops (a seamless wrap) | 20 |
+| Poisson event rates and real-time audio code (no allocation) | 20 |
 
 ## Lesson dependencies
 
@@ -150,10 +163,13 @@ graph TD
   L14 --> L16[16 real units, velocity, world clock]
   L15 --> L16
   L16 --> L18[18 heat, latent heat, boundary layers]
-  L18 --> L17[17 capstone]
+  L18 --> L19[19 jets, freezers, full material field]
+  L19 --> L20[20 recorded audio and loops]
+  L15 --> L20
+  L20 --> L17[17 capstone]
 ```
 
-Lessons 09 and 10 are independent of each other: both rely only on lesson 08's "every cell has exactly one writer" rule. Lesson 18 comes after 16 (it replaces 16's heat rule) and before the capstone, which has milestones for it.
+Lessons 09 and 10 are independent of each other: both rely only on lesson 08's "every cell has exactly one writer" rule. Lesson 18 comes after 16 (it replaces 16's heat rule). Lessons 19 and 20 extend the engine (materials that act, then sound) and come before the capstone. Lesson 20 also reads the viewer's readback from lesson 15.
 
 ## Project architecture
 
@@ -164,7 +180,7 @@ graph LR
   subgraph old["Old engine (lessons 01-05)"]
     MAIN["src/main.rs<br/>Cell enum, Grid, particles,<br/>scenes, macroquad UI, tests"]
   end
-  subgraph lib["Library crate (lessons 06-18)"]
+  subgraph lib["Library crate (lessons 06-19)"]
     LIBRS["src/lib.rs<br/>pub mod physics"]
     MOD["physics/mod.rs<br/>module list + re-exports"]
     RULES["physics/<br/>materials.rs (tables, pack, sens)<br/>rng.rs (pcg, hash3)<br/>world.rs (World)<br/>thermal.rs (heat_cell)<br/>motion.rs (move_block)<br/>chunks.rs (sleeping)<br/>scenes.rs, tests.rs"]
@@ -186,9 +202,16 @@ graph LR
   end
   VIEW --> GPU
   VIEW --> CLOCK
+  VIEW --> AUDIO
   BENCH --> CPU
   BENCH --> GPU
+  subgraph sound["Sound (lessons 19-20)"]
+    AUDIO["src/audio/<br/>analysis.rs (cells to rates)<br/>engine.rs (mixer, loops)<br/>bank.rs (synth + recordings)"]
+  end
+  AUDIO --> RULES
 ```
+
+The sound (`sand/src/audio/`) reads the grid each frame; it is not part of the physics. Lesson 20 explains it. The materials in `RULES` are 16 (ids 0-15, lesson 19).
 
 Before `4fb8971` everything in `RULES` lived in `physics/mod.rs` and the shader was one file, `physics/sim.wgsl`. Before `072327e` the viewer was one file, `src/bin/physics.rs`. Lessons that teach older commits use those older paths.
 
@@ -212,6 +235,7 @@ Before `4fb8971` everything in `RULES` lived in `physics/mod.rs` and the shader 
 | `4fb8971` | Physics split into modules (`materials`, `rng`, `world`, `thermal`, `motion`, `chunks`, `scenes`, `tests`) and WGSL parts (`physics/wgsl/*.wgsl`) | 06 (and paths in 13, 16, 18) |
 | `97d45da` | Fire fixes: flames anchored to fuel, no sideways mixing into air (with `20d89dd`: ignition fixes, unsupported solids fall) | 18 |
 | `302a475` | Latent heat in the temperature field (with `c4d6aeb`): boiling plateau, wet steam, melting ice, `sens()`, boundary-layer conductances, stochastic boiling; sleeping and the GPU fast path account for boiling water | 18 (and "What changed later" in 13, 15, 16) |
+| working tree after `3b45133` (not yet committed when these lessons were written) | Jets, exhaust, freezers, metal, coal (materials 11-15, the full 4-bit field); anchored cells; freezer contact; `vec4` GPU tables; the viewer's two-row toolbar, scene 5 and grid-size fix; the recorded audio (`src/audio/`) | 19, 20 (and "What changed later" in 14, 15) |
 
 Lesson 06 teaches bit packing together with the module split, though in history it came one commit later (`31aed2d`). If you want to see the unpacked first version, read `2fbcad6`.
 

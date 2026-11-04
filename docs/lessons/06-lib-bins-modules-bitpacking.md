@@ -279,7 +279,7 @@ pub const fn pack(material: u32, aux: u32) -> u32 { material | (aux << 8) }
 
 ### 2.8 The 31aed2d layout: everything in one word
 
-Eleven materials fit in 4 bits ($2^4 = 16$). Aux (the remaining life of fire and smoke) needs 8 bits. That leaves $32 - 4 - 8 = 20$ bits, which is enough to hold the temperature too:
+At `31aed2d` there were eleven materials, which fit in 4 bits ($2^4 = 16$). The field now holds sixteen and is full; lesson 19 shows what a seventeenth material would cost. Aux (the remaining life of fire and smoke) needs 8 bits. That leaves $32 - 4 - 8 = 20$ bits, which is enough to hold the temperature too:
 
 ```text
  bit 31                                12 11          4 3      0

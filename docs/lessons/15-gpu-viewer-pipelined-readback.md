@@ -1377,3 +1377,22 @@ SAND_SCREENSHOT=/tmp/lava.png SAND_FRAMES=240 SAND_SCENE=1 cargo run --release -
 ```
 
 What this means for this lesson: the GPU → CPU → GPU round trip of §2.11 is still there (wgpu and macroquad's OpenGL don't share buffers), but the CPU part shrank to one `memcpy` into a texture. Rendering straight from the wgpu storage buffer is still stretch goal 5 in [[17-capstone-roadmap]].
+
+### 5. Toolbar, scenes, and resizing the grid without a crash (working tree after `3b45133`)
+
+**The toolbar has two rows.** `BAR_HEIGHT` is 76 pixels. The top row holds the controls, laid out from the right edge. The bottom row holds the brushes, 14 of them, which did not fit on one row. Brush keys: `1` to `9` and `0` for sand to steam, `-` metal, `=` coal, `J` jet, `F` freezer. `T` sets the direction of the next jet you paint (0 up, 1 right, 2 down, 3 left; right by default). The `-` and `=` step keys of `d94ade6` (see the note at the top of this lesson) are now brushes.
+
+**Scenes.** There are six. Scene 4 is the benchmark, and scene 5 is "jet engine": a metal body with four nozzles, a freezer under falling water, and a jet lighting a coal pile (lesson 19).
+
+**Resizing the grid used to crash the viewer.** Changing the size while it ran panicked inside macroquad (`get_quad_pipeline_mut` unwrapped `None`). The cause: `Sim::new` rebuilt the `Renderer`, which deletes and recreates shader materials in the middle of a run. The fix:
+
+- `main()` owns the `Renderer` for the whole run.
+- `Renderer::set_grid` rebuilds only what depends on the grid size: the grid texture and the glow render targets.
+- The shader materials live as long as the program.
+
+The general lesson is the one this section keeps returning to: **keep long-lived GPU resources alive, and rebuild only what depends on the size.** A material is compiled once. A texture sized to the grid is rebuilt when the grid changes.
+
+Two test hooks reproduce this without a person: `SAND_GRID=<0..4>` starts at a grid size (an index into `GRIDS`), and `SAND_GRID_LATE=<frame>:<grid>` switches to a size at a given frame.
+
+**Sound.** Each frame the viewer sends the audio thread a small `AudioFrame` built from the same readback. Lesson 20 explains it.
+

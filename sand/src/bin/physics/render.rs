@@ -82,6 +82,10 @@ vec3 lava_color(float t) {
     float k = clamp((t - 950.0) / 250.0, 0.0, 1.0);
     return mix(vec3(0.45, 0.06, 0.02), vec3(1.0, 0.55, 0.12), k);
 }
+// A gas flame: orange at the edges, white-yellow in the hot core.
+vec3 flame_color(float t) {
+    return mix(vec3(0.95, 0.35, 0.08), vec3(1.0, 0.95, 0.75), clamp((t - 700.0) / 500.0, 0.0, 1.0));
+}
 vec3 fire_color(float life) {
     return mix(vec3(0.85, 0.15, 0.03), vec3(1.0, 0.8, 0.3), clamp(life / 120.0, 0.0, 1.0));
 }
@@ -92,7 +96,7 @@ vec3 emission(vec4 c, float incandescence) {
     float t = temp_of(c);
     if (is_mat(m, 5.0)) { return lava_color(t) * 1.1; }
     if (is_mat(m, 8.0)) { return fire_color(aux_of(c)) * 1.3; }
-    if (is_mat(m, 15.0)) { return lava_color(t) * 0.8; } // hot exhaust glows
+    if (is_mat(m, 15.0)) { return flame_color(t) * 1.4; } // hot exhaust glows
     if (!is_gas(m) && t > 500.0) { return heat_tint(t) * clamp((t - 500.0) / 700.0, 0.0, 1.0) * incandescence; }
     if (is_mat(m, 0.0) && t > 150.0) { return vec3(0.9, 0.3, 0.1) * clamp((t - 150.0) / 1500.0, 0.0, 0.25); }
     return vec3(0.0);
@@ -179,7 +183,7 @@ void main() {
     else if (is_mat(m, 14.0)) { col = vec3(0.55, 0.8, 0.95) * (1.0 + n * 0.05); } // freezer wall
     else if (is_mat(m, 15.0)) {
         // Exhaust: flame gas, orange to pale yellow as it is hotter.
-        col = mix(vec3(0.95, 0.35, 0.08), vec3(1.0, 0.85, 0.45), clamp((t - 500.0) / 600.0, 0.0, 1.0));
+        col = flame_color(t);
         col *= 1.0 + 0.15 * sin(Time * 40.0 + cp.x * 2.3 + cp.y * 1.1);
     }
     else { col = mix(sky, vec3(0.22, 0.22, 0.24), 0.55 + n * 0.2); } // smoke

@@ -363,6 +363,8 @@ A real number to check the melting value against: ice in 22°C water. $q = 1500\
 
 What the model leaves out: real boiling has a ceiling, the critical heat flux (roughly 1 MW/m² for water at 1 atm). Above it a vapour film forms (the Leidenfrost effect) and $h$ drops. At 50 000 W/(m²·K), lava at 1150°C would push 50 MW/m². In the sim the lava face cools and crusts within moments, so this lasts a fraction of a second, but it is a known simplification, not physics.
 
+**The freezer uses the same value (added later).** `pair_conductance` also returns `MELT_CONDUCTANCE` between water and `FREEZER`, a cold plate at -30°C, with the same $h = 1500$ W/(m²·K). Lesson 19 (section 2.6) explains why plain conduction is too slow for it and what the freezing time is.
+
 ### 2.11 Flames: anchored, with a real flux
 
 Two changes made fire behave (`20d89dd`, `97d45da`). First, a flame touching a solid or liquid heats it with a surface flux $q = 150$ kW/m², a typical figure for flames on a surface. The temperature rise per step is $q\,\Delta t/(\rho c\,\Delta x)$. In 1/256 K units:

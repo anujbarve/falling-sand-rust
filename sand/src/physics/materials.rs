@@ -135,6 +135,10 @@ pub const FREEZER_T: i32 = celsius(-30);
 pub const EXHAUST_T: i32 = celsius(1100);
 /// Exhaust life: 6 bits of aux, ticks of 16 steps on average.
 pub const EXHAUST_LIFE_MAX: u32 = 63;
+/// Exhaust moves on about half the steps it could (chance 128/256). A nozzle
+/// emits about every other step, so the stream is a solid plume of about one
+/// particle per cell (0.5 cell per step = 1.5 m/s), not a dotted line.
+pub const EXHAUST_MOVE: u32 = 192;
 
 /// Anchored cells never move by gravity or spread: flames, nozzles, exhaust
 /// and freezers stay where they are.

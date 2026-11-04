@@ -1,8 +1,8 @@
-//! The one-shot sounds: synthesised once, then played back like recordings.
-//!
-//! Every sound here is procedural (no sample files needed), generated once
-//! at startup, deterministic (fixed seeds), and the same data the `bake`
-//! binary writes to WAV files in `sand/assets/audio/`.
+//! The one-shot sounds. Drips, bubbles, crackles and ignitions are cut from
+//! recorded CC0 clips (embedded with `include_bytes!`, see
+//! assets/audio/clips/README.md). Grains, plops, tinks and fry sizzles have no
+//! CC0 recording yet, so they are synthesised once at startup (deterministic
+//! seeds). The `bake` binary writes every one-shot to WAV files for listening.
 //!
 //! Each kind has several variants so repeated events never sound identical.
 

@@ -119,7 +119,8 @@ fn move_block(cells: ptr<function, array<u32, 4>>, r: u32) {
     var done = array<bool, 4>(false, false, false, false);
     for (var c = 0u; c < 4u; c += 1u) {
         let m = material((*cells)[c]);
-        if ((m == JET || m == EXHAUST) && !done[c]) {
+        let waits = m == EXHAUST && ((r2 >> (c * 8u)) & 255u) >= EXHAUST_MOVE;
+        if ((m == JET || m == EXHAUST) && !done[c] && !waits) {
             let d = aux((*cells)[c]) & 3u;
             let p = block_partner(c, d);
             if (p < 4u && material((*cells)[p]) == AIR) {

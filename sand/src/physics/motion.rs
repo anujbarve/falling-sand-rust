@@ -98,6 +98,9 @@ pub fn move_block(cells: &mut [u32; 4], r: u32) {
         if (m != JET && m != EXHAUST) || done[c] {
             continue;
         }
+        if m == EXHAUST && ((r2 >> (c as u32 * 8)) & 255) >= EXHAUST_MOVE {
+            continue; // this particle waits this step
+        }
         let d = aux(cells[c]) & 3;
         let Some(p) = block_partner(c, d) else { continue };
         if material(cells[p]) != AIR {

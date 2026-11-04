@@ -64,6 +64,7 @@ const JET_T: i32 = 179200;      // 700°C
 const FREEZER_T: i32 = -7680;   // -30°C
 const EXHAUST_T: i32 = 281600;  // 1100°C
 const EXHAUST_LIFE_MAX: u32 = 63u;
+const EXHAUST_MOVE: u32 = 192u;
 
 const GAS: u32 = 0u;
 const LIQUID: u32 = 1u;

@@ -1104,3 +1104,8 @@ let fixed = m != WOOD && m != OIL && m != FIRE && m != SMOKE && (kind(m) != GAS 
 ```
 
 The rule and the proof are untouched. Sleeping is still exact, and `sleeping_gives_identical_world_to_no_sleeping` and `settled_scene_sleeps_on_cpu_and_gpu` still pass. Only the list of "things that use a random number" grew, which is exactly what the proof asks you to keep complete.
+
+### 4. The property test covers every material (working tree after `3b45133`)
+
+`block_can_move_is_never_wrong` no longer checks all 81 blocks against rolls `0..8`. It draws 20 000 random blocks, with every material taken from `MATERIAL_COUNT` (now 16, so the metal, coal, jet, freezer and exhaust cells are included), half at rest and half with a random speed. For each block it checks that a block reported as stuck stays unchanged for 64 hashed rolls. The same rule still holds: `move_block` must not change a block that `block_can_move` says is stuck. Nothing in the chunk rule changed for the new materials. A jet or exhaust cell always marks its chunk active, because `heat_cell` sets `maybe` for it on every step (lesson 19, section 2.2).
+

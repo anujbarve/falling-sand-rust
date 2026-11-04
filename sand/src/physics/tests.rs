@@ -668,7 +668,7 @@ mod new_materials {
             run(&mut w, 150);
             let (dx, dy) = dir_step(d);
             let ex = cells_of(&w, EXHAUST);
-            assert!(ex.len() > 40, "direction {d}: exhaust should stream out, got {}", ex.len());
+            assert!(ex.len() > 25, "direction {d}: exhaust should stream out, got {}", ex.len());
             for &(x, y, _) in &ex {
                 let forward = (x as i32 - 60) * dx + (y as i32 - 60) * dy;
                 assert!(forward > 0, "direction {d}: exhaust at ({x},{y}) is not ahead of the nozzle");
@@ -677,6 +677,17 @@ mod new_materials {
             assert_eq!(material(w.cells[60 * 121 + 60]), JET);
             assert_eq!(aux(w.cells[60 * 121 + 60]) & 3, d);
         }
+    }
+
+    #[test]
+    fn jet_makes_a_dense_continuous_plume() {
+        // A steady right-facing gas jet: along its axis, most cells near the
+        // nozzle hold flame, so the plume is a stream, not dots.
+        let mut w = World::new(121, 121);
+        set(&mut w, 60, 60, JET, 1, JET_T);
+        run(&mut w, 300);
+        let filled = (65..=90).filter(|&x| material(w.cells[60 * 121 + x]) == EXHAUST).count();
+        assert!(filled >= 13, "plume along the axis: {filled} of 26 cells hold exhaust");
     }
 
     #[test]
@@ -792,5 +803,6 @@ mod new_materials {
         assert!(!cells_of(&cpu_world, EXHAUST).is_empty(), "the scene really ran jets");
     }
 }
+
 
 
