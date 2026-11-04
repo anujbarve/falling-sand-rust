@@ -1,21 +1,18 @@
 //! The CPU backend: the same two passes, either on one thread or spread
-//! over every core with rayon.
+//! over every core with rayon. Kept as the reference the GPU is tested
+//! against, and as the baseline in the benchmark.
 
 use super::{block_offset, hash3, heat_cell, move_block, World};
 use rayon::prelude::*;
 
-/// Scratch buffers for the heat pass, which needs an old and a new grid.
+/// Scratch buffer for the heat pass, which needs an old and a new grid.
 pub struct CpuSim {
-    next_mat: Vec<u32>,
-    next_temp: Vec<i32>,
+    next: Vec<u32>,
 }
 
 impl CpuSim {
     pub fn new(world: &World) -> Self {
-        CpuSim {
-            next_mat: vec![0; world.mat.len()],
-            next_temp: vec![0; world.temp.len()],
-        }
+        CpuSim { next: vec![0; world.cells.len()] }
     }
 
     /// One step on one thread.
@@ -23,15 +20,12 @@ impl CpuSim {
         let (w, h, frame) = (world.width, world.height, world.frame);
         for y in 0..h {
             for x in 0..w {
-                let (m, t) = heat_cell(&world.mat, &world.temp, w, h, x, y, frame);
-                self.next_mat[y * w + x] = m;
-                self.next_temp[y * w + x] = t;
+                self.next[y * w + x] = heat_cell(&world.cells, w, h, x, y, frame);
             }
         }
         // The new grid becomes the current one. Swapping two Vecs only swaps
         // their pointers: no cells are copied.
-        std::mem::swap(&mut world.mat, &mut self.next_mat);
-        std::mem::swap(&mut world.temp, &mut self.next_temp);
+        std::mem::swap(&mut world.cells, &mut self.next);
 
         let o = block_offset(frame);
         for by in 0..h / 2 {
@@ -46,12 +40,10 @@ impl CpuSim {
                     continue;
                 }
                 let idx = [top + x, top + x + 1, bottom + x, bottom + x + 1];
-                let mut cells = idx.map(|i| world.mat[i]);
-                let mut temps = idx.map(|i| world.temp[i]);
-                move_block(&mut cells, &mut temps, hash3(bx as u32, by as u32, frame));
+                let mut cells = idx.map(|i| world.cells[i]);
+                move_block(&mut cells, hash3(bx as u32, by as u32, frame));
                 for k in 0..4 {
-                    world.mat[idx[k]] = cells[k];
-                    world.temp[idx[k]] = temps[k];
+                    world.cells[idx[k]] = cells[k];
                 }
             }
         }
@@ -66,46 +58,33 @@ impl CpuSim {
         // the new grid and only reads the old grid, so rayon can hand the
         // rows to different threads safely. The borrow checker proves this:
         // par_chunks_mut gives each task a separate &mut slice.
-        let (mat, temp) = (&world.mat, &world.temp);
-        self.next_mat
-            .par_chunks_mut(w)
-            .zip(self.next_temp.par_chunks_mut(w))
-            .enumerate()
-            .for_each(|(y, (mrow, trow))| {
-                for x in 0..w {
-                    let (m, t) = heat_cell(mat, temp, w, h, x, y, frame);
-                    mrow[x] = m;
-                    trow[x] = t;
-                }
-            });
-        std::mem::swap(&mut world.mat, &mut self.next_mat);
-        std::mem::swap(&mut world.temp, &mut self.next_temp);
+        let cells = &world.cells;
+        self.next.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+            for x in 0..w {
+                row[x] = heat_cell(cells, w, h, x, y, frame);
+            }
+        });
+        std::mem::swap(&mut world.cells, &mut self.next);
 
         // Move pass: one row of blocks (= 2 grid rows) per task.
         let o = block_offset(frame);
-        world.mat[o * w..]
-            .par_chunks_mut(2 * w)
-            .zip(world.temp[o * w..].par_chunks_mut(2 * w))
-            .enumerate()
-            .for_each(|(by, (mrows, trows))| {
-                if mrows.len() < 2 * w {
-                    return; // a lone last row has no partner row
+        world.cells[o * w..].par_chunks_mut(2 * w).enumerate().for_each(|(by, rows)| {
+            if rows.len() < 2 * w {
+                return; // a lone last row has no partner row
+            }
+            for bx in 0..w / 2 {
+                let x = 2 * bx + o;
+                if x + 1 >= w {
+                    continue;
                 }
-                for bx in 0..w / 2 {
-                    let x = 2 * bx + o;
-                    if x + 1 >= w {
-                        continue;
-                    }
-                    let idx = [x, x + 1, w + x, w + x + 1];
-                    let mut cells = idx.map(|i| mrows[i]);
-                    let mut temps = idx.map(|i| trows[i]);
-                    move_block(&mut cells, &mut temps, hash3(bx as u32, by as u32, frame));
-                    for k in 0..4 {
-                        mrows[idx[k]] = cells[k];
-                        trows[idx[k]] = temps[k];
-                    }
+                let idx = [x, x + 1, w + x, w + x + 1];
+                let mut cells = idx.map(|i| rows[i]);
+                move_block(&mut cells, hash3(bx as u32, by as u32, frame));
+                for k in 0..4 {
+                    rows[idx[k]] = cells[k];
                 }
-            });
+            }
+        });
         world.frame = frame.wrapping_add(1);
     }
 }

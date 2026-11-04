@@ -44,7 +44,7 @@ fn check_identical(w: usize, h: usize, steps: u32) -> Result<(), String> {
     let mut gpu = GpuSim::new(&start)?;
     gpu.step(steps);
     gpu.download(&mut gpu_world);
-    let differ = |a: &World, b: &World| (0..a.mat.len()).filter(|&i| a.mat[i] != b.mat[i] || a.temp[i] != b.temp[i]).count();
+    let differ = |a: &World, b: &World| (0..a.cells.len()).filter(|&i| a.cells[i] != b.cells[i]).count();
     match (differ(&single, &multi), differ(&single, &gpu_world)) {
         (0, 0) => Ok(()),
         (m, g) => Err(format!("{m} cells differ (rayon), {g} cells differ (gpu)")),

@@ -141,11 +141,8 @@ async fn main() {
 
         // --- draw ---
         for i in 0..W * H {
-            let rgb = if heat_view {
-                heat_color(world.temp[i])
-            } else {
-                cell_color(world.mat[i], world.temp[i], i)
-            };
+            let cell = world.cells[i];
+            let rgb = if heat_view { heat_color(temp(cell)) } else { cell_color(cell, temp(cell), i) };
             image.bytes[i * 4..i * 4 + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
         }
         texture.update(&image);
@@ -165,8 +162,8 @@ async fn main() {
         let probe = under_mouse.map_or(String::new(), |i| {
             format!(
                 "under mouse: {} {:.0}°C",
-                NAMES[material(world.mat[i]) as usize],
-                world.temp[i] as f32 / T_SCALE as f32
+                NAMES[material(world.cells[i]) as usize],
+                temp(world.cells[i]) as f32 / T_SCALE as f32
             )
         });
         let (name, about) = SCENES[scene_index];

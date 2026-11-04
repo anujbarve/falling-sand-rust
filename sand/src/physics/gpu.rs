@@ -28,13 +28,11 @@ pub struct GpuSim {
     moves: wgpu::ComputePipeline,
     params: wgpu::Buffer,
     // Two copies of the grid. The heat pass reads one and writes the other.
-    mat: [wgpu::Buffer; 2],
-    temp: [wgpu::Buffer; 2],
+    cells: [wgpu::Buffer; 2],
     // groups[i] reads buffers i and writes buffers 1 - i.
     groups: [wgpu::BindGroup; 2],
-    // CPU-readable buffers that results are copied into for `download`.
-    staging_mat: wgpu::Buffer,
-    staging_temp: wgpu::Buffer,
+    // CPU-readable buffer that results are copied into for `download`.
+    staging: wgpu::Buffer,
     current: usize, // which of the two copies holds the latest state
     width: u32,
     height: u32,
@@ -99,9 +97,7 @@ impl GpuSim {
                     count: None,
                 },
                 storage(1, true),
-                storage(2, true),
-                storage(3, false),
-                storage(4, false),
+                storage(2, false),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -122,21 +118,18 @@ impl GpuSim {
         let heat = pipeline("heat");
         let moves = pipeline("move_blocks");
 
-        let cells = (world.width * world.height) as u64;
+        let cell_count = (world.width * world.height) as u64;
         let buffer = |label: &str, usage: wgpu::BufferUsages| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
-                size: cells * 4,
+                size: cell_count * 4,
                 usage,
                 mapped_at_creation: false,
             })
         };
         let grid_usage = wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC;
-        let mat = [buffer("mat0", grid_usage), buffer("mat1", grid_usage)];
-        let temp = [buffer("temp0", grid_usage), buffer("temp1", grid_usage)];
-        let staging_usage = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
-        let staging_mat = buffer("staging mat", staging_usage);
-        let staging_temp = buffer("staging temp", staging_usage);
+        let cells = [buffer("cells0", grid_usage), buffer("cells1", grid_usage)];
+        let staging = buffer("staging", wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST);
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("params"),
             size: MAX_BATCH as u64 * PARAMS_STRIDE,
@@ -158,10 +151,8 @@ impl GpuSim {
                             size: NonZeroU64::new(size_of::<Params>() as u64),
                         }),
                     },
-                    wgpu::BindGroupEntry { binding: 1, resource: mat[src].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: temp[src].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: mat[dst].as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 4, resource: temp[dst].as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: cells[src].as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: cells[dst].as_entire_binding() },
                 ],
             })
         };
@@ -173,11 +164,9 @@ impl GpuSim {
             heat,
             moves,
             params,
-            mat,
-            temp,
+            cells,
             groups,
-            staging_mat,
-            staging_temp,
+            staging,
             current: 0,
             width: world.width as u32,
             height: world.height as u32,
@@ -191,8 +180,7 @@ impl GpuSim {
     /// Replace the GPU's copy of the world (after painting on the CPU side).
     pub fn upload(&mut self, world: &World) {
         assert_eq!((world.width as u32, world.height as u32), (self.width, self.height));
-        self.queue.write_buffer(&self.mat[self.current], 0, bytemuck::cast_slice(&world.mat));
-        self.queue.write_buffer(&self.temp[self.current], 0, bytemuck::cast_slice(&world.temp));
+        self.queue.write_buffer(&self.cells[self.current], 0, bytemuck::cast_slice(&world.cells));
         self.frame = world.frame;
     }
 
@@ -242,24 +230,18 @@ impl GpuSim {
 
     /// Copy the GPU's world back into `world` (waits for queued steps first).
     pub fn download(&self, world: &mut World) {
-        let size = self.staging_mat.size();
         let mut encoder = self.device.create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(&self.mat[self.current], 0, &self.staging_mat, 0, size);
-        encoder.copy_buffer_to_buffer(&self.temp[self.current], 0, &self.staging_temp, 0, size);
+        encoder.copy_buffer_to_buffer(&self.cells[self.current], 0, &self.staging, 0, self.staging.size());
         self.queue.submit([encoder.finish()]);
 
         // Mapping is asynchronous: ask for it, then poll until it is done.
-        self.staging_mat.map_async(wgpu::MapMode::Read, .., |r| r.expect("map failed"));
-        self.staging_temp.map_async(wgpu::MapMode::Read, .., |r| r.expect("map failed"));
+        self.staging.map_async(wgpu::MapMode::Read, .., |r| r.expect("map failed"));
         self.wait();
         {
-            let view = self.staging_mat.get_mapped_range(..).expect("mapped");
-            world.mat.copy_from_slice(bytemuck::cast_slice(&view));
-            let view = self.staging_temp.get_mapped_range(..).expect("mapped");
-            world.temp.copy_from_slice(bytemuck::cast_slice(&view));
-        } // the views must be dropped before unmapping
-        self.staging_mat.unmap();
-        self.staging_temp.unmap();
+            let view = self.staging.get_mapped_range(..).expect("mapped");
+            world.cells.copy_from_slice(bytemuck::cast_slice(&view));
+        } // the view must be dropped before unmapping
+        self.staging.unmap();
         world.frame = self.frame;
     }
 }

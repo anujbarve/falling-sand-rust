@@ -44,8 +44,13 @@ pub mod gpu;
 // Materials
 // ---------------------------------------------------------------------------
 
-// A cell is a packed u32: bits 0-7 material, bits 8-15 `aux` (remaining
-// life for fire and smoke). Temperature is stored in a separate array.
+// A cell is one packed u32, so a step moves half the bytes it would with
+// a separate temperature array (the GPU is limited by memory traffic):
+//
+//   bits 0-3    material (16 possible)
+//   bits 4-11   aux: remaining life for fire and smoke
+//   bits 12-31  temperature, signed 20 bits (see T_SCALE): about ±2047°C
+//
 // The GPU shader `sim.wgsl` repeats these numbers: keep the two in sync.
 pub const AIR: u32 = 0;
 pub const STONE: u32 = 1;
@@ -91,14 +96,23 @@ pub const fn celsius(c: i32) -> i32 {
 }
 pub const AMBIENT: i32 = celsius(20);
 
+/// Temperature range that fits in 20 signed bits.
+pub const T_MIN: i32 = -(1 << 19);
+pub const T_MAX: i32 = (1 << 19) - 1;
+
 pub const fn material(cell: u32) -> u32 {
-    cell & 0xFF
+    cell & 0xF
 }
 pub const fn aux(cell: u32) -> u32 {
-    (cell >> 8) & 0xFF
+    (cell >> 4) & 0xFF
 }
-pub const fn pack(material: u32, aux: u32) -> u32 {
-    material | (aux << 8)
+/// `as i32` reinterprets the bits; `>>` on an i32 copies the sign bit
+/// down, so negative temperatures come back out negative.
+pub const fn temp(cell: u32) -> i32 {
+    (cell as i32) >> 12
+}
+pub fn pack(material: u32, aux: u32, temp: i32) -> u32 {
+    material | (aux << 4) | ((temp.clamp(T_MIN, T_MAX) as u32) << 12)
 }
 
 /// Starting temperature of a freshly placed cell.
@@ -145,9 +159,8 @@ pub fn hash3(a: u32, b: u32, c: u32) -> u32 {
 pub struct World {
     pub width: usize,
     pub height: usize,
-    pub mat: Vec<u32>,  // packed cells, row by row, row 0 at the top
-    pub temp: Vec<i32>, // temperature of each cell, fixed point (see T_SCALE)
-    pub frame: u32,     // steps run so far; picks the block offset and the randomness
+    pub cells: Vec<u32>, // packed cells (material, aux, temperature), row by row, row 0 at the top
+    pub frame: u32,      // steps run so far; picks the block offset and the randomness
 }
 
 impl World {
@@ -156,8 +169,7 @@ impl World {
         let mut world = World {
             width,
             height,
-            mat: vec![pack(AIR, 0); width * height],
-            temp: vec![AMBIENT; width * height],
+            cells: vec![pack(AIR, 0, AMBIENT); width * height],
             frame: 0,
         };
         world.fill(0, height as i32 - 1, width as i32, height as i32, STONE);
@@ -173,14 +185,13 @@ impl World {
     }
 
     pub fn get(&self, x: i32, y: i32) -> u32 {
-        self.index(x, y).map_or(STONE, |i| material(self.mat[i]))
+        self.index(x, y).map_or(STONE, |i| material(self.cells[i]))
     }
 
     /// Place a fresh cell of material `m` (with its default temperature).
     pub fn set(&mut self, x: i32, y: i32, m: u32) {
         if let Some(i) = self.index(x, y) {
-            self.mat[i] = pack(m, default_aux(m));
-            self.temp[i] = default_temp(m);
+            self.cells[i] = pack(m, default_aux(m), default_temp(m));
         }
     }
 
@@ -205,7 +216,7 @@ impl World {
     }
 
     pub fn count(&self, m: u32) -> usize {
-        self.mat.iter().filter(|c| material(**c) == m).count()
+        self.cells.iter().filter(|c| material(**c) == m).count()
     }
 }
 
@@ -214,13 +225,12 @@ impl World {
 // ---------------------------------------------------------------------------
 
 /// Heat pass for one cell: conduction from the 4 neighbours, then phase
-/// changes. Reads only the old grid, returns the cell's new (packed cell,
-/// temperature).
-pub fn heat_cell(mat: &[u32], temp: &[i32], w: usize, h: usize, x: usize, y: usize, frame: u32) -> (u32, i32) {
+/// changes. Reads only the old grid, returns the cell's new packed value.
+pub fn heat_cell(cells: &[u32], w: usize, h: usize, x: usize, y: usize, frame: u32) -> u32 {
     let i = y * w + x;
-    let m = material(mat[i]);
-    let mut life = aux(mat[i]);
-    let t0 = temp[i];
+    let m = material(cells[i]);
+    let mut life = aux(cells[i]);
+    let t0 = temp(cells[i]);
     let k_self = COND[m as usize];
 
     // Conduction. The heat that flows from j to i is exactly minus the heat
@@ -229,9 +239,9 @@ pub fn heat_cell(mat: &[u32], temp: &[i32], w: usize, h: usize, x: usize, y: usi
     let mut flux = 0;
     let mut touches_water = false;
     let mut neighbour = |j: usize| {
-        let mn = material(mat[j]);
+        let mn = material(cells[j]);
         let k = k_self.min(COND[mn as usize]);
-        flux += (temp[j] - t0) * k / 1024;
+        flux += (temp(cells[j]) - t0) * k / 1024;
         touches_water |= mn == WATER;
     };
     if x > 0 {
@@ -248,7 +258,7 @@ pub fn heat_cell(mat: &[u32], temp: &[i32], w: usize, h: usize, x: usize, y: usi
     }
     let mut t = t0 + flux;
     // Is something solid holding this cell up? (The world's bottom edge counts.)
-    let supported = y + 1 >= h || KIND[material(mat[i + w]) as usize] >= POWDER;
+    let supported = y + 1 >= h || KIND[material(cells[i + w]) as usize] >= POWDER;
 
     // Gases mix with the wider atmosphere and drift back to room temperature.
     if KIND[m as usize] == GAS && m != FIRE {
@@ -295,14 +305,14 @@ pub fn heat_cell(mat: &[u32], temp: &[i32], w: usize, h: usize, x: usize, y: usi
         }
         _ => {}
     }
-    (pack(next, if next == AIR { 0 } else { life }), t)
+    pack(next, if next == AIR { 0 } else { life }, t)
 }
 
 /// Density of a cell at temperature `t`. Gases expand when heated, so hot
 /// air is lighter than cold air and rises: that is convection. (Flames keep
 /// a fixed density, or they would shoot away from what they are burning.)
-fn density(cell: u32, t: i32) -> i32 {
-    let m = material(cell);
+fn density(cell: u32) -> i32 {
+    let (m, t) = (material(cell), temp(cell));
     let d = DENSITY[m as usize];
     if KIND[m as usize] == GAS && m != FIRE {
         (d - (t - AMBIENT) / celsius(40)).max(1)
@@ -313,13 +323,13 @@ fn density(cell: u32, t: i32) -> i32 {
 
 /// Would the cell `top` sink into the cell `bottom` right below it?
 /// The bigger the density gap, the more likely: that is buoyancy.
-fn sinks(top: u32, t_top: i32, bottom: u32, t_bottom: i32, roll: u32) -> bool {
+fn sinks(top: u32, bottom: u32, roll: u32) -> bool {
     let (mt, mb) = (material(top) as usize, material(bottom) as usize);
     // Solids never move; a pile of powder is not pushed aside by liquid.
     if KIND[mt] == SOLID || KIND[mb] == SOLID || KIND[mb] == POWDER {
         return false;
     }
-    let (dt, db) = (density(top, t_top), density(bottom, t_bottom));
+    let (dt, db) = (density(top), density(bottom));
     if dt <= db {
         return false;
     }
@@ -333,22 +343,18 @@ fn spreads(left: u32, right: u32, roll: u32) -> bool {
     ml != mr && fluid(KIND[ml]) && fluid(KIND[mr]) && roll < FLOW[ml].min(FLOW[mr])
 }
 
-/// Move pass for one 2x2 block. `cells` and `temps` are in the order
-/// top-left, top-right, bottom-left, bottom-right. A cell carries its
-/// temperature with it when it moves.
-pub fn move_block(cells: &mut [u32; 4], temps: &mut [i32; 4], r: u32) {
+/// Move pass for one 2x2 block. `cells` is in the order top-left,
+/// top-right, bottom-left, bottom-right. The temperature is packed into
+/// the cell, so it travels with the cell for free.
+pub fn move_block(cells: &mut [u32; 4], r: u32) {
     let r2 = pcg(r);
-    let swap = |a: usize, b: usize, cells: &mut [u32; 4], temps: &mut [i32; 4]| {
-        cells.swap(a, b);
-        temps.swap(a, b);
-    };
     let mut fell = [false; 2];
 
     // 1. Gravity and buoyancy, in each column: heavy above light trades places.
     for col in 0..2 {
         let (top, bottom) = (col, col + 2);
-        if sinks(cells[top], temps[top], cells[bottom], temps[bottom], (r >> (col * 8)) & 255) {
-            swap(top, bottom, cells, temps);
+        if sinks(cells[top], cells[bottom], (r >> (col * 8)) & 255) {
+            cells.swap(top, bottom);
             fell[col] = true;
         }
     }
@@ -366,8 +372,8 @@ pub fn move_block(cells: &mut [u32; 4], temps: &mut [i32; 4], r: u32) {
             continue;
         }
         let roll = (r >> (16 + col * 8)) & 255;
-        if roll < FLOW[m] && sinks(cells[top], temps[top], cells[diagonal], temps[diagonal], 0) {
-            swap(top, diagonal, cells, temps);
+        if roll < FLOW[m] && sinks(cells[top], cells[diagonal], 0) {
+            cells.swap(top, diagonal);
             slid = true;
         }
     }
@@ -377,7 +383,7 @@ pub fn move_block(cells: &mut [u32; 4], temps: &mut [i32; 4], r: u32) {
         for row in 0..2 {
             let (left, right) = (row * 2, row * 2 + 1);
             if spreads(cells[left], cells[right], (r2 >> (row * 8)) & 255) {
-                swap(left, right, cells, temps);
+                cells.swap(left, right);
             }
         }
     }
@@ -502,9 +508,7 @@ mod tests {
         gpu.step(200);
         gpu.download(&mut gpu_world);
         assert_eq!(cpu_world.frame, gpu_world.frame);
-        let diff = (0..cpu_world.mat.len())
-            .filter(|&i| cpu_world.mat[i] != gpu_world.mat[i] || cpu_world.temp[i] != gpu_world.temp[i])
-            .count();
+        let diff = (0..cpu_world.cells.len()).filter(|&i| cpu_world.cells[i] != gpu_world.cells[i]).count();
         assert_eq!(diff, 0, "{diff} cells differ between CPU and GPU");
     }
 
@@ -515,14 +519,15 @@ mod tests {
         world.fill(0, 0, 64, 64, STONE);
         for y in 20..30 {
             for x in 20..30 {
-                world.temp[y * 64 + x] = celsius(1000);
+                world.cells[y * 64 + x] = pack(STONE, 0, celsius(1000));
             }
         }
-        let before: i64 = world.temp.iter().map(|&t| t as i64).sum();
+        let total = |w: &World| w.cells.iter().map(|&c| temp(c) as i64).sum::<i64>();
+        let before = total(&world);
         run(&mut world, 300);
-        let after: i64 = world.temp.iter().map(|&t| t as i64).sum();
+        let after = total(&world);
         assert_eq!(before, after);
-        assert!(world.temp[64 * 25 + 15] > AMBIENT, "heat should have spread outward");
+        assert!(temp(world.cells[64 * 25 + 15]) > AMBIENT, "heat should have spread outward");
     }
 
     #[test]
@@ -533,7 +538,7 @@ mod tests {
         world.fill(0, 43, 32, 63, OIL);
         run(&mut world, 3000);
         let mean_y = |m: u32| {
-            let ys: Vec<usize> = (0..world.mat.len()).filter(|&i| material(world.mat[i]) == m).map(|i| i / 32).collect();
+            let ys: Vec<usize> = (0..world.cells.len()).filter(|&i| material(world.cells[i]) == m).map(|i| i / 32).collect();
             ys.iter().sum::<usize>() as f64 / ys.len() as f64
         };
         assert!(mean_y(OIL) < mean_y(WATER), "oil should end up above water");

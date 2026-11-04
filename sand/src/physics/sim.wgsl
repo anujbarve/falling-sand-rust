@@ -10,10 +10,8 @@ struct Params {
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> mat_in: array<u32>;
-@group(0) @binding(2) var<storage, read> temp_in: array<i32>;
-@group(0) @binding(3) var<storage, read_write> mat_out: array<u32>;
-@group(0) @binding(4) var<storage, read_write> temp_out: array<i32>;
+@group(0) @binding(1) var<storage, read> cells_in: array<u32>;
+@group(0) @binding(2) var<storage, read_write> cells_out: array<u32>;
 
 const AIR: u32 = 0u;
 const STONE: u32 = 1u;
@@ -34,6 +32,8 @@ const SOLID: u32 = 3u;
 
 const T_SCALE: i32 = 256;
 const AMBIENT: i32 = 5120; // 20°C
+const T_MIN: i32 = -524288; // -(1 << 19)
+const T_MAX: i32 = 524287;  //  (1 << 19) - 1
 
 // `var<private>` (not `const`) so they can be indexed with a runtime value.
 var<private> KIND: array<u32, 11> = array<u32, 11>(GAS, SOLID, POWDER, LIQUID, LIQUID, LIQUID, GAS, SOLID, GAS, SOLID, GAS);
@@ -41,10 +41,15 @@ var<private> DENSITY: array<i32, 11> = array<i32, 11>(10, 255, 150, 100, 80, 250
 var<private> FLOW: array<u32, 11> = array<u32, 11>(256u, 0u, 200u, 230u, 150u, 40u, 200u, 0u, 120u, 0u, 150u);
 var<private> COND: array<i32, 11> = array<i32, 11>(15, 100, 40, 120, 40, 80, 20, 40, 80, 150, 15);
 
+// Cell layout: bits 0-3 material, 4-11 aux, 12-31 signed temperature.
 fn celsius(c: i32) -> i32 { return c * T_SCALE; }
-fn material(cell: u32) -> u32 { return cell & 0xFFu; }
-fn aux(cell: u32) -> u32 { return (cell >> 8u) & 0xFFu; }
-fn pack(m: u32, a: u32) -> u32 { return m | (a << 8u); }
+fn material(cell: u32) -> u32 { return cell & 0xFu; }
+fn aux(cell: u32) -> u32 { return (cell >> 4u) & 0xFFu; }
+// >> on an i32 is an arithmetic shift: it keeps the sign.
+fn temp(cell: u32) -> i32 { return bitcast<i32>(cell) >> 12u; }
+fn pack(m: u32, a: u32, t: i32) -> u32 {
+    return m | (a << 4u) | (bitcast<u32>(clamp(t, T_MIN, T_MAX)) << 12u);
+}
 
 // u32 arithmetic in WGSL wraps around, like wrapping_mul / wrapping_add in Rust.
 fn pcg(v: u32) -> u32 {
@@ -71,9 +76,10 @@ fn heat(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let i = y * w + x;
-    let m = material(mat_in[i]);
-    var life = aux(mat_in[i]);
-    let t0 = temp_in[i];
+    let me = cells_in[i];
+    let m = material(me);
+    var life = aux(me);
+    let t0 = temp(me);
     let k_self = COND[m];
 
     var flux = 0;
@@ -85,16 +91,16 @@ fn heat(@builtin(global_invocation_id) id: vec3<u32>) {
     if (y > 0u) { js[n] = i - w; n += 1u; }
     if (y + 1u < h) { js[n] = i + w; n += 1u; }
     for (var k = 0u; k < n; k += 1u) {
-        let j = js[k];
-        let mn = material(mat_in[j]);
+        let other = cells_in[js[k]];
+        let mn = material(other);
         let c = min(k_self, COND[mn]);
-        flux += (temp_in[j] - t0) * c / 1024;
+        flux += (temp(other) - t0) * c / 1024;
         touches_water = touches_water || mn == WATER;
     }
     var t = t0 + flux;
     var supported = true;
     if (y + 1u < h) {
-        supported = KIND[material(mat_in[i + w])] >= POWDER;
+        supported = KIND[material(cells_in[i + w])] >= POWDER;
     }
 
     if (KIND[m] == GAS && m != FIRE) {
@@ -131,31 +137,30 @@ fn heat(@builtin(global_invocation_id) id: vec3<u32>) {
     if (next == AIR) {
         life = 0u;
     }
-    mat_out[i] = pack(next, life);
-    temp_out[i] = t;
+    cells_out[i] = pack(next, life, t);
 }
 
 // ---------------------------------------------------------------------------
 // Pass 2: movement. One thread per 2x2 block, in place on the new grid.
 // ---------------------------------------------------------------------------
 
-fn density(cell: u32, t: i32) -> i32 {
+fn density(cell: u32) -> i32 {
     let m = material(cell);
     let d = DENSITY[m];
     if (KIND[m] == GAS && m != FIRE) {
-        return max(d - (t - AMBIENT) / celsius(40), 1);
+        return max(d - (temp(cell) - AMBIENT) / celsius(40), 1);
     }
     return d;
 }
 
-fn sinks(top: u32, t_top: i32, bottom: u32, t_bottom: i32, roll: u32) -> bool {
+fn sinks(top: u32, bottom: u32, roll: u32) -> bool {
     let mt = material(top);
     let mb = material(bottom);
     if (KIND[mt] == SOLID || KIND[mb] == SOLID || KIND[mb] == POWDER) {
         return false;
     }
-    let dt = density(top, t_top);
-    let db = density(bottom, t_bottom);
+    let dt = density(top);
+    let db = density(bottom);
     if (dt <= db) {
         return false;
     }
@@ -189,10 +194,8 @@ fn move_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     let idx = array<u32, 4>(y * w + x, y * w + x + 1u, (y + 1u) * w + x, (y + 1u) * w + x + 1u);
     var cells: array<u32, 4>;
-    var temps: array<i32, 4>;
     for (var k = 0u; k < 4u; k += 1u) {
-        cells[k] = mat_out[idx[k]];
-        temps[k] = temp_out[idx[k]];
+        cells[k] = cells_out[idx[k]];
     }
 
     let r = hash3(bx, by, params.frame);
@@ -202,9 +205,8 @@ fn move_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
     for (var col = 0u; col < 2u; col += 1u) {
         let top = col;
         let bottom = col + 2u;
-        if (sinks(cells[top], temps[top], cells[bottom], temps[bottom], (r >> (col * 8u)) & 255u)) {
+        if (sinks(cells[top], cells[bottom], (r >> (col * 8u)) & 255u)) {
             let c = cells[top]; cells[top] = cells[bottom]; cells[bottom] = c;
-            let t = temps[top]; temps[top] = temps[bottom]; temps[bottom] = t;
             fell[col] = true;
         }
     }
@@ -221,9 +223,8 @@ fn move_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
             continue;
         }
         let roll = (r >> (16u + col * 8u)) & 255u;
-        if (roll < FLOW[m] && sinks(cells[top], temps[top], cells[diagonal], temps[diagonal], 0u)) {
+        if (roll < FLOW[m] && sinks(cells[top], cells[diagonal], 0u)) {
             let c = cells[top]; cells[top] = cells[diagonal]; cells[diagonal] = c;
-            let t = temps[top]; temps[top] = temps[diagonal]; temps[diagonal] = t;
             slid = true;
         }
     }
@@ -234,13 +235,11 @@ fn move_blocks(@builtin(global_invocation_id) id: vec3<u32>) {
             let right = row * 2u + 1u;
             if (spreads(cells[left], cells[right], (r2 >> (row * 8u)) & 255u)) {
                 let c = cells[left]; cells[left] = cells[right]; cells[right] = c;
-                let t = temps[left]; temps[left] = temps[right]; temps[right] = t;
             }
         }
     }
 
     for (var k = 0u; k < 4u; k += 1u) {
-        mat_out[idx[k]] = cells[k];
-        temp_out[idx[k]] = temps[k];
+        cells_out[idx[k]] = cells[k];
     }
 }
