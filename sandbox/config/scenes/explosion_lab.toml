@@ -1,0 +1,6 @@
+# Explosion lab: gunpowder piles in a stone box. No ocean.
+seed = 1
+wind = 0.0
+sea_level = 0
+brush = 3
+volume = 0.5

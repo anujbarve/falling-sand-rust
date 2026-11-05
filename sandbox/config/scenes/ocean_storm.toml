@@ -1,0 +1,6 @@
+# Ocean storm: deep water under strong wind (full swell).
+seed = 1
+wind = 6.0
+sea_level = 70
+brush = 3
+volume = 0.5

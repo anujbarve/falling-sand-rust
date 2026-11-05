@@ -7,3 +7,7 @@ macroquad = "=0.4.16"
 
 [profile.release]
 debug = "line-tables-only"
+
+# Soak tests run 10 000 ticks per scene; optimise test builds so they stay fast.
+[profile.test]
+opt-level = 3

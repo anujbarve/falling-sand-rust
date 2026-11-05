@@ -1,0 +1,6 @@
+# Volcano island: a rock island with a lava vent, surrounded by water.
+seed = 1
+wind = 2.0
+sea_level = 95
+brush = 3
+volume = 0.5
