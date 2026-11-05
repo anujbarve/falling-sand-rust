@@ -15,7 +15,21 @@ impl GranularPass {
         GranularPass(RowPass::new(gpu, "granular", SAND, false, cps))
     }
 
-    /// Runs both row phases for `tick`; the result is in `grid`'s current buffer.
+    /// Records both row phases for `tick` into `pass` (no submit); the result
+    /// is in `grid`'s current buffer once the pass runs.
+    pub fn record(
+        &self,
+        gpu: &Gpu,
+        pass: &mut wgpu::ComputePass<'_>,
+        grid: &GridState,
+        tick: u32,
+        seed: u32,
+    ) {
+        self.0.record(gpu, pass, grid, tick, seed);
+    }
+
+    /// Runs both row phases for `tick` in one submit; the result is in
+    /// `grid`'s current buffer.
     pub fn dispatch(&self, gpu: &Gpu, grid: &GridState, tick: u32, seed: u32) {
         self.0.dispatch(gpu, grid, tick, seed);
     }

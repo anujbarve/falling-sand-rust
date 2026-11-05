@@ -6,10 +6,34 @@ Interfaces:
 - `Gpu { instance, adapter, device, queue }`
 - `Gpu::new_headless() -> Option<Gpu>` (None when no adapter)
 - `Gpu::new_windowed(target, w, h) -> Option<(Gpu, WindowSurface)>`
-- `WindowSurface::{resize, size, clear_frame}`; zero-size frames are skipped.
+- `WindowSurface::{resize, size, format, is_drawable, render, clear_frame}`; zero-size frames are skipped
+  (`drawable(w, h)` is the pure size gate). `render(gpu, |view| ..)` acquires, draws, presents, reconfigures on
+  lost/outdated/suboptimal and returns `false` when nothing was presented (0x0, occluded, timeout).
+- `Gpu` requests `TIMESTAMP_QUERY` when the adapter has it (the app times the tick with it; CPU fallback otherwise).
 - `CellRaw` (32 bytes, `#[repr(C)]`, bytemuck Pod); `MAX_CELLS = 1 << 20`
 - `GridState::new(gpu, w, h) -> Result<_, GridError>` (rejects 0 or > 1024x1024 cells)
-- `GridState::{swap, upload, readback, current, other, width, height}`; readback reads the current buffer
+- `GridState::{swap, upload, upload_sanitized, readback, current, other, width, height, events}`; readback reads the
+  current buffer. `upload_sanitized` replaces NaN/inf (temp -> 293 K, other floats -> 0) and returns the count.
+- `GridState::events()`: a 16-byte `array<atomic<u32>, 4>` of sound-event counters indexed by `EventKind`
+  (`Flow`, `Impact`, `Crackle`, `Boom`). Passes only add; the app copies and clears it (see `app/README.md`).
+
+## Recording a tick (one encoder, one submit)
+
+Every pass has `record(&gpu, &mut compute_pass, &grid, ..)`, which writes its uniforms and adds its dispatches to the
+caller's compute pass; `dispatch(..)` wrappers (own encoder, one submit) remain for the pass tests. The app records a
+whole tick into ONE compute pass of ONE encoder and submits once (`app/src/frame.rs`). `ThermalPass::record/dispatch`
+take `&mut GridState`: thermal writes current -> other and FLIPS the grid (no full-buffer copy back). Every later stage
+binds by the grid's current index at record time, so the flip is invisible to them.
+
+Sound events counted on the GPU (atomic adds into `GridState::events`):
+- `Flow`: a water cell wins a target (liquid pass) or a lava cell moves (lava pass).
+- `Impact`: a sand/water mover with fall speed >= 1 cell/tick (60 cells/s) ends the tick stopped (`vy` reset to 0).
+- `Crackle`: a flammable non-gunpowder cell ignites (fire pass) or lava freezes to rock (thermal pass).
+- `Boom`: gunpowder ignites (fire pass). (No explosion/chemistry pass exists in v2 yet.)
+
+`BrushPass` + `Stroke` paint discs into EMPTY cells only (v1 rule), in place, at most `MAX_STROKES = 64` per dispatch,
+bounds-checked per cell (edges and off-grid centres are safe). Non-finite stroke `temp`/`fuel` are replaced on the CPU and
+counted (`BrushPass::sanitized`). `AirPass::write_velocity` loads saved air velocity (sanitised, counted).
 - `src/shaders/common.wgsl`: `Cell`, `Dims`, clamped `idx` (not yet dispatched)
 
 Test: `cargo test -p sandbox_v2_gpu` (prints SKIPPED when no GPU adapter).
@@ -42,10 +66,14 @@ DIFFERS from v1 (no in-row sweep, no `updated` flags, no Rng stream); v1 is not 
 - Free fall: 100 cells (1 m) take 27 ticks = 0.45 s (ideal sqrt(2h/g) = 0.4515 s).
 - Hash: `cell_hash(tick, x, y, seed)`, murmur3 fmix32 chain in u32 wrapping math, identical in Rust and WGSL.
 - Values are integers stored in the `f32` fields, so velocity state is compared bitwise in the parity test.
+- A move SWAPS the whole cell with the empty target: the mover carries `temp`, `fuel`, `vapor`, `pressure` to the target;
+  the vacated cell receives the target's air (its temperature, vapor, pressure) with `vx = vy = flags = 0`. No 0 K hole is
+  left and no heat or vapor is created or deleted (`Reference` tracks the payload; parity compares it bitwise;
+  `moves_swap_full_cells_no_zero_kelvin_holes` checks 0 cells at 0 K and an unchanged payload multiset).
 
 API: `GranularPass::new(&gpu)` / `LiquidPass::new(&gpu)` compile once and own a uniform buffer and cached bind groups;
-`pass.dispatch(&gpu, &grid, tick, seed)` records both phases in one encoder and leaves the result in the grid's
-current buffer. `reference::Reference` is the CPU model.
+`pass.record(&gpu, &mut cpass, &grid, tick, seed)` adds both phases to a compute pass (`dispatch` = own encoder + submit)
+and leaves the result in the grid's current buffer. Bindings: uniform, src, dst, event counters (3 storage). `reference::Reference` is the CPU model.
 
 Parity test: `cargo test -p sandbox_v2_gpu --test parity_granular_liquid -- --nocapture`
 (prints the mismatch counts; skips without a GPU). CPU-only: `--test reference`, `--test units`.
@@ -84,7 +112,8 @@ Tests: `cargo test -p sandbox_v2_gpu --test air -- --nocapture` (CPU-only tests 
 `src/reference_thermal.rs` is the CPU reference (`ThermalReference`) and holds every constant and per-material table;
 `src/shaders/thermal.wgsl`, `fire.wgsl`, `lava.wgsl` must match it. The tables (edge rates, 1/heat capacity, burn ticks)
 are generated into the shader header as exact f32 bit patterns, so both sides use identical numbers. Tick order:
-`ThermalPass::dispatch(&gpu, &grid)`, `FirePass::dispatch(&gpu, &grid)`, `LavaPass::dispatch(&gpu, &grid, tick, seed)`
+`ThermalPass::dispatch(&gpu, &mut grid)`, `FirePass::dispatch(&gpu, &grid)`, `LavaPass::dispatch(&gpu, &grid, tick, seed)`
+(or `record` into one compute pass)
 (the plan's `dispatch_thermal/fire/lava` are methods because the passes persist). Each compiles once and caches bind groups per grid.
 
 - Conduction (double-buffered): `T += sum_edges(rate(m, n) * (T_n - T)) / C(m)`, `rate = DT * 2 ka kb / (ka + kb)` (harmonic
@@ -127,11 +156,12 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
   <= 373.15 K whenever water touches it.
 
 Binding budget (default limit 8 storage buffers per stage): all three passes share one layout from `pass_cells.rs`:
-1 uniform + 3 storage (src cells, dst cells, 4-byte counter). Thermal: 1 dispatch + 1 buffer copy; fire: 1 dispatch; lava: 3
-dispatches. For comparison granular/liquid use 2 storage, air uses 8 (at the limit).
+1 uniform + 4 storage (src cells, dst cells, 4-byte debug counter, event counters). Thermal: 1 dispatch then a grid flip (no
+copy); fire: 1 dispatch; lava: 3 dispatches. For comparison granular/liquid use 3 storage, brush 2, particles 3, air 8 (at the
+limit).
 
-Known limits: granular/liquid moves leave a zeroed (0 K) cell behind (Task 3/4 behaviour), which conduction then sees as a cold
-spot; fix when the passes are combined in the sim loop. Fire leaves Ash for every fuel (no smoke yet); oil/acid do not boil.
+Known limits: fire leaves Ash for every fuel (no smoke yet); oil/acid do not boil. (The 0 K holes left by granular/liquid
+moves are fixed: moves swap whole cells.)
 
 Tests: `cargo test -p sandbox_v2_gpu --test thermal_fire_lava -- --nocapture`.
 

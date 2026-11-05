@@ -241,13 +241,19 @@ impl Particles {
         }
     }
 
-    /// Advances every occupied slot by `dt` seconds against `grid`'s current
-    /// buffer (one dispatch, one submit).
+    /// Records a step of every occupied slot by `dt` seconds against
+    /// `grid`'s current buffer into `pass` (one dispatch, no submit).
     ///
     /// # Panics
     /// Unless `dt = 1/n` s with `n >= 60`, or if a grid side exceeds
     /// [`MAX_SIDE`](crate::reference_particles::MAX_SIDE).
-    pub fn step(&mut self, gpu: &Gpu, grid: &GridState, dt: f32) {
+    pub fn record_step(
+        &mut self,
+        gpu: &Gpu,
+        pass: &mut wgpu::ComputePass<'_>,
+        grid: &GridState,
+        dt: f32,
+    ) {
         let k = StepConsts::new(dt);
         let (w, h) = (grid.width(), grid.height());
         assert!(w <= MAX_SIDE && h <= MAX_SIDE, "grid side above {MAX_SIDE}");
@@ -266,13 +272,26 @@ impl Particles {
             .write_buffer(&self.pass.ubo, 0, bytemuck::cast_slice(&params));
         self.pass.ensure_groups(gpu, &self.buf, grid);
         let group = &self.pass.cache.as_ref().expect("cache just filled").1[grid.current_index()];
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = enc.begin_compute_pass(&Default::default());
+        if count > 0 {
             pass.set_pipeline(&self.pass.pipeline);
             pass.set_bind_group(0, group, &[]);
             pass.dispatch_workgroups(count.div_ceil(WORKGROUP), 1, 1);
         }
+    }
+
+    /// Advances every occupied slot by `dt` seconds against `grid`'s current
+    /// buffer (one dispatch, one submit).
+    ///
+    /// # Panics
+    /// As [`Particles::record_step`].
+    pub fn step(&mut self, gpu: &Gpu, grid: &GridState, dt: f32) {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        self.record_step(
+            gpu,
+            &mut enc.begin_compute_pass(&Default::default()),
+            grid,
+            dt,
+        );
         gpu.queue.submit(Some(enc.finish()));
     }
 

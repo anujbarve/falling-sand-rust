@@ -1,0 +1,18 @@
+# Sandbox v2 configuration (same keys as v1; read with sandbox_core::config).
+# Any key may be omitted; a missing or malformed file falls back to the
+# defaults with one on-screen message.
+
+# Seed for the simulation hash RNG (unsigned 32-bit).
+seed = 1
+
+# Wind is not used by v2 (scene configs set the air wind in cells/s).
+wind = 2.0
+
+# Not used by v2.
+sea_level = 40
+
+# Brush radius in cells.
+brush = 3
+
+# Master volume 0.0..1.0. NOT applied: sandbox_audio has no volume API.
+volume = 0.5

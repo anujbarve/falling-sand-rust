@@ -1,7 +1,11 @@
 //! Persistent thermal pass (conduction, moisture, phase changes). Rule
 //! defined by [`crate::reference_thermal`].
 //!
-//! Bindings: 1 uniform + 3 storage (src cells, dst cells, debug counter).
+//! Bindings: 1 uniform + 4 storage (src cells, dst cells, debug counter,
+//! event counters).
+//!
+//! The pass writes current -> other and then flips the grid (no copy back),
+//! so it takes `&mut GridState`.
 
 use crate::pass_cells::{CellPass, Flow, Stage};
 use crate::reference_thermal::wgsl_header;
@@ -23,15 +27,24 @@ impl ThermalPass {
         ThermalPass(CellPass::new(gpu, "thermal", src, &["stage_thermal"]))
     }
 
-    /// Runs one thermal tick (current -> other, then copied back), so the
-    /// result is in `grid`'s current buffer. One dispatch plus one copy.
-    pub fn dispatch(&self, gpu: &Gpu, grid: &GridState) {
+    /// Records one thermal tick (current -> other) into `pass` and flips
+    /// `grid`, so the result is the current buffer once the pass runs.
+    pub fn record(&self, gpu: &Gpu, pass: &mut wgpu::ComputePass<'_>, grid: &mut GridState) {
         let stage = Stage {
             entry: 0,
             flow: Flow::Forward,
             slot: 0,
         };
-        self.0.dispatch(gpu, grid, 0, 0, &[stage], true);
+        self.0.record(gpu, pass, grid, 0, 0, &[stage]);
+        grid.swap();
+    }
+
+    /// [`ThermalPass::record`] in its own encoder, then one submit. One
+    /// dispatch, no copy.
+    pub fn dispatch(&self, gpu: &Gpu, grid: &mut GridState) {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        self.record(gpu, &mut enc.begin_compute_pass(&Default::default()), grid);
+        gpu.queue.submit(Some(enc.finish()));
     }
 
     /// Number of non-finite `temp`/`fuel` values reset so far (blocking

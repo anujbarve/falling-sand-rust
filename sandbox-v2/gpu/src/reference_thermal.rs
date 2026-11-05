@@ -5,6 +5,10 @@
 //!
 //! A tick runs three passes in order: thermal, fire, lava.
 //!
+//! The GPU passes also count sound events (not modelled here): lava
+//! freezing to rock and non-gunpowder ignition count as crackle, gunpowder
+//! ignition as boom, and each lava move as flow.
+//!
 //! **Thermal** (double-buffered, every cell reads the state at pass start):
 //! 1. Sanitize: a non-finite `temp` becomes [`AMBIENT_K`], a non-finite
 //!    `fuel` becomes 0 (each counted); `temp` is clamped to `0..=MAX_TEMP_K`
@@ -264,6 +268,7 @@ pub(crate) fn wgsl_header() -> String {
         ("GLASS", Glass),
         ("FIRE", Fire),
         ("ASH", Ash),
+        ("GUNPOWDER", Gunpowder),
     ] {
         s += &format!("const {name}: u32 = {}u;\n", m as u32);
     }

@@ -63,6 +63,7 @@ fn stage_move(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (s >= 0) {
             out = src[u32(s)];
             out.fuel = LAVA_DELAY;
+            atomicAdd(&events[0], 1u);
         }
     } else {
         let t = plan(x, y);

@@ -1,4 +1,7 @@
 //! Shared persistent dispatch machinery for the row-parity passes.
+//!
+//! Bindings: 0 uniform params, 1 source cells (read), 2 destination cells
+//! (read-write), 3 event counters (read-write atomics). 3 storage buffers.
 
 use std::sync::Mutex;
 
@@ -105,15 +108,26 @@ impl RowPass {
                         binding: 2,
                         resource: grid.buffer(cur ^ phase ^ 1).as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: grid.events().as_entire_binding(),
+                    },
                 ],
             })
         };
         [[make(0, 0), make(0, 1)], [make(1, 0), make(1, 1)]]
     }
 
-    /// Runs phase 0 (current -> other) then phase 1 (other -> current) in one
-    /// encoder. The result is back in `grid`'s current buffer; no swap needed.
-    pub(crate) fn dispatch(&self, gpu: &Gpu, grid: &GridState, tick: u32, seed: u32) {
+    /// Records phase 0 (current -> other) then phase 1 (other -> current)
+    /// into `pass`. The result is back in `grid`'s current buffer; no swap.
+    pub(crate) fn record(
+        &self,
+        gpu: &Gpu,
+        pass: &mut wgpu::ComputePass<'_>,
+        grid: &GridState,
+        tick: u32,
+        seed: u32,
+    ) {
         let (w, h) = (grid.width(), grid.height());
         let mut cache = self.cache.lock().expect("pass cache poisoned");
         if cache.as_ref().is_none_or(|c| c.grid_id != grid.id()) {
@@ -131,15 +145,23 @@ impl RowPass {
                 bytemuck::cast_slice(&params),
             );
         }
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = enc.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&self.pipeline);
-            for group in groups {
-                pass.set_bind_group(0, group, &[]);
-                pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
-            }
+        pass.set_pipeline(&self.pipeline);
+        for group in groups {
+            pass.set_bind_group(0, group, &[]);
+            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
         }
+    }
+
+    /// [`RowPass::record`] in its own encoder, then one submit.
+    pub(crate) fn dispatch(&self, gpu: &Gpu, grid: &GridState, tick: u32, seed: u32) {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        self.record(
+            gpu,
+            &mut enc.begin_compute_pass(&Default::default()),
+            grid,
+            tick,
+            seed,
+        );
         gpu.queue.submit(Some(enc.finish()));
     }
 }

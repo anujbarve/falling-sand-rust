@@ -94,6 +94,7 @@ fn stage_thermal(@builtin(global_invocation_id) gid: vec3<u32>) {
         if (t >= SAND_MELT_K) { mat = GLASS; }
     }
     if (mat != m) { f = 0.0; }
+    if (m == LAVA && mat == ROCK) { atomicAdd(&events[2], 1u); }
     c.mat = mat;
     c.temp = t;
     c.fuel = f;

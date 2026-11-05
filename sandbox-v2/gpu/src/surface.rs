@@ -2,6 +2,11 @@
 
 use crate::Gpu;
 
+/// Whether a `width` x `height` surface can be drawn (both non-zero).
+pub fn drawable(width: u32, height: u32) -> bool {
+    width > 0 && height > 0
+}
+
 /// A configured presentable surface.
 pub struct WindowSurface {
     surface: wgpu::Surface<'static>,
@@ -34,6 +39,49 @@ impl WindowSurface {
     /// Current surface size in pixels.
     pub fn size(&self) -> (u32, u32) {
         (self.config.width, self.config.height)
+    }
+
+    /// Texture format of the surface (pass it to `Renderer::new`).
+    pub fn format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
+    /// Whether frames can be drawn: both dimensions non-zero (a minimised
+    /// window reports 0x0).
+    pub fn is_drawable(&self) -> bool {
+        drawable(self.config.width, self.config.height)
+    }
+
+    /// Acquires the next frame, calls `draw` with its view, and presents.
+    /// Returns `false` (drawing nothing) while the surface has zero size or
+    /// no frame could be acquired. Reconfigures once on a lost or outdated
+    /// surface, and after presenting a suboptimal frame.
+    pub fn render(&self, gpu: &Gpu, draw: impl FnOnce(&wgpu::TextureView)) -> bool {
+        if !self.is_drawable() {
+            return false;
+        }
+        for attempt in 0..2 {
+            match self.surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(frame) => {
+                    draw(&frame.texture.create_view(&Default::default()));
+                    gpu.queue.present(frame);
+                    return true;
+                }
+                wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
+                    draw(&frame.texture.create_view(&Default::default()));
+                    gpu.queue.present(frame);
+                    self.surface.configure(&gpu.device, &self.config);
+                    return true;
+                }
+                wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated
+                    if attempt == 0 =>
+                {
+                    self.surface.configure(&gpu.device, &self.config);
+                }
+                _ => return false,
+            }
+        }
+        false
     }
 
     /// Clears the surface to `color` and presents. Does nothing while the

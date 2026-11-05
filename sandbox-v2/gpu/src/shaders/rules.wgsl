@@ -16,6 +16,8 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> src: array<Cell>;
 @group(0) @binding(2) var<storage, read_write> dst: array<Cell>;
+// Sound event counters, indexed as state.rs EventKind (0 flow, 1 impact).
+@group(0) @binding(3) var<storage, read_write> events: array<atomic<u32>, 4>;
 
 
 // mix32 and cell_hash come from hash.wgsl.
@@ -131,13 +133,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             out.vy = f32(p.mv);
             out.vx = f32(p.mf);
             out.flags = params.tick + 1u;
+            if (SIDEWAYS) { atomicAdd(&events[0], 1u); }
         }
     } else {
         let p = plan(x, y);
         if (p.live) {
+            // A fall of at least one cell per tick that ends this tick is an impact.
+            let fast = i32(out.vy) >= FP_ONE;
             if (p.dest >= 0 && winner(p.dest % i32(params.w), p.dest / i32(params.w)) == i) {
-                out = Cell();
+                if (fast && p.mv == 0) { atomicAdd(&events[1], 1u); }
+                // Swap: take the whole empty cell we moved into (its air
+                // temperature, vapor and pressure), with fall state reset.
+                out = src[p.dest];
+                out.vx = 0.0;
+                out.vy = 0.0;
+                out.flags = 0u;
             } else {
+                if (fast && p.sv == 0) { atomicAdd(&events[1], 1u); }
                 out.vy = f32(p.sv);
                 out.vx = f32(p.sf);
                 out.flags = params.tick + 1u;

@@ -10,7 +10,7 @@ use crate::air::{
 use crate::materials::WALL;
 use crate::{Gpu, GridState};
 
-const _: () = assert!(AIR_SWEEPS % 2 == 0, "Jacobi result must land in p_a");
+const _: () = assert!(AIR_SWEEPS.is_multiple_of(2), "Jacobi result must land in p_a");
 
 const ENTRY_POINTS: [&str; 7] = [
     "stage_force",
@@ -149,7 +149,9 @@ impl AirPass {
             gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: n * bytes,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
         };
@@ -192,10 +194,17 @@ impl AirPass {
         }
     }
 
-    /// Runs one air tick of `dt` seconds with ambient `wind` (cells/s) on
-    /// `grid`'s current buffer, in one encoder. Updates `vapor` and
+    /// Records one air tick of `dt` seconds with ambient `wind` (cells/s) on
+    /// `grid`'s current buffer into `pass` (no submit). Updates `vapor` and
     /// `pressure` of the cells in place; velocity stays in this pass.
-    pub fn dispatch(&self, gpu: &Gpu, grid: &GridState, dt: f32, wind: [f32; 2]) {
+    pub fn record(
+        &self,
+        gpu: &Gpu,
+        pass: &mut wgpu::ComputePass<'_>,
+        grid: &GridState,
+        dt: f32,
+        wind: [f32; 2],
+    ) {
         let (w, h) = (grid.width(), grid.height());
         let mut cache = self.cache.lock().expect("air cache poisoned");
         if cache.as_ref().is_none_or(|c| c.grid_id != grid.id()) {
@@ -213,18 +222,26 @@ impl AirPass {
         let mut stages: Vec<(usize, usize)> = vec![(0, 0), (1, 0), (2, 0)];
         stages.extend((0..AIR_SWEEPS as usize).map(|s| (3, s % 2)));
         stages.extend([(4, 0), (5, 0), (6, 0)]);
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = enc.begin_compute_pass(&Default::default());
-            for &(stage, swap) in &stages {
-                pass.set_pipeline(&self.pipelines[stage]);
-                pass.set_bind_group(0, &groups[swap], &[]);
-                pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
-            }
+        for &(stage, swap) in &stages {
+            pass.set_pipeline(&self.pipelines[stage]);
+            pass.set_bind_group(0, &groups[swap], &[]);
+            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
         }
-        gpu.queue.submit(Some(enc.finish()));
         self.dispatches
             .fetch_add(stages.len() as u64, Ordering::Relaxed);
+    }
+
+    /// [`AirPass::record`] in its own encoder, then one submit.
+    pub fn dispatch(&self, gpu: &Gpu, grid: &GridState, dt: f32, wind: [f32; 2]) {
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        self.record(
+            gpu,
+            &mut enc.begin_compute_pass(&Default::default()),
+            grid,
+            dt,
+            wind,
+        );
+        gpu.queue.submit(Some(enc.finish()));
     }
 
     /// Total compute dispatches issued so far (a tick always issues
@@ -287,5 +304,39 @@ impl AirPass {
         drop(view);
         staging.unmap();
         out
+    }
+
+    /// Overwrites the air velocity (cells/s) of `grid` with `vel`
+    /// (row-major, `w * h` entries; non-finite values become 0). Used by
+    /// load. Returns how many values were sanitised.
+    ///
+    /// # Panics
+    /// If `vel.len() != w * h`.
+    pub fn write_velocity(&self, gpu: &Gpu, grid: &GridState, vel: &[[f32; 2]]) -> u32 {
+        assert_eq!(
+            vel.len() as u64,
+            u64::from(grid.width()) * u64::from(grid.height())
+        );
+        let mut cache = self.cache.lock().expect("air cache poisoned");
+        if cache.as_ref().is_none_or(|c| c.grid_id != grid.id()) {
+            *cache = Some(self.build(gpu, grid));
+        }
+        let mut bad = 0;
+        let clean: Vec<[f32; 2]> = vel
+            .iter()
+            .map(|v| {
+                v.map(|c| {
+                    if c.is_finite() {
+                        c
+                    } else {
+                        bad += 1;
+                        0.0
+                    }
+                })
+            })
+            .collect();
+        let buf = &cache.as_ref().expect("cache just filled").vel_a;
+        gpu.queue.write_buffer(buf, 0, bytemuck::cast_slice(&clean));
+        bad
     }
 }

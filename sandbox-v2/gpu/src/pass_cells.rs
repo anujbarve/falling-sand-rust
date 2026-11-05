@@ -3,8 +3,9 @@
 //! One bind group layout for every stage: binding 0 = uniform params
 //! (`w, h, tick, seed, phase` + padding, 32 bytes), binding 1 = source cells
 //! (read-only storage), binding 2 = destination cells (read-write storage),
-//! binding 3 = a 4-byte debug counter (read-write storage). That is 3 storage
-//! buffers per stage, well under the default limit of 8.
+//! binding 3 = a 4-byte debug counter (read-write storage), binding 4 = the
+//! grid's event counters (read-write storage). That is 4 storage buffers per
+//! stage, under the default limit of 8.
 
 use std::sync::Mutex;
 
@@ -81,6 +82,7 @@ impl CellPass {
                     entry(1, Storage { read_only: true }),
                     entry(2, Storage { read_only: false }),
                     entry(3, Storage { read_only: false }),
+                    entry(4, Storage { read_only: false }),
                 ],
             });
         let pl = gpu
@@ -159,6 +161,10 @@ impl CellPass {
                         binding: 3,
                         resource: self.counter.as_entire_binding(),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: grid.events().as_entire_binding(),
+                    },
                 ],
             })
         };
@@ -174,17 +180,16 @@ impl CellPass {
         }
     }
 
-    /// Records `stages` in one encoder and submits. With `copy_back`, the
-    /// other buffer is then copied over the current one, so the result is
-    /// always in `grid`'s current buffer.
-    pub(crate) fn dispatch(
+    /// Records `stages` into `pass` (no submit). Buffer roles follow each
+    /// stage's [`Flow`] relative to `grid`'s current buffer at record time.
+    pub(crate) fn record(
         &self,
         gpu: &Gpu,
+        pass: &mut wgpu::ComputePass<'_>,
         grid: &GridState,
         tick: u32,
         seed: u32,
         stages: &[Stage],
-        copy_back: bool,
     ) {
         let (w, h) = (grid.width(), grid.height());
         let mut cache = self.cache.lock().expect("cell pass cache poisoned");
@@ -200,24 +205,15 @@ impl CellPass {
                 bytemuck::cast_slice(&params),
             );
         }
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
-        {
-            let mut pass = enc.begin_compute_pass(&Default::default());
-            for st in stages {
-                let flow = match st.flow {
-                    Flow::Forward => 0,
-                    Flow::Back => 1,
-                };
-                pass.set_pipeline(&self.pipelines[st.entry]);
-                pass.set_bind_group(0, &groups[flow][st.slot], &[]);
-                pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
-            }
+        for st in stages {
+            let flow = match st.flow {
+                Flow::Forward => 0,
+                Flow::Back => 1,
+            };
+            pass.set_pipeline(&self.pipelines[st.entry]);
+            pass.set_bind_group(0, &groups[flow][st.slot], &[]);
+            pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
         }
-        if copy_back {
-            let size = grid.current().size();
-            enc.copy_buffer_to_buffer(grid.other(), 0, grid.current(), 0, size);
-        }
-        gpu.queue.submit(Some(enc.finish()));
     }
 
     /// Reads the debug counter (blocking; intended for tests).

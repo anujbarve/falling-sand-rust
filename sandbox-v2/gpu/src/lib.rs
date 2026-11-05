@@ -13,13 +13,18 @@
 //! million [`ParticleRaw`] stepped on the GPU; its rule is in
 //! [`reference_particles`]. [`Renderer`] draws the grid and particles with
 //! lighting, shading, bloom and tone mapping; its look rules are in
-//! [`mod@render`].
+//! [`mod@render`]. [`BrushPass`] paints [`Stroke`]s into empty cells. Every
+//! pass has a `record` method that adds its dispatches to a caller's compute
+//! pass, so a whole tick runs in one encoder and one submit; `dispatch`
+//! wrappers (one submit each) remain for tests. Passes count sound events
+//! ([`EventKind`]) into [`GridState::events`].
 
 pub mod air;
 mod layout;
 pub mod materials;
 mod particles;
 mod pass_air;
+mod pass_brush;
 mod pass_cells;
 mod pass_fire;
 mod pass_granular;
@@ -39,14 +44,15 @@ pub mod units;
 pub use layout::{CellRaw, ParticleRaw, MAX_CELLS};
 pub use particles::Particles;
 pub use pass_air::AirPass;
+pub use pass_brush::{BrushPass, Stroke, MAX_STROKES};
 pub use pass_fire::FirePass;
 pub use pass_granular::GranularPass;
 pub use pass_lava::LavaPass;
 pub use pass_liquid::LiquidPass;
 pub use pass_thermal::ThermalPass;
 pub use render::Renderer;
-pub use state::{GridError, GridState};
-pub use surface::WindowSurface;
+pub use state::{EventKind, GridError, GridState, EVENT_KINDS};
+pub use surface::{drawable, WindowSurface};
 
 /// Core wgpu handles shared by every GPU feature.
 pub struct Gpu {
@@ -72,10 +78,13 @@ async fn init(instance: wgpu::Instance, surface: Option<&wgpu::Surface<'_>>) -> 
         })
         .await
         .ok()?;
-    let (device, queue) = adapter
-        .request_device(&wgpu::DeviceDescriptor::default())
-        .await
-        .ok()?;
+    // Timestamp queries are optional: requested only when the adapter has
+    // them (the app falls back to CPU timing otherwise).
+    let desc = wgpu::DeviceDescriptor {
+        required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+        ..Default::default()
+    };
+    let (device, queue) = adapter.request_device(&desc).await.ok()?;
     Some(Gpu {
         instance,
         adapter,

@@ -74,7 +74,7 @@ fn run_gpu(
     every: u32,
     mut obs: impl FnMut(u32, &[CellRaw]),
 ) -> Vec<CellRaw> {
-    let grid = GridState::new(gpu, s.w, s.h).unwrap();
+    let mut grid = GridState::new(gpu, s.w, s.h).unwrap();
     grid.upload(gpu, &s.cells);
     let (th, fi, la) = (
         ThermalPass::new(gpu),
@@ -82,7 +82,7 @@ fn run_gpu(
         LavaPass::new(gpu),
     );
     for t in 0..n {
-        th.dispatch(gpu, &grid);
+        th.dispatch(gpu, &mut grid);
         fi.dispatch(gpu, &grid);
         la.dispatch(gpu, &grid, t, SEED);
         if (t + 1) % every == 0 {
@@ -601,10 +601,10 @@ fn gpu_nan_temperature_is_reset_and_counted() {
     let Some(gpu) = gpu_or_skip() else { return };
     let mut s = Scene::new(8, 8);
     s.cells[9].temp = f32::from_bits(0x7FC0_0000);
-    let grid = GridState::new(&gpu, 8, 8).unwrap();
+    let mut grid = GridState::new(&gpu, 8, 8).unwrap();
     grid.upload(&gpu, &s.cells);
     let th = ThermalPass::new(&gpu);
-    th.dispatch(&gpu, &grid);
+    th.dispatch(&gpu, &mut grid);
     let out = grid.readback(&gpu);
     assert!(out.iter().all(|c| c.temp.is_finite()));
     assert_eq!(th.sanitized_count(&gpu), 1);

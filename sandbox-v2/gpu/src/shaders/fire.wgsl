@@ -7,6 +7,7 @@ fn stage_fire(@builtin(global_invocation_id) gid: vec3<u32>) {
     var c = dst[i];
     let burn = BURN_TICKS[tid(c.mat)];
     if (burn != 0u && c.temp >= IGNITE_K) {
+        if (c.mat == GUNPOWDER) { atomicAdd(&events[3], 1u); } else { atomicAdd(&events[2], 1u); }
         c.fuel = f32(burn);
         c.mat = FIRE;
         c.temp = max(c.temp, FIRE_K);

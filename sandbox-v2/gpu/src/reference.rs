@@ -27,6 +27,11 @@
 //!   sideways-left, sideways-right. Losers stay.
 //! * Sand: down, else diagonal (hash bit 0 picks the first side). Water: also
 //!   one sideways step (hash bit 1 picks the first side).
+//! * A move SWAPS the two cells: the mover takes its whole payload (`temp`,
+//!   `fuel`, `vapor`, `pressure`) to the target, and the vacated cell takes
+//!   the payload of the empty cell it was swapped with (so no 0 K hole is
+//!   left and the air's heat and vapor are kept). The vacated cell's fall
+//!   state and stamp are reset to 0.
 //! * Out-of-grid cells count as solid.
 //! * Free fall from rest covers `g t^2 / 2`: 100 cells take 27 ticks (0.45 s).
 
@@ -97,6 +102,7 @@ pub struct Reference {
     vy: Vec<i32>,
     frac: Vec<i32>,
     stamp: Vec<u32>,
+    payload: Vec<[f32; 4]>,
 }
 
 impl Reference {
@@ -110,6 +116,7 @@ impl Reference {
             vy: vec![0; n],
             frac: vec![0; n],
             stamp: vec![0; n],
+            payload: vec![[0.0; 4]; n],
         }
     }
 
@@ -126,6 +133,18 @@ impl Reference {
         self.vy[i] = 0;
         self.frac[i] = 0;
         self.stamp[i] = 0;
+    }
+
+    /// Sets the payload `[temp, fuel, vapor, pressure]` carried by the cell at
+    /// `(x, y)`. Panics when out of the grid.
+    pub fn set_payload(&mut self, x: u32, y: u32, payload: [f32; 4]) {
+        assert!(x < self.w && y < self.h, "cell out of grid");
+        self.payload[(y * self.w + x) as usize] = payload;
+    }
+
+    /// Row-major payloads `[temp, fuel, vapor, pressure]`; moves only permute them.
+    pub fn payload(&self) -> &[[f32; 4]] {
+        &self.payload
     }
 
     /// Row-major materials.
@@ -273,6 +292,7 @@ impl Reference {
                 if self.cells[i] == EMPTY {
                     if let Some(((sx, sy), p)) = self.winner(kind, phase, tick, seed, x, y) {
                         out.cells[i] = self.at(sx, sy);
+                        out.payload[i] = self.payload[self.ix(sx, sy)];
                         (out.vy[i], out.frac[i]) = p.moved;
                         out.stamp[i] = stamp;
                     }
@@ -281,7 +301,9 @@ impl Reference {
                         .target
                         .and_then(|(tx, ty)| self.winner(kind, phase, tick, seed, tx, ty));
                     if wins.is_some_and(|(src, _)| src == (x, y)) {
+                        let (tx, ty) = p.target.expect("a winner implies a target");
                         out.cells[i] = EMPTY;
+                        out.payload[i] = self.payload[self.ix(tx, ty)];
                         out.vy[i] = 0;
                         out.frac[i] = 0;
                         out.stamp[i] = 0;

@@ -15,6 +15,9 @@ struct Params {
 @group(0) @binding(0) var<uniform> params: Params;
 @group(0) @binding(1) var<storage, read> src: array<Cell>;
 @group(0) @binding(2) var<storage, read_write> dst: array<Cell>;
+// Sound event counters, indexed as state.rs EventKind
+// (0 flow, 1 impact, 2 crackle, 3 boom).
+@group(0) @binding(4) var<storage, read_write> events: array<atomic<u32>, 4>;
 
 // Bit-pattern finiteness test (not x != x, which fast-math may fold).
 fn finite(v: f32) -> bool { return (bitcast<u32>(v) & 0x7f800000u) != 0x7f800000u; }

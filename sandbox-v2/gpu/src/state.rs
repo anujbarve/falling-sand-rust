@@ -34,6 +34,31 @@ impl std::fmt::Display for GridError {
 
 impl std::error::Error for GridError {}
 
+/// Kinds of sound event counted on the GPU, in counter-buffer order.
+///
+/// Each pass that produces an event adds 1 to `events[kind]` (a
+/// `array<atomic<u32>, 4>` storage buffer owned by [`GridState`]):
+/// * `Flow`: a liquid cell (water or lava) moved.
+/// * `Impact`: a falling grain or drop moving at least 1 cell/tick (60
+///   cells/s) was stopped.
+/// * `Crackle`: a flammable cell ignited, or lava froze to rock.
+/// * `Boom`: gunpowder ignited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(usize)]
+pub enum EventKind {
+    /// Liquid moved.
+    Flow = 0,
+    /// A fast fall was stopped.
+    Impact = 1,
+    /// Ignition or lava solidifying.
+    Crackle = 2,
+    /// Gunpowder ignited.
+    Boom = 3,
+}
+
+/// Number of [`EventKind`]s (length of the event counter buffer).
+pub const EVENT_KINDS: usize = 4;
+
 /// One of the two cell buffers.
 struct Buffers {
     cells: wgpu::Buffer,
@@ -48,14 +73,16 @@ pub struct GridState {
     h: u32,
     bufs: [Buffers; 2],
     cur: usize,
+    events: wgpu::Buffer,
 }
 
 impl GridState {
     /// Allocates two zeroed `w` x `h` buffers. Rejects empty grids and grids
     /// above [`MAX_CELLS`] before allocating anything.
     ///
-    /// Note: values stored here are not sanitized. Later shader stages clamp
-    /// NaN/Inf in float fields; uploaded data is trusted as-is.
+    /// [`GridState::upload`] stores data as-is; [`GridState::upload_sanitized`]
+    /// (the app's load/scene path) replaces NaN/inf first and counts them.
+    /// Shader stages also clamp NaN/inf in the fields they own.
     pub fn new(gpu: &Gpu, w: u32, h: u32) -> Result<GridState, GridError> {
         if w == 0 || h == 0 {
             return Err(GridError::Empty);
@@ -80,6 +107,14 @@ impl GridState {
             h,
             bufs: [make("cells_a"), make("cells_b")],
             cur: 0,
+            events: gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("events"),
+                size: (EVENT_KINDS * 4) as u64,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
         })
     }
 
@@ -118,6 +153,12 @@ impl GridState {
         &self.bufs[1 - self.cur].cells
     }
 
+    /// The event counter buffer: [`EVENT_KINDS`] `u32` counters indexed by
+    /// [`EventKind`]. Passes only add; the owner copies and clears it.
+    pub fn events(&self) -> &wgpu::Buffer {
+        &self.events
+    }
+
     /// Makes the other buffer current.
     pub fn swap(&mut self) {
         self.cur = 1 - self.cur;
@@ -131,6 +172,38 @@ impl GridState {
         assert_eq!(cells.len() as u64, u64::from(self.w) * u64::from(self.h));
         gpu.queue
             .write_buffer(self.current(), 0, bytemuck::cast_slice(cells));
+    }
+
+    /// Like [`GridState::upload`], but first replaces non-finite floats (a
+    /// NaN/inf `temp` becomes ambient, any other non-finite float 0) and
+    /// returns how many were replaced. This is the load/brush entry point.
+    ///
+    /// # Panics
+    /// If `cells.len() != w * h`.
+    pub fn upload_sanitized(&self, gpu: &Gpu, cells: &[CellRaw]) -> u32 {
+        let mut bad = 0;
+        let mut fix = |v: f32, default: f32| {
+            if v.is_finite() {
+                v
+            } else {
+                bad += 1;
+                default
+            }
+        };
+        let clean: Vec<CellRaw> = cells
+            .iter()
+            .map(|c| CellRaw {
+                temp: fix(c.temp, crate::air::AMBIENT_K),
+                fuel: fix(c.fuel, 0.0),
+                vx: fix(c.vx, 0.0),
+                vy: fix(c.vy, 0.0),
+                vapor: fix(c.vapor, 0.0),
+                pressure: fix(c.pressure, 0.0),
+                ..*c
+            })
+            .collect();
+        self.upload(gpu, &clean);
+        bad
     }
 
     /// Copies the current buffer back to the CPU (blocking).
