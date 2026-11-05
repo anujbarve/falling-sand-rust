@@ -17,12 +17,20 @@ pub const MAX_TEMP: f32 = 1500.0;
 pub const DEFAULT_FUEL: u8 = 60;
 /// Chance per tick that a burning cell releases Smoke into an empty cell above.
 pub const SMOKE_P: f32 = 0.05;
+/// Chance that a burnt-out cell with no flammable neighbour left becomes Ember instead of Ash.
+pub const EMBER_P: f32 = 0.05;
 
+const ORTHO: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 const NEIGHBOURS: [(i32, i32); 8] =
     [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)];
 
-/// Burning system. Consumes `Event::Ignite`; a Fire cell burns `fuel` ticks, then becomes Ash.
-pub struct Fire;
+/// Burning system. Consumes `Event::Ignite`; a Fire cell burns `fuel` ticks, then becomes Ash
+/// (or, rarely and only with no flammable neighbour left, Ember).
+#[derive(Default)]
+pub struct Fire {
+    /// Scratch list of burning cells, reused across ticks.
+    burning: Vec<(i32, i32)>,
+}
 
 fn flammable(m: Material) -> bool {
     matches!(m, Material::Wood | Material::Gunpowder)
@@ -55,29 +63,28 @@ impl System for Fire {
 
         let (width, height) = (w.cells.width() as i32, w.cells.height() as i32);
         // Snapshot so cells ignited this tick start acting next tick.
-        let mut burning = Vec::new();
+        self.burning.clear();
         for y in 0..height {
             for x in 0..width {
                 if w.cells.get(x, y).map(|c| c.mat) == Some(Material::Fire) {
-                    burning.push((x, y));
+                    self.burning.push((x, y));
                 }
             }
         }
 
-        for (x, y) in burning {
+        for k in 0..self.burning.len() {
+            let (x, y) = self.burning[k];
             let wind = w.cells.index(x, y).map(|i| w.air.vel[i]).unwrap_or_default().normalized();
             for (dx, dy) in NEIGHBOURS {
                 let (nx, ny) = (x + dx, y + dy);
-                let Some(&n) = w.cells.get(nx, ny) else { continue };
-                if let Some(c) = w.cells.get_mut(nx, ny) {
-                    c.temp = (c.temp + HEAT).min(MAX_TEMP);
-                }
-                if !flammable(n.mat) {
+                let Some(c) = w.cells.get_mut(nx, ny) else { continue };
+                c.temp = (c.temp + HEAT).min(MAX_TEMP);
+                if !flammable(c.mat) {
                     continue;
                 }
                 let len = ((dx * dx + dy * dy) as f32).sqrt();
                 let dot = ((dx as f32 * wind.x + dy as f32 * wind.y) / len).clamp(-0.5, 1.0);
-                let wet = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                let wet = ORTHO
                     .iter()
                     .filter(|(wx, wy)| w.cells.get(nx + wx, ny + wy).map(|c| c.mat) == Some(Material::Water))
                     .count();
@@ -96,6 +103,13 @@ impl System for Fire {
             c.fuel = c.fuel.saturating_sub(1);
             if c.fuel == 0 {
                 c.mat = Material::Ash;
+                let ember = rng.chance(EMBER_P)
+                    && !NEIGHBOURS.iter().any(|(dx, dy)| {
+                        w.cells.get(x + dx, y + dy).is_some_and(|n| flammable(n.mat))
+                    });
+                if ember {
+                    w.cells.get_mut(x, y).unwrap().mat = Material::Ember;
+                }
             }
         }
     }

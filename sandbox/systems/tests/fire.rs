@@ -32,7 +32,7 @@ fn scramble(seed: u32) -> u32 {
 }
 
 fn systems() -> Vec<Box<dyn System>> {
-    vec![Box::new(Fire)]
+    vec![Box::new(Fire::default())]
 }
 
 /// Ticks until cell (x, 1) first becomes `target`, or None within `max`.
@@ -88,7 +88,7 @@ fn fire_spreads_along_wood_strip_seed_2() {
 /// divides the chance by 1 + wet (0.05/tick over 20 ticks of fuel), so the valid assertion is
 /// statistical: wet wood ignites clearly less often than dry wood.
 #[test]
-fn wet_wood_resists_ignition_seeds_1_to_200() {
+fn wet_wood_is_less_likely_to_ignite_seeds_1_to_200() {
     let trial = |wet: bool, seed: u32| -> bool {
         let mut w = World::new(3, 3);
         put(&mut w, 1, 1, Material::Wood, 20);
@@ -147,4 +147,21 @@ fn fire_never_persists_without_fuel_seed_3() {
         run_tick(&mut w, &mut s, &mut rng);
     }
     assert!(w.cells.as_slice().iter().all(|c| c.mat != Material::Fire));
+}
+
+/// A fully burnt strip leaves at least one Ember somewhere across seeds 1..=20.
+#[test]
+fn burning_strip_leaves_ember_seeds_1_to_20() {
+    let mut embers = 0;
+    for seed in 1..=20u32 {
+        let mut w = strip(10, 5);
+        w.events.push(Event::Ignite { x: 0, y: 1 });
+        let mut rng = Rng::new(scramble(seed));
+        let mut s = systems();
+        for _ in 0..300 {
+            run_tick(&mut w, &mut s, &mut rng);
+        }
+        embers += w.cells.as_slice().iter().filter(|c| c.mat == Material::Ember).count();
+    }
+    assert!(embers >= 1, "no Ember produced");
 }

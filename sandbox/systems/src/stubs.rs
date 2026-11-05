@@ -34,7 +34,7 @@ stub!(Lighting, "lighting");
 pub fn registry() -> Vec<Box<dyn System>> {
     vec![
         Box::new(Granular), Box::new(Liquid), Box::new(AirSystem::default()), Box::new(Thermal),
-        Box::new(Humidity), Box::new(Fire), Box::new(Volcano), Box::new(Particles),
+        Box::new(Humidity), Box::new(Fire::default()), Box::new(Volcano), Box::new(Particles),
         Box::new(Collisions), Box::new(Explosions), Box::new(Chemistry),
         Box::new(Ocean), Box::new(Lighting),
     ]
