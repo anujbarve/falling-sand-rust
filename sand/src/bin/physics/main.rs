@@ -16,10 +16,12 @@
 //! [SAND_MENU=1] [SAND_HEAT=1]` runs that many frames, saves the screen and
 //! exits (used to check the looks without a person watching).
 
+mod camera;
 mod render;
 mod settings;
 mod ui;
 
+use camera::Camera;
 use macroquad::prelude::*;
 use render::Renderer;
 use sand::audio::{analysis::Analyzer, output::AudioOut};
@@ -66,15 +68,6 @@ impl Sim {
     }
 }
 
-/// Where the world is drawn: as large as fits under the toolbar, keeping
-/// the grid's aspect ratio (letterboxed).
-fn world_rect(grid: (usize, usize)) -> Rect {
-    let (sw, sh) = (screen_width(), screen_height() - BAR_HEIGHT);
-    let scale = (sw / grid.0 as f32).min(sh / grid.1 as f32);
-    let (w, h) = (grid.0 as f32 * scale, grid.1 as f32 * scale);
-    Rect::new((sw - w) * 0.5, BAR_HEIGHT + (sh - h) * 0.5, w, h)
-}
-
 fn env<T: std::str::FromStr>(name: &str) -> Option<T> {
     std::env::var(name).ok()?.parse().ok()
 }
@@ -86,6 +79,8 @@ async fn main() {
     settings.grid = env("SAND_GRID").unwrap_or(settings.grid).min(GRIDS.len() - 1);
     let mut scene_index = env("SAND_SCENE").unwrap_or(0usize).min(SCENES.len() - 1);
     let mut sim = Sim::new(scene_index, &settings);
+    let mut camera = Camera::fit(GRIDS[settings.grid], (screen_width(), screen_height() - BAR_HEIGHT));
+    let mut pan_from: Option<Vec2> = None; // pointer position last frame, while middle-dragging
     let mut renderer = Renderer::new(GRIDS[settings.grid], &settings.graphics);
     renderer.upload(&sim.world.cells);
     let mut clock = Clock::default();
@@ -171,18 +166,46 @@ async fn main() {
                 brush = m;
             }
         }
+        // The wheel is brush size, unless Cmd/Ctrl is held: then it zooms (below).
         let wheel = mouse_wheel().1;
-        if is_key_pressed(KeyCode::RightBracket) || wheel > 0.0 {
+        let zoom_mod = [KeyCode::LeftSuper, KeyCode::RightSuper, KeyCode::LeftControl, KeyCode::RightControl]
+            .into_iter()
+            .any(is_key_down);
+        let brush_wheel = if zoom_mod { 0.0 } else { wheel };
+        if is_key_pressed(KeyCode::RightBracket) || brush_wheel > 0.0 {
             brush_size = (brush_size + 1).min(40);
         }
-        if is_key_pressed(KeyCode::LeftBracket) || wheel < 0.0 {
+        if is_key_pressed(KeyCode::LeftBracket) || brush_wheel < 0.0 {
             brush_size = (brush_size - 1).max(1);
         }
 
-        // --- draw the world (the newest readback) ---
+        // --- camera: zoom (Cmd/Ctrl + wheel, or = and -), pan (middle drag), clamped every frame ---
         clear_background(Color::from_rgba(6, 7, 10, 255));
         let grid = GRIDS[settings.grid];
-        let dest = world_rect(grid);
+        let view = (screen_width(), screen_height() - BAR_HEIGHT); // the area under the toolbar
+        let (mx, my) = mouse_position();
+        let pointer = vec2(mx, my);
+        if zoom_mod && wheel != 0.0 {
+            camera.zoom_at(pointer, 1.2f32.powf(wheel), grid, view);
+        }
+        if is_key_pressed(KeyCode::Equal) {
+            camera.zoom_at(pointer, 1.25, grid, view);
+        }
+        if is_key_pressed(KeyCode::Minus) {
+            camera.zoom_at(pointer, 0.8, grid, view);
+        }
+        if is_mouse_button_down(MouseButton::Middle) {
+            if let Some(prev) = pan_from {
+                camera.pan(pointer - prev, grid, view);
+            }
+            pan_from = Some(pointer);
+        } else {
+            pan_from = None;
+        }
+        camera.clamp(grid, view);
+
+        // --- draw the world (the newest readback) ---
+        let dest = camera.dest_rect(grid, view);
         renderer.draw(dest, &settings.graphics, settings.heat_view, get_time() as f32);
 
         // --- UI on top; it also decides whether the mouse may paint ---
@@ -190,7 +213,6 @@ async fn main() {
         if menu_open {
             menu.draw(&mut settings, &mut actions);
         }
-        let (mx, my) = mouse_position();
         let over_ui = my < BAR_HEIGHT || (menu_open && menu.wants_mouse());
 
         // --- carry out what was asked ---
@@ -222,6 +244,7 @@ async fn main() {
                     sim = Sim::new(scene_index, &settings);
                     renderer.set_grid(GRIDS[settings.grid], &settings.graphics);
                     renderer.upload(&sim.world.cells);
+                    camera = Camera::fit(GRIDS[settings.grid], view);
                     clock.reset();
                     analyzer.reset();
                 }
@@ -236,7 +259,8 @@ async fn main() {
         }
 
         // --- paint (left) / erase (right), straight into the GPU's grid ---
-        let cell = (((mx - dest.x) / dest.w * grid.0 as f32) as i32, ((my - dest.y) / dest.h * grid.1 as f32) as i32);
+        // The cell under the pointer as the camera draws it; off the grid, nothing is painted.
+        let cell = camera.screen_to_cell(pointer, grid, view);
         edits.clear();
         if !over_ui {
             let m = if is_mouse_button_down(MouseButton::Left) {
@@ -246,8 +270,8 @@ async fn main() {
             } else {
                 None
             };
-            if let Some(m) = m {
-                paint(&sim.world, m, jet_dir, cell, brush_size, &mut edits);
+            if let (Some(m), Some(c)) = (m, cell) {
+                paint(&sim.world, m, jet_dir, c, brush_size, &mut edits);
             }
         }
         if !edits.is_empty() {
@@ -299,7 +323,7 @@ async fn main() {
         draw_line(bx, by, bx + bar, by, 2.0, Color::from_rgba(255, 255, 255, 180));
         draw_text("10 cm", bx, by - 6.0, 16.0, Color::from_rgba(255, 255, 255, 180));
         if settings.show_stats {
-            let probe = sim.world.index(cell.0, cell.1).map_or(String::new(), |i| {
+            let probe = cell.and_then(|(cx, cy)| sim.world.index(cx, cy)).map_or(String::new(), |i| {
                 let c = sim.world.cells[i];
                 format!("  |  {} {:.0}°C", NAMES[material(c) as usize], sens(c) as f32 / T_SCALE as f32)
             });
