@@ -3,6 +3,7 @@
 pub mod air;
 pub mod engine;
 pub mod granular;
+pub mod humidity;
 pub mod liquid;
 pub mod thermal;
 pub mod stubs;

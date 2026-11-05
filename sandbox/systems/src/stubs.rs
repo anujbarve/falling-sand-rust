@@ -4,6 +4,7 @@
 use crate::air::AirSystem;
 use crate::engine::System;
 use crate::granular::Granular;
+use crate::humidity::Humidity;
 use crate::liquid::Liquid;
 use crate::thermal::Thermal;
 use sandbox_core::rng::Rng;
@@ -20,7 +21,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Humidity, "humidity");
 stub!(Fire, "fire");
 stub!(Volcano, "volcano");
 stub!(Particles, "particles");
