@@ -14,6 +14,8 @@ Core simulation data types shared by every other sandbox crate.
 - `event`: `Event` and `SoundKind`, drained by the app each tick.
 - `world`: `World`, all layers; `World::new(w, h)` gives an empty 293.0 world.
 - `time`: `DT` (1/60 s) and `FixedStep`, capped at 8 ticks per frame.
+- `config`: `Config` (seed, wind, sea_level, brush, volume) and `load_config(path)`; a missing or bad file gives defaults plus one warning string. See `config/default.toml`.
+- `save`: `save_world` (atomic: temp file then rename), `load_world`, `SaveError`. Text format `version 1`, `size W H`, cell lines, air lines; unknown version or truncation returns `Err`.
 - `VERSION`: the crate version string.
 
 ## Tests
