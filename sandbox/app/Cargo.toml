@@ -9,3 +9,7 @@ sandbox_systems = { path = "../systems" }
 sandbox_render = { path = "../render" }
 sandbox_audio = { path = "../audio" }
 macroquad = { workspace = true }
+
+[features]
+# Also feed frames through the wgpu presenter (offscreen; see render README).
+gpu = ["sandbox_render/gpu"]

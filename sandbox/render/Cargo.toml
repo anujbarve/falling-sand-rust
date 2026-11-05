@@ -3,5 +3,12 @@ name = "sandbox_render"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Optional wgpu presenter. Off by default; the macroquad presenter is always available.
+gpu = ["dep:wgpu", "dep:pollster"]
+
 [dependencies]
 sandbox_core = { path = "../core" }
+macroquad = { workspace = true }
+wgpu = { version = "=30.0.1", optional = true }
+pollster = { version = "=0.4.0", optional = true }
