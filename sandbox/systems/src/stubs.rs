@@ -8,6 +8,7 @@ use crate::granular::Granular;
 use crate::humidity::Humidity;
 use crate::liquid::Liquid;
 use crate::thermal::Thermal;
+use crate::volcano::Volcano;
 use sandbox_core::rng::Rng;
 use sandbox_core::world::World;
 
@@ -22,7 +23,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Volcano, "volcano");
 stub!(Particles, "particles");
 stub!(Collisions, "collisions");
 stub!(Explosions, "explosions");
@@ -34,7 +34,7 @@ stub!(Lighting, "lighting");
 pub fn registry() -> Vec<Box<dyn System>> {
     vec![
         Box::new(Granular), Box::new(Liquid), Box::new(AirSystem::default()), Box::new(Thermal),
-        Box::new(Humidity), Box::new(Fire::default()), Box::new(Volcano), Box::new(Particles),
+        Box::new(Humidity), Box::new(Fire::default()), Box::new(Volcano::default()), Box::new(Particles),
         Box::new(Collisions), Box::new(Explosions), Box::new(Chemistry),
         Box::new(Ocean), Box::new(Lighting),
     ]

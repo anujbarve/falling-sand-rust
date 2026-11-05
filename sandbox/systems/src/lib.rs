@@ -8,6 +8,7 @@ pub mod humidity;
 pub mod liquid;
 pub mod thermal;
 pub mod stubs;
+pub mod volcano;
 
 pub use engine::{run_tick, System};
 pub use stubs::registry;
