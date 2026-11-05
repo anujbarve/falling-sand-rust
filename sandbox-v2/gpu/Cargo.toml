@@ -7,3 +7,6 @@ edition = "2021"
 wgpu = "=30.0.1"
 pollster = "=0.4.0"
 bytemuck = { version = "=1.25.2", features = ["derive"] }
+
+[dev-dependencies]
+sandbox_core = { path = "../../sandbox/core" }

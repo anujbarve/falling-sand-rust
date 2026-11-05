@@ -46,7 +46,10 @@ fn round_trip_64x64_byte_for_byte() {
     let cells = random_cells(64 * 64);
     g.upload(&gpu, &cells);
     let back = g.readback(&gpu);
-    assert_eq!(bytemuck::cast_slice::<_, u8>(&cells), bytemuck::cast_slice::<_, u8>(&back));
+    assert_eq!(
+        bytemuck::cast_slice::<_, u8>(&cells),
+        bytemuck::cast_slice::<_, u8>(&back)
+    );
     // swap flips the current buffer: the other buffer is still zeroed.
     g.swap();
     assert!(g.readback(&gpu).iter().all(|c| *c == CellRaw::default()));

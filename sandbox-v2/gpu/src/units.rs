@@ -27,7 +27,9 @@ pub const MAX_STEP: u32 = 15;
 /// Converts a duration in seconds to a whole number of ticks, rounding up.
 /// A tiny tolerance keeps values like `0.1` (6.0000005 ticks in f32) at 6.
 pub fn ticks(seconds: f32) -> u32 {
-    (f64::from(seconds) * f64::from(TICK_HZ) - 1e-3).ceil().max(0.0) as u32
+    (f64::from(seconds) * f64::from(TICK_HZ) - 1e-3)
+        .ceil()
+        .max(0.0) as u32
 }
 
 /// Converts a speed in cells per second to fixed-point cells per tick (rounded).

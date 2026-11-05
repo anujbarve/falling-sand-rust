@@ -51,7 +51,12 @@ async fn init(instance: wgpu::Instance, surface: Option<&wgpu::Surface<'_>>) -> 
         .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .ok()?;
-    Some(Gpu { instance, adapter, device, queue })
+    Some(Gpu {
+        instance,
+        adapter,
+        device,
+        queue,
+    })
 }
 
 impl Gpu {

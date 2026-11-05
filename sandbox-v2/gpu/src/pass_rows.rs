@@ -2,6 +2,7 @@
 
 use std::sync::Mutex;
 
+use crate::reference::{EMPTY, WALL};
 use crate::units::{cps_to_fp, FP_ONE, GRAVITY_FP, MAX_STEP};
 use crate::{Gpu, GridState};
 
@@ -27,7 +28,13 @@ pub(crate) struct RowPass {
 impl RowPass {
     /// Compiles the shared rule for movers of material id `mover`, with
     /// `terminal_cps` as the speed limit and `sideways` enabling liquid spreading.
-    pub(crate) fn new(gpu: &Gpu, label: &str, mover: u32, sideways: bool, terminal_cps: f32) -> RowPass {
+    pub(crate) fn new(
+        gpu: &Gpu,
+        label: &str,
+        mover: u32,
+        sideways: bool,
+        terminal_cps: f32,
+    ) -> RowPass {
         let terminal_fp = cps_to_fp(terminal_cps);
         assert!(
             terminal_fp <= MAX_STEP as i32 * FP_ONE,
@@ -36,7 +43,7 @@ impl RowPass {
         let header = format!(
             "const FP_ONE: i32 = {FP_ONE};\nconst MAX_STEP: i32 = {MAX_STEP};\n\
              const GRAVITY_FP: i32 = {GRAVITY_FP};\nconst TERMINAL_FP: i32 = {terminal_fp};\n\
-             const MOVER: u32 = {mover}u;\nconst SIDEWAYS: bool = {sideways};\n"
+             const MOVER: u32 = {mover}u;\nconst EMPTY: u32 = {EMPTY}u;\nconst WALL: u32 = {WALL}u;\nconst SIDEWAYS: bool = {sideways};\n"
         );
         let src = [
             header.as_str(),
@@ -44,25 +51,33 @@ impl RowPass {
             include_str!("shaders/rules.wgsl"),
         ]
         .join("\n");
-        let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(label),
-            source: wgpu::ShaderSource::Wgsl(src.into()),
-        });
-        let pipeline = gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some(label),
-            layout: None,
-            module: &module,
-            entry_point: Some("main"),
-            compilation_options: Default::default(),
-            cache: None,
-        });
+        let module = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(src.into()),
+            });
+        let pipeline = gpu
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(label),
+                layout: None,
+                module: &module,
+                entry_point: Some("main"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
         let ubo = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("row_params"),
             size: 2 * SLOT,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        RowPass { pipeline, ubo, cache: Mutex::new(None) }
+        RowPass {
+            pipeline,
+            ubo,
+            cache: Mutex::new(None),
+        }
     }
 
     fn bind_groups(&self, gpu: &Gpu, grid: &GridState) -> [[wgpu::BindGroup; 2]; 2] {
@@ -101,12 +116,19 @@ impl RowPass {
         let (w, h) = (grid.width(), grid.height());
         let mut cache = self.cache.lock().expect("pass cache poisoned");
         if cache.as_ref().is_none_or(|c| c.grid_id != grid.id()) {
-            *cache = Some(Cached { grid_id: grid.id(), groups: self.bind_groups(gpu, grid) });
+            *cache = Some(Cached {
+                grid_id: grid.id(),
+                groups: self.bind_groups(gpu, grid),
+            });
         }
         let groups = &cache.as_ref().expect("cache just filled").groups[grid.current_index()];
         for phase in 0..2u32 {
             let params: [u32; 8] = [w, h, tick, seed, phase, 0, 0, 0];
-            gpu.queue.write_buffer(&self.ubo, u64::from(phase) * SLOT, bytemuck::cast_slice(&params));
+            gpu.queue.write_buffer(
+                &self.ubo,
+                u64::from(phase) * SLOT,
+                bytemuck::cast_slice(&params),
+            );
         }
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         {

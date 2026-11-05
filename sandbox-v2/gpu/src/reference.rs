@@ -33,14 +33,14 @@
 use crate::materials::{Material, MATERIALS};
 use crate::units::{cps_to_fp, FP_ONE, GRAVITY_FP, MAX_STEP};
 
-/// Empty cell.
-pub const EMPTY: u32 = 0;
-/// Sand (granular).
-pub const SAND: u32 = 1;
-/// Water (liquid).
-pub const WATER: u32 = 2;
-/// Immovable solid.
-pub const WALL: u32 = 3;
+/// Empty cell (id of [`Material::Empty`]).
+pub const EMPTY: u32 = Material::Empty as u32;
+/// Sand (granular), id of [`Material::Sand`].
+pub const SAND: u32 = Material::Sand as u32;
+/// Water (liquid), id of [`Material::Water`].
+pub const WATER: u32 = Material::Water as u32;
+/// Immovable boundary solid; see [`crate::materials::WALL`].
+pub const WALL: u32 = crate::materials::WALL;
 
 /// 32-bit integer finalizer (murmur3 `fmix32`). Mirrored in WGSL as `mix32`.
 fn mix32(mut h: u32) -> u32 {
@@ -63,7 +63,11 @@ pub fn cell_hash(tick: u32, x: u32, y: u32, seed: u32) -> u32 {
 
 /// Fixed-point terminal speed of the sand grains and water cells moved by `kind`.
 fn terminal_fp(kind: Kind) -> i32 {
-    let m = if kind == Kind::Granular { Material::Sand } else { Material::Water };
+    let m = if kind == Kind::Granular {
+        Material::Sand
+    } else {
+        Material::Water
+    };
     cps_to_fp(MATERIALS[m as usize].terminal_cps)
 }
 
@@ -185,7 +189,11 @@ impl Reference {
         let n = acc / FP_ONE;
         let kept = (v, acc % FP_ONE);
         if n == 0 {
-            return Some(Plan { target: None, moved: kept, stay: kept });
+            return Some(Plan {
+                target: None,
+                moved: kept,
+                stay: kept,
+            });
         }
         let stop = (0, 0);
         let mut m = 0;
@@ -193,11 +201,18 @@ impl Reference {
             m += 1;
         }
         let (target, moved) = if m > 0 {
-            (Some((x, y + i64::from(m))), if m == n { kept } else { stop })
+            (
+                Some((x, y + i64::from(m))),
+                if m == n { kept } else { stop },
+            )
         } else {
             (self.slide(kind, tick, seed, x, y), stop)
         };
-        Some(Plan { target, moved, stay: stop })
+        Some(Plan {
+            target,
+            moved,
+            stay: stop,
+        })
     }
 
     /// Diagonal (then, for liquids, sideways) target of a blocked mover.
@@ -221,9 +236,18 @@ impl Reference {
     }
 
     /// Source (and its plan) that wins the empty cell `(x, y)`, by fixed priority.
-    fn winner(&self, kind: Kind, phase: u32, tick: u32, seed: u32, x: i64, y: i64) -> Option<((i64, i64), Plan)> {
+    fn winner(
+        &self,
+        kind: Kind,
+        phase: u32,
+        tick: u32,
+        seed: u32,
+        x: i64,
+        y: i64,
+    ) -> Option<((i64, i64), Plan)> {
         let wins = |sx: i64, sy: i64| {
-            self.plan(kind, phase, tick, seed, sx, sy).filter(|p| p.target == Some((x, y)))
+            self.plan(kind, phase, tick, seed, sx, sy)
+                .filter(|p| p.target == Some((x, y)))
         };
         // Only the nearest non-empty cell above can reach `(x, y)` straight down.
         for dy in 1..=i64::from(MAX_STEP) {
@@ -253,7 +277,9 @@ impl Reference {
                         out.stamp[i] = stamp;
                     }
                 } else if let Some(p) = self.plan(kind, phase, tick, seed, x, y) {
-                    let wins = p.target.and_then(|(tx, ty)| self.winner(kind, phase, tick, seed, tx, ty));
+                    let wins = p
+                        .target
+                        .and_then(|(tx, ty)| self.winner(kind, phase, tick, seed, tx, ty));
                     if wins.is_some_and(|(src, _)| src == (x, y)) {
                         out.cells[i] = EMPTY;
                         out.vy[i] = 0;

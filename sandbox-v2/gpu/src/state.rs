@@ -77,7 +77,8 @@ impl GridState {
         Ok(GridState {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             w,
-            h, bufs: [make("cells_a"), make("cells_b")],
+            h,
+            bufs: [make("cells_a"), make("cells_b")],
             cur: 0,
         })
     }
@@ -128,7 +129,8 @@ impl GridState {
     /// If `cells.len() != w * h`.
     pub fn upload(&self, gpu: &Gpu, cells: &[CellRaw]) {
         assert_eq!(cells.len() as u64, u64::from(self.w) * u64::from(self.h));
-        gpu.queue.write_buffer(self.current(), 0, bytemuck::cast_slice(cells));
+        gpu.queue
+            .write_buffer(self.current(), 0, bytemuck::cast_slice(cells));
     }
 
     /// Copies the current buffer back to the CPU (blocking).
@@ -143,7 +145,9 @@ impl GridState {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(self.current(), 0, &staging, 0, size);
         gpu.queue.submit(Some(enc.finish()));
-        staging.slice(..).map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
+        staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
         gpu.device
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("poll readback");

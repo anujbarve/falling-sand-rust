@@ -1,7 +1,7 @@
 // Shared row-parity kernel for granular and liquid passes. Concatenated after
 // common.wgsl and after a generated header (see pass_rows.rs) that defines the
-// i32 constants FP_ONE, MAX_STEP, GRAVITY_FP, TERMINAL_FP, the u32 constant
-// MOVER and the bool SIDEWAYS. Mirrors src/reference.rs exactly (integer math).
+// i32 constants FP_ONE, MAX_STEP, GRAVITY_FP, TERMINAL_FP, the u32 constants
+// MOVER, EMPTY and WALL (material ids) and the bool SIDEWAYS. Mirrors src/reference.rs exactly (integer math).
 struct Params {
     w: u32,
     h: u32,
@@ -17,10 +17,6 @@ struct Params {
 @group(0) @binding(1) var<storage, read> src: array<Cell>;
 @group(0) @binding(2) var<storage, read_write> dst: array<Cell>;
 
-const EMPTY: u32 = 0u;
-const SAND: u32 = 1u;
-const WATER: u32 = 2u;
-const WALL: u32 = 3u;
 
 // murmur3 fmix32, u32 wrapping math (WGSL u32 ops wrap).
 fn mix32(v: u32) -> u32 {

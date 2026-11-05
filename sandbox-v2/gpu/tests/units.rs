@@ -43,9 +43,42 @@ fn material_table_matches_enum_and_limits() {
     assert_eq!(Material::Empty as u32, EMPTY);
     assert_eq!(Material::Sand as u32, SAND);
     assert_eq!(Material::Water as u32, WATER);
-    assert_eq!(Material::Wall as u32, WALL);
+    assert_eq!(sandbox_v2_gpu::materials::WALL, WALL);
     assert_eq!(Material::Wood.def().burn_s, 6.0);
     for m in MATERIALS.iter() {
-        assert!(cps_to_fp(m.terminal_cps) <= MAX_STEP as i32 * FP_ONE, "terminal speed too high");
+        assert!(
+            cps_to_fp(m.terminal_cps) <= MAX_STEP as i32 * FP_ONE,
+            "terminal speed too high"
+        );
+    }
+}
+
+#[test]
+fn material_ids_match_v1() {
+    use sandbox_core::material::Material as V1;
+    use sandbox_v2_gpu::materials::Material as V2;
+    let pairs = [
+        (V2::Empty, V1::Empty),
+        (V2::Sand, V1::Sand),
+        (V2::Water, V1::Water),
+        (V2::Oil, V1::Oil),
+        (V2::Stone, V1::Stone),
+        (V2::Rock, V1::Rock),
+        (V2::Wood, V1::Wood),
+        (V2::Ash, V1::Ash),
+        (V2::Metal, V1::Metal),
+        (V2::Glass, V1::Glass),
+        (V2::Lava, V1::Lava),
+        (V2::Acid, V1::Acid),
+        (V2::Gunpowder, V1::Gunpowder),
+        (V2::Ice, V1::Ice),
+        (V2::Fire, V1::Fire),
+        (V2::Steam, V1::Steam),
+        (V2::Smoke, V1::Smoke),
+        (V2::Ember, V1::Ember),
+    ];
+    assert_eq!(pairs.len(), sandbox_v2_gpu::materials::MATERIAL_COUNT);
+    for (a, b) in pairs {
+        assert_eq!(a as u32, b as u8 as u32, "{a:?} id drifted from v1");
     }
 }

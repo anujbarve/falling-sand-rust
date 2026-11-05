@@ -22,7 +22,10 @@ fn sand_column_falls_to_floor() {
     }
     let r = run(r, TICKS);
     assert_eq!(r.count(SAND), 6);
-    assert!((0..32).any(|x| r.get(x, 30) == SAND), "sand reached the floor");
+    assert!(
+        (0..32).any(|x| r.get(x, 30) == SAND),
+        "sand reached the floor"
+    );
     for y in 0..31 {
         for x in 0..32 {
             if r.get(x, y) == SAND {
@@ -50,7 +53,10 @@ fn water_spreads_sideways() {
         .map(|x| (0..31).filter(|&y| r.get(x, y) == WATER).count())
         .max()
         .unwrap();
-    assert!(max_height <= 2, "water not levelled: tallest column holds {max_height} cells");
+    assert!(
+        max_height <= 2,
+        "water not levelled: tallest column holds {max_height} cells"
+    );
 }
 
 #[test]
