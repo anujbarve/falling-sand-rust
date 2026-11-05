@@ -52,6 +52,33 @@ use cpu::CpuSim;
         }
     }
 
+    /// Poll `f` (which never blocks) until it returns Some, for up to 5 s.
+    fn wait_for<T>(mut f: impl FnMut() -> Option<T>) -> Option<T> {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(v) = f() {
+                return Some(v);
+            }
+            if start.elapsed() > std::time::Duration::from_secs(5) {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn per_pass_times_are_reported_when_timestamps_exist() {
+        let world = World::new(256, 256);
+        let Some(mut gpu) = gpu_or_skip(&world) else { return };
+        if !gpu.has_timestamps() {
+            return;
+        }
+        gpu.step(200);
+        gpu.wait();
+        let t = wait_for(|| gpu.pass_times_ms()).expect("timestamps arrive");
+        assert!(t.step_ms > 0.0 && t.wake_ms >= 0.0);
+    }
+
     /// A scene that reaches a true fixed point quickly: still water filling
     /// whole rows of a tank, and a block of sand that falls into a walled
     /// bin and lands flat (a free heap would creep down its slope for many
@@ -223,7 +250,7 @@ use cpu::CpuSim;
         if gpu.has_timestamps() {
             gpu.step(10);
             gpu.wait();
-            let ms = gpu.gpu_time_ms().expect("timestamps should come back after a wait");
+            let ms = wait_for(|| gpu.gpu_time_ms()).expect("timestamps should come back after a wait");
             assert!(ms > 0.0 && ms < 1000.0, "implausible GPU time {ms} ms/step");
         }
     }
