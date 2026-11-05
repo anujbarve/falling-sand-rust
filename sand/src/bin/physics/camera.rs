@@ -164,4 +164,48 @@ mod tests {
         let screen = (1280.0, 760.0);
         assert_eq!(Camera::fit(grid, screen).screen_to_cell(vec2(5.0, 5.0), grid, screen), None);
     }
+
+    /// Deterministic generator (no crates): a linear congruential generator.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_u64(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0
+        }
+
+        /// Uniform in `[0, 1)`.
+        fn unit(&mut self) -> f32 {
+            (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
+        }
+    }
+
+    #[test]
+    fn camera_round_trip() {
+        // Screens are the area under the toolbar, as the viewer passes them.
+        let grids = [(640usize, 360usize), (301, 157), (1, 1), (64, 900)];
+        let screens = [(1280.0f32, 720.0f32), (1000.0, 500.0), (333.0, 777.0)];
+        let mut rng = Lcg(0x5eed_cafe);
+        for _ in 0..200 {
+            let grid = grids[(rng.next_u64() % grids.len() as u64) as usize];
+            let screen = screens[(rng.next_u64() % screens.len() as u64) as usize];
+            let mut cam = Camera {
+                zoom: MIN_ZOOM + rng.unit() * (MAX_ZOOM - MIN_ZOOM),
+                center: vec2(rng.unit() * grid.0 as f32, rng.unit() * grid.1 as f32),
+            };
+            cam.clamp(grid, screen);
+            let (x0, y0, x1, y1) = cam.visible_cells(grid, screen);
+            assert!(x0 < x1 && y0 < y1, "nothing visible for {cam:?} on {grid:?}");
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let p = cam.cell_to_screen((x, y), grid, screen);
+                    assert_eq!(
+                        cam.screen_to_cell(p, grid, screen),
+                        Some((x, y)),
+                        "cell ({x},{y}) at {p:?} maps back wrongly; camera {cam:?}, grid {grid:?}, screen {screen:?}"
+                    );
+                }
+            }
+        }
+    }
 }

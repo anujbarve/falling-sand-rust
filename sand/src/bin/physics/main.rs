@@ -312,9 +312,11 @@ async fn main() {
         cpu_ms = if cpu_ms == 0.0 { now } else { cpu_ms * 0.95 + now * 0.05 };
 
         // --- overlays ---
-        if !over_ui && dest.contains(vec2(mx, my)) {
+        // The brush circle is centred on the cell that paint() will use.
+        if let (false, Some(c)) = (over_ui, cell) {
+            let at = camera.cell_to_screen(c, grid, view);
             let r = brush_size as f32 * dest.w / grid.0 as f32;
-            draw_circle_lines(mx, my, r, 1.0, Color::from_rgba(255, 255, 255, 90));
+            draw_circle_lines(at.x, at.y, r, 1.0, Color::from_rgba(255, 255, 255, 90));
         }
         let (name, about) = SCENES[scene_index];
         draw_text(&format!("{name}: {about}"), dest.x + 12.0, dest.y + 24.0, 18.0, Color::from_rgba(220, 225, 235, 200));
