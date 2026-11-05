@@ -50,6 +50,7 @@ CI (`.github/workflows/ci.yml`) builds and tests on macOS, Linux and Windows and
 - `systems_for(scene)` takes no config, so each scene's wind and sea level are constants in `scenes.rs`; a test asserts the TOML files agree. `main` uses `systems_with` and the loaded config.
 - Keys 1 to 8 are Sand, Water, Oil, Stone, Wood, Gunpowder, Fire, Lava (the brief did not name them). Mouse painting was added because the material keys are pointless without it. Audio volume from the config is not applied (the audio API has no volume control).
 - `main` now gates config loading and S/L on `file_io_available()`.
+- Explosion Lab loss is attributed to blasts by a control run (same world, `lab_fuse` removed): the fused run has booms, debris particles, more Ash and destroyed Metal, and loses more gunpowder. Net non-empty cell count is not asserted to rise, because blasts on the metal plate destroy cells (2249 -> 2216 fused, 2249 -> 2276 control).
 
 ## Known issues
 

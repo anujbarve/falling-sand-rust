@@ -73,9 +73,7 @@ fn soak(scene: Scene) {
         "SOAK {scene:?}: mean tick {mean_ms:.3} ms, solids {start} -> {end} (drift {drift:.2e}), non-empty {start_all} -> {end_all}"
     );
     if scene == Scene::ExplosionLab {
-        // Explosions destroy gunpowder and leave debris/ash: gunpowder strictly drops, non-empty cells never shrink.
-        assert!(gp < start_gp, "gunpowder {start_gp} -> {gp}");
-        assert!(end_all >= start_all, "non-empty {start_all} -> {end_all}");
+        // Loss attribution is tested in `explosions_cause_extra_lab_loss`.
         return;
     }
     let sand = count(&w, Material::Sand);
@@ -103,4 +101,66 @@ fn ocean_storm_soak() {
 #[test]
 fn explosion_lab_soak() {
     soak(Scene::ExplosionLab);
+}
+
+/// Result of one headless lab run.
+struct LabRun {
+    booms: usize,
+    gunpowder_lost: usize,
+    non_empty_start: usize,
+    non_empty_end: usize,
+    max_particles: usize,
+    ash: usize,
+    metal_lost: usize,
+}
+
+fn non_empty(w: &World) -> usize {
+    w.cells.as_slice().iter().filter(|c| c.mat != Material::Empty).count()
+}
+
+fn run_lab(fused: bool) -> LabRun {
+    let mut w = build(Scene::ExplosionLab, 1);
+    let mut systems: Vec<_> = systems_for(Scene::ExplosionLab)
+        .into_iter()
+        .filter(|s| fused || s.name() != "lab_fuse")
+        .collect();
+    let mut rng = Rng::new(1);
+    let metal0 = count(&w, Material::Metal);
+    let (gp0, ne0) = (count(&w, Material::Gunpowder), non_empty(&w));
+    let (mut booms, mut max_particles) = (0, 0);
+    for _ in 0..TICKS {
+        run_tick(&mut w, &mut systems, &mut rng);
+        booms += w.events.iter().filter(|e| matches!(e, Event::Sound { kind: SoundKind::Boom, .. })).count();
+        w.events.clear();
+        max_particles = max_particles.max(w.particles.len());
+    }
+    LabRun {
+        booms,
+        gunpowder_lost: gp0 - count(&w, Material::Gunpowder).min(gp0),
+        non_empty_start: ne0,
+        non_empty_end: non_empty(&w),
+        max_particles,
+        ash: count(&w, Material::Ash),
+        metal_lost: metal0 - count(&w, Material::Metal).min(metal0),
+    }
+}
+
+/// Blasts must be heard, throw debris particles, leave extra ash, destroy metal, and must destroy more
+/// gunpowder than the same world with only its starting flame (control run, fuse removed).
+#[test]
+fn explosions_cause_extra_lab_loss() {
+    let fused = run_lab(true);
+    let control = run_lab(false);
+    println!(
+        "LAB fused: booms {}, gunpowder lost {}, non-empty {} -> {}, max particles {}; control: booms {}, gunpowder lost {}, non-empty {} -> {}, max particles {}",
+        fused.booms, fused.gunpowder_lost, fused.non_empty_start, fused.non_empty_end, fused.max_particles,
+        control.booms, control.gunpowder_lost, control.non_empty_start, control.non_empty_end, control.max_particles,
+    );
+    println!("LAB ash fused {} control {}; metal lost fused {} control {}", fused.ash, control.ash, fused.metal_lost, control.metal_lost);
+    assert!(fused.booms > 0);
+    assert_eq!(control.booms, 0);
+    assert!(fused.max_particles > control.max_particles, "no debris particles from blasts");
+    assert!(fused.ash > control.ash, "blasts left no extra ash");
+    assert!(fused.metal_lost > 0 && control.metal_lost == 0, "blasts did not destroy metal");
+    assert!(fused.gunpowder_lost > control.gunpowder_lost, "blasts did not add gunpowder loss");
 }

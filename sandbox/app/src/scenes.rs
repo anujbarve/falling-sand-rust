@@ -165,7 +165,7 @@ pub fn build(scene: Scene, seed: u32) -> World {
 }
 
 /// Explosion lab fuse: every `PERIOD` ticks after the first `FIRST`, detonates a charge
-/// above one of the two gunpowder piles. Emits an `Explosion` (consumed by `Explosions`)
+/// above the left pile, the metal plate (throws debris) and the right pile in turn. Emits an `Explosion` (consumed by `Explosions`)
 /// and a `Boom` sound (survives to the app so the blast is heard).
 struct LabFuse {
     tick: u64,
@@ -186,7 +186,7 @@ impl System for LabFuse {
         if self.tick < Self::FIRST || (self.tick - Self::FIRST) % Self::PERIOD != 0 {
             return;
         }
-        let x = if ((self.tick - Self::FIRST) / Self::PERIOD) % 2 == 0 { 45.0 } else { 115.0 };
+        let x = [45.0, 80.0, 115.0][(((self.tick - Self::FIRST) / Self::PERIOD) % 3) as usize];
         w.events.push(Event::Explosion { x, y: 98.0, radius: 10.0, energy: 80.0 });
         w.events.push(Event::Sound { kind: SoundKind::Boom, intensity: 0.8, x, y: 98.0 });
     }
