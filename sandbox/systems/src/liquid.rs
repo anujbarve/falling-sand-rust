@@ -9,6 +9,7 @@ use sandbox_core::world::World;
 /// Maximum number of cells a liquid travels sideways in one tick.
 const FLOW: i32 = 4;
 
+/// True for materials this system moves.
 fn is_liquid(m: Material) -> bool {
     matches!(m, Material::Water | Material::Oil | Material::Acid)
 }

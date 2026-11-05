@@ -10,6 +10,7 @@ use sandbox_systems::liquid::Liquid;
 use sandbox_systems::System;
 
 fn put(w: &mut World, x: i32, y: i32, m: Material) {
+    assert_eq!(w.cells.get(x, y).unwrap().mat, Material::Empty, "put over occupied ({x},{y})");
     w.cells.set(x, y, Cell { mat: m, temp: 293.0, fuel: 0, updated: false });
 }
 
@@ -97,6 +98,22 @@ fn sand_sinks_through_water() {
     // The displaced water column is intact apart from the sand: column rises by one.
     assert_eq!(mat(&w, 5, 7), Material::Water);
     assert_eq!(mat(&w, 5, 14), Material::Water);
+}
+
+#[test]
+fn sand_sinks_through_water_open_grid() {
+    let mut w = World::new(16, 16);
+    let mut rng = Rng::new(5);
+    let mut s = systems();
+    for y in 8..16 {
+        put(&mut w, 5, y, Material::Water);
+    }
+    put(&mut w, 5, 5, Material::Sand);
+    for _ in 0..60 {
+        run_tick(&mut w, &mut s, &mut rng);
+    }
+    assert!((0..16).any(|x| mat(&w, x, 15) == Material::Sand), "sand did not reach row 15");
+    assert_eq!(count(&w, Material::Water), 8);
 }
 
 #[test]

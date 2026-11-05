@@ -51,21 +51,20 @@ fn water_sinks_below_oil() {
     let mut w = World::new(8, 8);
     let mut rng = Rng::new(2);
     let mut s = systems();
+    for y in 0..8 {
+        put(&mut w, 2, y, Material::Stone);
+        put(&mut w, 4, y, Material::Stone);
+    }
     put(&mut w, 3, 6, Material::Oil);
     put(&mut w, 3, 7, Material::Stone);
     put(&mut w, 3, 2, Material::Water);
     for _ in 0..40 {
         run_tick(&mut w, &mut s, &mut rng);
     }
-    // Water must end up with no oil beneath it in the same column.
-    let mut seen_water = false;
-    for y in 0..8 {
-        match mat(&w, 3, y) {
-            Material::Water => seen_water = true,
-            Material::Oil => assert!(!seen_water, "oil under water at y={y}"),
-            _ => {}
-        }
-    }
+    let find = |m: Material| (0..8).find(|&y| mat(&w, 3, y) == m);
+    let (water, oil) = (find(Material::Water), find(Material::Oil));
+    let (water, oil) = (water.expect("water left column"), oil.expect("oil left column"));
+    assert!(water > oil, "water at y={water} should be below oil at y={oil}");
 }
 
 #[test]
