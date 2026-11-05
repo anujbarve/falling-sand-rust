@@ -207,7 +207,8 @@ impl GridState {
     }
 
     /// Copies the current buffer back to the CPU (blocking).
-    pub fn readback(&self, gpu: &Gpu) -> Vec<CellRaw> {
+    /// Returns `None` if buffer mapping or device polling fails (e.g. device lost).
+    pub fn try_readback(&self, gpu: &Gpu) -> Option<Vec<CellRaw>> {
         let size = u64::from(self.w) * u64::from(self.h) * CELL_BYTES;
         let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback"),
@@ -218,16 +219,32 @@ impl GridState {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(self.current(), 0, &staging, 0, size);
         gpu.queue.submit(Some(enc.finish()));
-        staging
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
-        gpu.device
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok2 = ok.clone();
+        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            if r.is_ok() {
+                ok2.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        if gpu
+            .device
             .poll(wgpu::PollType::wait_indefinitely())
-            .expect("poll readback");
-        let view = staging.slice(..).get_mapped_range().expect("mapped range");
+            .is_err()
+        {
+            return None;
+        }
+        if !ok.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let view = staging.slice(..).get_mapped_range().ok()?;
         let out = bytemuck::cast_slice(&view).to_vec();
         drop(view);
         staging.unmap();
-        out
+        Some(out)
+    }
+
+    /// Copies the current buffer back to the CPU (blocking).
+    pub fn readback(&self, gpu: &Gpu) -> Vec<CellRaw> {
+        self.try_readback(gpu).expect("readback failed")
     }
 }

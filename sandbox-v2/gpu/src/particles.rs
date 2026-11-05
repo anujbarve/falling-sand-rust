@@ -151,7 +151,7 @@ impl ParticlePass {
     }
 }
 
-fn read_buffer(gpu: &Gpu, src: &wgpu::Buffer, size: u64) -> Vec<u8> {
+fn try_read_buffer(gpu: &Gpu, src: &wgpu::Buffer, size: u64) -> Option<Vec<u8>> {
     let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("particle_readback"),
         size,
@@ -161,17 +161,32 @@ fn read_buffer(gpu: &Gpu, src: &wgpu::Buffer, size: u64) -> Vec<u8> {
     let mut enc = gpu.device.create_command_encoder(&Default::default());
     enc.copy_buffer_to_buffer(src, 0, &staging, 0, size);
     gpu.queue.submit(Some(enc.finish()));
-    staging
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, |r| r.expect("map particle readback"));
-    gpu.device
+    let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ok2 = ok.clone();
+    staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+        if r.is_ok() {
+            ok2.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    if gpu
+        .device
         .poll(wgpu::PollType::wait_indefinitely())
-        .expect("poll particle readback");
-    let view = staging.slice(..).get_mapped_range().expect("mapped range");
+        .is_err()
+    {
+        return None;
+    }
+    if !ok.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    let view = staging.slice(..).get_mapped_range().ok()?;
     let out = view.to_vec();
     drop(view);
     staging.unmap();
-    out
+    Some(out)
+}
+
+fn read_buffer(gpu: &Gpu, src: &wgpu::Buffer, size: u64) -> Vec<u8> {
+    try_read_buffer(gpu, src, size).expect("read particle buffer failed")
 }
 
 /// A GPU ring buffer of particles plus its persistent step pass.
@@ -296,12 +311,30 @@ impl Particles {
     }
 
     /// Copies the occupied slots back in slot order (blocking).
+    /// Returns `None` if mapping or device polling fails (e.g. device lost).
+    pub fn try_readback(&self, gpu: &Gpu) -> Option<Vec<ParticleRaw>> {
+        let size = u64::from(self.count()) * PART_BYTES;
+        if size == 0 {
+            return Some(Vec::new());
+        }
+        let bytes = try_read_buffer(gpu, &self.buf, size)?;
+        Some(bytemuck::pod_collect_to_vec(&bytes))
+    }
+
+    /// Copies the occupied slots back in slot order (blocking).
     pub fn readback(&self, gpu: &Gpu) -> Vec<ParticleRaw> {
         let size = u64::from(self.count()) * PART_BYTES;
         if size == 0 {
             return Vec::new();
         }
         bytemuck::pod_collect_to_vec(&read_buffer(gpu, &self.buf, size))
+    }
+
+    /// Particles zeroed for non-finite fields so far (debug counter;
+    /// blocking readback, intended for tests).
+    pub fn try_sanitized_count(&self, gpu: &Gpu) -> Option<u32> {
+        let bytes = try_read_buffer(gpu, &self.pass.counter, 4)?;
+        Some(bytemuck::pod_read_unaligned(&bytes))
     }
 
     /// Particles zeroed for non-finite fields so far (debug counter;

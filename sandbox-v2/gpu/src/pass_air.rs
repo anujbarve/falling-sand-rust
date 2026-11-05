@@ -10,7 +10,10 @@ use crate::air::{
 use crate::materials::WALL;
 use crate::{Gpu, GridState};
 
-const _: () = assert!(AIR_SWEEPS.is_multiple_of(2), "Jacobi result must land in p_a");
+const _: () = assert!(
+    AIR_SWEEPS.is_multiple_of(2),
+    "Jacobi result must land in p_a"
+);
 
 const ENTRY_POINTS: [&str; 7] = [
     "stage_force",
@@ -252,7 +255,7 @@ impl AirPass {
 
     /// Number of non-finite vapor, pressure or velocity values zeroed so far
     /// (debug counter; blocking readback, intended for tests).
-    pub fn sanitized_count(&self, gpu: &Gpu) -> u32 {
+    pub fn try_sanitized_count(&self, gpu: &Gpu) -> Option<u32> {
         let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("air_sanitized_readback"),
             size: 4,
@@ -262,27 +265,46 @@ impl AirPass {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(&self.sanitized, 0, &staging, 0, 4);
         gpu.queue.submit(Some(enc.finish()));
-        staging
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, |r| r.expect("map sanitized"));
-        gpu.device
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok2 = ok.clone();
+        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            if r.is_ok() {
+                ok2.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        if gpu
+            .device
             .poll(wgpu::PollType::wait_indefinitely())
-            .expect("poll sanitized");
-        let view = staging.slice(..).get_mapped_range().expect("mapped range");
+            .is_err()
+        {
+            return None;
+        }
+        if !ok.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let view = staging.slice(..).get_mapped_range().ok()?;
         let out = bytemuck::cast_slice::<u8, u32>(&view)[0];
         drop(view);
         staging.unmap();
-        out
+        Some(out)
+    }
+
+    /// Number of non-finite vapor, pressure or velocity values zeroed so far
+    /// (debug counter; blocking readback, intended for tests).
+    pub fn sanitized_count(&self, gpu: &Gpu) -> u32 {
+        self.try_sanitized_count(gpu)
+            .expect("read sanitized counter failed")
     }
 
     /// Copies the air velocity (cells/s, wind excluded) of `grid` back to the
     /// CPU (blocking). Zeros if the pass has not run on `grid` yet.
-    pub fn read_velocity(&self, gpu: &Gpu, grid: &GridState) -> Vec<[f32; 2]> {
-        let mut cache = self.cache.lock().expect("air cache poisoned");
+    /// Returns `None` if buffer mapping or device polling fails (e.g. device lost).
+    pub fn try_read_velocity(&self, gpu: &Gpu, grid: &GridState) -> Option<Vec<[f32; 2]>> {
+        let mut cache = self.cache.lock().ok()?;
         if cache.as_ref().is_none_or(|c| c.grid_id != grid.id()) {
             *cache = Some(self.build(gpu, grid));
         }
-        let vel = &cache.as_ref().expect("cache just filled").vel_a;
+        let vel = &cache.as_ref()?.vel_a;
         let size = vel.size();
         let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("air_readback"),
@@ -293,17 +315,35 @@ impl AirPass {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(vel, 0, &staging, 0, size);
         gpu.queue.submit(Some(enc.finish()));
-        staging
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, |r| r.expect("map air readback"));
-        gpu.device
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok2 = ok.clone();
+        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            if r.is_ok() {
+                ok2.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        if gpu
+            .device
             .poll(wgpu::PollType::wait_indefinitely())
-            .expect("poll air readback");
-        let view = staging.slice(..).get_mapped_range().expect("mapped range");
+            .is_err()
+        {
+            return None;
+        }
+        if !ok.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let view = staging.slice(..).get_mapped_range().ok()?;
         let out = bytemuck::cast_slice::<u8, [f32; 2]>(&view).to_vec();
         drop(view);
         staging.unmap();
-        out
+        Some(out)
+    }
+
+    /// Copies the air velocity (cells/s, wind excluded) of `grid` back to the
+    /// CPU (blocking). Zeros if the pass has not run on `grid` yet.
+    pub fn read_velocity(&self, gpu: &Gpu, grid: &GridState) -> Vec<[f32; 2]> {
+        self.try_read_velocity(gpu, grid)
+            .expect("read air velocity failed")
     }
 
     /// Overwrites the air velocity (cells/s) of `grid` with `vel`

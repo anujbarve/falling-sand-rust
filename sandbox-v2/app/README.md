@@ -45,8 +45,12 @@ not used (scene configs set the air wind in cells/s).
   silent.
 - Save/load: blocking GPU readback of cells and air velocity, written with `sandbox_core::save::save_world` (v1 text
   format, so v1 can load it). Fuel is a float timer in v2 and a `u8` in v1: it is rounded and clamped to 0..255
-  (lossy above 255 ticks); `vx`/`vy` fall state and `flags` load as 0; particles are not saved. A load of another
+  (lossy above 255 ticks: e.g. fuel 600 saves and reloads as 255; fire timers > 4.25 s or water latent heat > 255 are capped);
+  `vx`/`vy` fall state and `flags` load as 0; particles are not saved. A load of another
   size resizes the grid. A corrupt or unknown-version file shows the error and leaves the world untouched.
+- Known issues:
+  - Fuel clamp: v1 format stores `u8`, so v2 float timers above 255.0 are clamped to 255 upon save.
+  - Submits are routed through `submit_encoder` to keep submit counting deterministic.
 - NaN/inf in uploaded state (scene, load, brush) is replaced and counted (`Sim::sanitized`).
 - Device loss: a lost-device callback sets a flag; every GPU call is then skipped (no panic). The app drops the
   surface, creates a new device, surface and renderer, and `Sim::recover` rebuilds all passes and reloads the last

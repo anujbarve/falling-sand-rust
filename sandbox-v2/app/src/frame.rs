@@ -330,6 +330,20 @@ impl Sim {
         self.sanitized += self.eng.grid.upload_sanitized(&self.eng.gpu, cells);
     }
 
+    /// Submits a command buffer to the GPU queue and increments the submit counter.
+    /// Every queue submit in `Sim` must route through this helper to guarantee
+    /// consistent accounting across ticks, flushes, strokes and readbacks.
+    fn submit_encoder(&mut self, enc: wgpu::CommandEncoder) {
+        self.eng.gpu.queue.submit(Some(enc.finish()));
+        self.submits += 1;
+    }
+
+    /// Records an out-of-band GPU submission that bypassed `submit_encoder`
+    /// (for example, internal helper submissions during blocking readbacks).
+    fn submit_queued(&mut self) {
+        self.submits += 1;
+    }
+
     /// Applies queued strokes now without ticking (used while paused).
     pub fn apply_strokes(&mut self) {
         if self.strokes.is_empty() || self.is_lost() {
@@ -343,8 +357,7 @@ impl Sim {
             &e.grid,
             &self.strokes,
         );
-        e.gpu.queue.submit(Some(enc.finish()));
-        self.submits += 1;
+        self.submit_encoder(enc);
         self.strokes.clear();
     }
 
@@ -423,12 +436,11 @@ impl Sim {
         if boundary {
             e.record_readback(&mut enc);
         }
-        e.gpu.queue.submit(Some(enc.finish()));
+        self.submit_encoder(enc);
         if boundary {
-            e.start_map();
+            self.eng.start_map();
         }
         self.strokes.clear();
-        self.submits += 1;
         self.tick = self.tick.wrapping_add(1);
         self.cpu_ms = t0.elapsed().as_secs_f32() * 1000.0;
     }
@@ -488,8 +500,7 @@ impl Sim {
             .device
             .create_command_encoder(&Default::default());
         self.eng.record_readback(&mut enc);
-        self.eng.gpu.queue.submit(Some(enc.finish()));
-        self.submits += 1;
+        self.submit_encoder(enc);
         self.eng.start_map();
         let _ = self
             .eng
@@ -504,15 +515,18 @@ impl Sim {
         if self.is_lost() {
             return None;
         }
-        self.submits += 1;
-        Some(self.eng.grid.readback(&self.eng.gpu))
+        self.submit_queued();
+        self.eng.grid.try_readback(&self.eng.gpu)
     }
 
     /// Blocking snapshot of the saved state (`None` while lost).
     pub fn snapshot(&mut self) -> Option<Snapshot> {
         let cells = self.readback()?;
-        self.submits += 1;
-        let air_vel = self.eng.air.read_velocity(&self.eng.gpu, &self.eng.grid);
+        self.submit_queued();
+        let air_vel = self
+            .eng
+            .air
+            .try_read_velocity(&self.eng.gpu, &self.eng.grid)?;
         Some(Snapshot {
             w: self.eng.grid.width(),
             h: self.eng.grid.height(),

@@ -12,8 +12,8 @@ Interfaces:
 - `Gpu` requests `TIMESTAMP_QUERY` when the adapter has it (the app times the tick with it; CPU fallback otherwise).
 - `CellRaw` (32 bytes, `#[repr(C)]`, bytemuck Pod); `MAX_CELLS = 1 << 20`
 - `GridState::new(gpu, w, h) -> Result<_, GridError>` (rejects 0 or > 1024x1024 cells)
-- `GridState::{swap, upload, upload_sanitized, readback, current, other, width, height, events}`; readback reads the
-  current buffer. `upload_sanitized` replaces NaN/inf (temp -> 293 K, other floats -> 0) and returns the count.
+- `GridState::{swap, upload, upload_sanitized, readback, try_readback, current, other, width, height, events}`; readback reads the
+  current buffer. `try_readback` returns `Option<Vec<CellRaw>>` gracefully handling device loss. `upload_sanitized` replaces NaN/inf (temp -> 293 K, other floats -> 0) and returns the count.
 - `GridState::events()`: a 16-byte `array<atomic<u32>, 4>` of sound-event counters indexed by `EventKind`
   (`Flow`, `Impact`, `Crackle`, `Boom`). Passes only add; the app copies and clears it (see `app/README.md`).
 

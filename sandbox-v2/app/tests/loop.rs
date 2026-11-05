@@ -195,6 +195,7 @@ fn device_loss_recovers_and_reloads_save() {
 
 /// (f) Save/load round trip through GPU readback and the v1 text format;
 /// a corrupt file leaves the world untouched.
+/// Note on fuel: save clamps fuel to u8 (0..=255). Values above 255 lose precision.
 #[test]
 fn save_load_round_trip() {
     let Some(gpu) = gpu_or_skip() else { return };
@@ -240,6 +241,21 @@ fn save_load_round_trip() {
     assert_eq!(sim.readback().unwrap(), before);
     std::fs::write(&bad, "version 9\n").unwrap();
     assert!(sim.load(&bad).unwrap_err().contains("version"));
+}
+
+/// Pins the loss in the v1 save format: fuel > 255 (e.g. 600.0) saves as 255 and reloads as 255.
+#[test]
+fn fuel_clamp_above_255_pins_loss() {
+    let Some(gpu) = gpu_or_skip() else { return };
+    let mut sim = Sim::new(gpu, Scene::VolcanoIsland, 32, 32, SEED).unwrap();
+    let mut cells = sim.readback().unwrap();
+    cells[0].fuel = 600.0;
+    sim.load_cells(&cells);
+    let path = tmp("fuel_clamp.txt");
+    sim.save(&path).unwrap();
+    sim.load(&path).unwrap();
+    let reloaded = sim.readback().unwrap();
+    assert_eq!(reloaded[0].fuel, 255.0);
 }
 
 /// Review Focus 8: NaN/inf in uploaded float state is replaced and counted.
@@ -343,4 +359,25 @@ fn event_counts_map_to_sounds() {
     for _ in 0..1000 {
         dead.send_events(&sounds([5, 5, 5, 5]));
     }
+}
+
+/// Review Focus 6: pressing S (save) right after the device is lost, before
+/// the lost callback has fired, returns an error message instead of
+/// panicking inside a blocking readback; the sim then recovers.
+#[test]
+fn save_on_lost_device_is_an_error_not_a_panic() {
+    let Some(gpu) = gpu_or_skip() else { return };
+    let mut sim = Sim::new(gpu, Scene::VolcanoIsland, 64, 64, SEED).unwrap();
+    sim.run(6);
+    sim.gpu().device.destroy();
+    // No poll: the lost flag is not set yet, so save takes the real readback path.
+    let err = sim.save(&tmp("lost_save.txt")).unwrap_err();
+    println!("save on lost device: {err}");
+    assert!(err.starts_with("save failed"));
+    assert!(sim.snapshot().is_none());
+    let _ = sim.gpu().device.poll(wgpu::PollType::wait_indefinitely());
+    assert!(sim.is_lost());
+    let msg = sim.recover(Gpu::new_headless().unwrap(), None);
+    assert!(msg.contains("restarted"), "{msg}");
+    assert!(sim.save(&tmp("after_recover.txt")).is_ok());
 }

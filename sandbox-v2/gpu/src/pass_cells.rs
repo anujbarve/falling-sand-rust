@@ -217,7 +217,7 @@ impl CellPass {
     }
 
     /// Reads the debug counter (blocking; intended for tests).
-    pub(crate) fn counter(&self, gpu: &Gpu) -> u32 {
+    pub(crate) fn try_counter(&self, gpu: &Gpu) -> Option<u32> {
         let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("cell_counter_readback"),
             size: 4,
@@ -227,16 +227,32 @@ impl CellPass {
         let mut enc = gpu.device.create_command_encoder(&Default::default());
         enc.copy_buffer_to_buffer(&self.counter, 0, &staging, 0, 4);
         gpu.queue.submit(Some(enc.finish()));
-        staging
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, |r| r.expect("map counter"));
-        gpu.device
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok2 = ok.clone();
+        staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            if r.is_ok() {
+                ok2.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+        if gpu
+            .device
             .poll(wgpu::PollType::wait_indefinitely())
-            .expect("poll counter");
-        let view = staging.slice(..).get_mapped_range().expect("mapped range");
+            .is_err()
+        {
+            return None;
+        }
+        if !ok.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        let view = staging.slice(..).get_mapped_range().ok()?;
         let out = bytemuck::cast_slice::<u8, u32>(&view)[0];
         drop(view);
         staging.unmap();
-        out
+        Some(out)
+    }
+
+    /// Reads the debug counter (blocking; intended for tests).
+    pub(crate) fn counter(&self, gpu: &Gpu) -> u32 {
+        self.try_counter(gpu).expect("read cell counter failed")
     }
 }
