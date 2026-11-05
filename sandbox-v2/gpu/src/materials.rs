@@ -4,8 +4,9 @@
 //! kelvin, times are seconds (convert with [`crate::units::ticks`]), speeds are
 //! cells per second (1 cell = 1 cm). [`NEVER`] marks "does not apply".
 //! `terminal_cps` is used by the granular and liquid passes; `burn_s`,
-//! `evap_s`, `melt_k`, `boil_k` and `condense_k` by the thermal and fire
-//! passes ([`crate::reference_thermal`]). `density` is not consumed yet.
+//! `melt_k`, `boil_k` and `condense_k` by the thermal and fire passes
+//! ([`crate::reference_thermal`]). `density` and `evap_s` are not consumed:
+//! water boils by latent heat (`reference_thermal::LATENT_WATER`), not by time.
 
 /// "Does not apply" for times and temperatures.
 pub const NEVER: f32 = f32::INFINITY;

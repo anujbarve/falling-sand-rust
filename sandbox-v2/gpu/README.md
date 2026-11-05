@@ -97,11 +97,14 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
 - Heat capacity (relative to granite, density x specific heat): air 0.01 (real ~6e-4, raised for explicit stability), water 2.0,
   lava 2.2 (includes latent heat of crystallisation), metal 1.7, rock 1.2, stone/glass 1.0, ice 0.9, ... (table in the source).
 - Phase changes on the new temperature (`MATERIALS` thresholds, `HYST_K = 2` hysteresis): ice -> water above melt+2; water -> ice
-  below melt-2; water at boil is held at 373.15 K and becomes steam after `ticks(evap_s)` = 120 ticks of boiling; steam -> water
+  below melt-2; water boils by LATENT HEAT, not a timer: at 373.15 K it is held there and stores the heat above it,
+  `(T-373.15)*C`, in `fuel`; when `fuel >= LATENT_WATER = 1060` (2.257 MJ/kg in granite heat-capacity units) it becomes steam,
+  and below 373.15 K stored heat is released first. Water lifetime therefore depends on heat input; `evap_s` is NOT used for
+  water (no other material evaporates yet, so `evap_s` is currently unused); steam -> water
   below condense-2; lava -> rock below `LAVA_FREEZE_K = 700`; stone/rock -> lava at `melt_k`; sand -> glass at `melt_k`.
 - Moisture (ruling): a flammable cell with an orthogonal water neighbour is capped at 373.15 K, and the excess heat `C*(T-373.15)`
   is MOVED into its water neighbours (split equally), not deleted. Water warms, boils and evaporates; then the wood heats and can
-  ignite. Boiling water held at 373.15 K is the one deliberate heat sink (latent heat of vaporisation, counted by the evap timer).
+  ignite. Heat is conserved as `sum C*T + sum water fuel` (phase changes change `C` and are outside that statement).
   `IGNITE_K = 573` (wood autoignition, Babrauskas 2003); `FIRE_K = 1200` (wood flame, Drysdale); `LAVA_FREEZE_K = 700` is a GAMEPLAY
   value from v1 (real basalt solidifies near 1250 K).
 - Fire (in place): flammable (finite `burn_s`) at >= 573 K ignites: becomes Fire with `fuel = ticks(burn_s)` of the original
@@ -110,7 +113,8 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
 - Lava: `fuel` is the viscosity timer. Countdown, then two row-parity phases. Lava falls straight down every tick; it slides
   diagonally only when its timer is 0, and spreads sideways only with lava directly above it (yield stress: a 1-cell sheet
   stops). Every move swaps it with the empty cell and sets the timer to `ticks(LAVA_DELAY_S = 0.25)` = 15 ticks.
-- `CellRaw.fuel` is the per-material timer in whole ticks (Fire: burn left; Water: boiling ticks; Lava: viscosity delay).
+- `CellRaw.fuel` is the per-material timer in whole ticks (Fire: burn ticks left; Water: latent heat absorbed,
+  heat-capacity units x K; Lava: viscosity delay ticks).
   `flags` is NOT used (it is the granular per-tick stamp).
 - Sanitizing: non-finite temp -> 293 K, non-finite fuel -> 0, each counted (`ThermalPass::sanitized_count`); temp clamped to
   0..10 000 K, fuel to 0..1e6.
@@ -118,9 +122,9 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
   Measured on a mixed 64x64 scene after 300 ticks: 0 / 0 / 0 mismatches, max |dT| 1.2e-4 K of 1974 K (6e-8).
 - Measured: 3x3 lava blob at 1500 K on stone in air: all 9 cells above 700 K at 20 s (asserted >= 5), some lava above 700 K
   for > 60 s (hottest 939 K at 60 s); a single lava cell holds 16.7 s (printed, not asserted); wood burns 6.000 s then ash.
-  Wet wood (two water neighbours, flame above): water boils at 4.55 s, is gone at 6.53 s, wood ignites at 8.55 s (dry: 2.68 s).
-  So with heat conserved, wet wood DOES ignite within 10 s; the test asserts it never exceeds 373.15 K while water touches it,
-  ignites only after the water is gone, and is delayed >= 3x versus dry.
+  Wet wood (two water neighbours, long-lived flame above): water starts boiling at 4.55 s, the last water turns to steam at
+  29.3 s, the wood ignites at 31.15 s (dry: 2.68 s). Asserted: no ignition and both water cells still liquid for 10 s; wood
+  <= 373.15 K whenever water touches it.
 
 Binding budget (default limit 8 storage buffers per stage): all three passes share one layout from `pass_cells.rs`:
 1 uniform + 3 storage (src cells, dst cells, 4-byte counter). Thermal: 1 dispatch + 1 buffer copy; fire: 1 dispatch; lava: 3

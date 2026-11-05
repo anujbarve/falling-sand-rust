@@ -71,15 +71,17 @@ fn stage_thermal(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (m == ICE) {
         if (t >= ICE_MELT_K) { mat = WATER; }
     } else if (m == WATER) {
-        if (t <= WATER_FREEZE_K) {
-            mat = ICE;
-        } else if (t >= WATER_BOIL_K) {
+        let cw = bitcast<f32>(C_BITS[WATER]);
+        if (t >= WATER_BOIL_K) {
+            f += (t - WATER_BOIL_K) * cw;
             t = WATER_BOIL_K;
-            f += 1.0;
-            if (f >= EVAP_TICKS) { mat = STEAM; }
-        } else {
-            f = 0.0;
+            if (f >= LATENT_WATER) { mat = STEAM; }
+        } else if (f > 0.0) {
+            let r = min(f, (WATER_BOIL_K - t) * cw);
+            t += r * bitcast<f32>(INV_C_BITS[WATER]);
+            f -= r;
         }
+        if (mat == m && t <= WATER_FREEZE_K) { mat = ICE; }
     } else if (m == STEAM) {
         if (t < STEAM_CONDENSE_K) { mat = WATER; }
     } else if (m == LAVA) {

@@ -329,7 +329,7 @@ fn gpu_wood_burns_for_burn_s_then_ash() {
     });
 }
 
-/// Wood at (8, 10) in a stone cup, a long-lived flame (12 s of fuel) right
+/// Wood at (8, 10) in a stone cup, a long-lived flame (`TORCH_S` of fuel) right
 /// above it; `side` fills (7, 10) and (9, 10).
 fn torch_scene(side: u32) -> Scene {
     let mut s = Scene::new(16, 16);
@@ -342,7 +342,7 @@ fn torch_scene(side: u32) -> Scene {
     s.set(9, 10, side, AMBIENT_K);
     s.set(8, 10, WOOD, AMBIENT_K);
     s.set(8, 9, FIRE, 1200.0);
-    s.cells[(9 * 16 + 8) as usize].fuel = ticks(12.0) as f32;
+    s.cells[(9 * 16 + 8) as usize].fuel = ticks(TORCH_S) as f32;
     s
 }
 
@@ -368,18 +368,24 @@ fn check_wet_and_dry(who: &str, run: Runner) {
         "{who}: dry wood did not ignite in 10 s"
     );
 
-    // Wet: the cap moves the wood's excess heat into the two water cells, which
-    // boil (held at 373.15 K for ticks(evap_s)) and turn to steam. The wood
-    // must stay at or below 373.15 K while ANY water touches it.
+    // Wet: the cap moves the wood's excess heat into the two water cells,
+    // which boil and absorb latent heat until LATENT_WATER is spent.
     let wet = torch_scene(WATER);
+    let ten = ticks(10.0);
     let (mut boil, mut gone) = (None, None);
-    let mut capped = true;
+    let (mut capped, mut liquid_10s) = (true, true);
+    let mut wood_max = 0.0f32;
     let lit = ignition(&wet, |o| {
         run(&wet, &mut |t, c| {
             let (l, r) = (wet.at(c, 7, 10), wet.at(c, 9, 10));
+            let both = l.mat == WATER && r.mat == WATER;
             let touching = l.mat == WATER || r.mat == WATER;
             if touching {
                 capped &= wet.at(c, 8, 10).temp <= 373.15 && wet.at(c, 8, 10).mat == WOOD;
+            }
+            if t <= ten {
+                liquid_10s &= both;
+                wood_max = wood_max.max(wet.at(c, 8, 10).temp);
             }
             if boil.is_none() && (l.fuel > 0.0 || r.fuel > 0.0) {
                 boil = Some(t);
@@ -392,39 +398,45 @@ fn check_wet_and_dry(who: &str, run: Runner) {
     });
     let s_of = |v: Option<u32>| v.map(|t| t as f32 * DT);
     println!(
-        "{who}: wet wood: water starts boiling {:?} s, last water gone {:?} s, wood ignites {:?} s (dry {:?} s)",
+        "{who}: wet wood: max wood temp in 10 s {wood_max:.2} K; water boils from {:?} s, \
+         last water gone {:?} s, wood ignites {:?} s (run {} s; dry ignites {:?} s)",
         s_of(boil),
         s_of(gone),
         s_of(lit),
+        WET_RUN_S,
         s_of(dry_lit)
+    );
+    assert!(
+        lit.is_none_or(|t| t > ten),
+        "{who}: wet wood ignited within 10 s (tick {lit:?})"
+    );
+    assert!(
+        liquid_10s,
+        "{who}: a water neighbour boiled away within 10 s"
     );
     assert!(
         capped,
         "{who}: wet wood exceeded 373.15 K or ignited while touching water"
     );
-    let (lit, gone) = (
-        lit.expect("wet wood never ignited"),
-        gone.expect("water never left"),
-    );
-    assert!(lit > gone, "{who}: ignited before the water was gone");
-    assert!(
-        lit >= 3 * dry_lit.unwrap(),
-        "{who}: wetness barely delayed ignition"
-    );
 }
 
+/// Length of the wet-wood runs (longer than 10 s to measure water lifetime).
+const WET_RUN_S: f32 = 120.0;
+/// Fuel of the torch flame in the wet/dry scenes (outlasts the run).
+const TORCH_S: f32 = 130.0;
+
 #[test]
-fn cpu_wet_wood_cannot_ignite_while_water_touches_it() {
+fn cpu_wet_wood_does_not_ignite_in_10_s() {
     check_wet_and_dry("cpu", &|s, o| {
-        run_cpu(s, ticks(15.0), o);
+        run_cpu(s, ticks(WET_RUN_S), o);
     });
 }
 
 #[test]
-fn gpu_wet_wood_cannot_ignite_while_water_touches_it() {
+fn gpu_wet_wood_does_not_ignite_in_10_s() {
     let Some(gpu) = gpu_or_skip() else { return };
     check_wet_and_dry("gpu", &|s, o| {
-        run_gpu(&gpu, s, ticks(15.0), 1, o);
+        run_gpu(&gpu, s, ticks(WET_RUN_S), 1, o);
     });
 }
 
@@ -476,9 +488,17 @@ fn conduction_scene() -> Scene {
     s
 }
 
+/// `sum C*T` plus the latent heat stored in boiling water.
 fn energy(c: &[CellRaw]) -> f64 {
     c.iter()
-        .map(|c| f64::from(heat_capacity(c.mat)) * f64::from(c.temp))
+        .map(|c| {
+            let latent = if c.mat == WATER {
+                f64::from(c.fuel)
+            } else {
+                0.0
+            };
+            f64::from(heat_capacity(c.mat)) * f64::from(c.temp) + latent
+        })
         .sum()
 }
 
@@ -618,6 +638,9 @@ fn parity_scene() -> Scene {
     for x in 40..46 {
         s.set(x, 45, Material::Ice as u32, 250.0);
     }
+    // Hot stone in the pool: water around it boils (latent-heat path).
+    s.set(50, 52, STONE, 1400.0);
+    s.set(51, 52, STONE, 1400.0);
     // Hot wet wood in the pool: exercises the moisture heat transfer.
     for x in 34..40 {
         s.set(x, 50, WOOD, 520.0);
@@ -670,12 +693,14 @@ fn gpu_matches_reference() {
     println!(
         "parity after {n} ticks: material mismatches {mat_diff}, timer mismatches {fuel_diff}, \
          other-field mismatches {rest_diff}, max |dT| {t_diff:e} K (field max {max_t} K, ratio {:e}); \
-         cpu lava {} fire {} ash {} glass {}",
+         cpu lava {} fire {} ash {} glass {} steam {} boiling water {}",
         t_diff / max_t,
         count(&cpu, LAVA),
         count(&cpu, FIRE),
         count(&cpu, ASH),
         count(&cpu, Material::Glass as u32),
+        count(&cpu, Material::Steam as u32),
+        cpu.iter().filter(|c| c.mat == WATER && c.fuel > 0.0).count(),
     );
     assert_eq!(mat_diff, 0);
     assert_eq!(fuel_diff, 0);

@@ -19,14 +19,16 @@
 //! 3. Moisture: a flammable cell with an orthogonal Water neighbour is wet;
 //!    its temperature is capped at water's `boil_k`, and the excess heat
 //!    `C * (T - cap)` is moved (not deleted) into its water neighbours, split
-//!    equally. The water warms, boils and evaporates; once no water touches
+//!    equally. The water warms, boils and evaporates (by latent heat); once no water touches
 //!    the cell it heats normally and can ignite.
 //! 4. Phase changes on the new temperature, using `MATERIALS` thresholds:
 //!    Ice -> Water at `melt_k + HYST_K`; Water -> Ice at `melt_k - HYST_K`;
-//!    Water at or above `boil_k` is held at `boil_k` and counts boiling ticks
-//!    in `fuel`, becoming Steam after `ticks(evap_s)` (below `boil_k` the
-//!    count resets; the heat above `boil_k` is the latent heat of
-//!    vaporisation, consumed by the count: the one deliberate heat sink);
+//!    Water at or above `boil_k` is held at `boil_k` and stores the heat
+//!    above it, `(T - boil_k) * C`, in `fuel` (latent heat absorbed); when
+//!    `fuel >= LATENT_WATER` it becomes Steam. Below `boil_k`, stored latent
+//!    heat is released first (up to `boil_k`). So heat is conserved as
+//!    `sum C*T + sum water fuel`, and water's lifetime depends on its heat
+//!    input; water does NOT use `evap_s`;
 //!    Steam -> Water below `condense_k - HYST_K`;
 //!    Lava -> Rock below [`LAVA_FREEZE_K`]; Stone and Rock -> Lava at their
 //!    `melt_k`; Sand -> Glass at its `melt_k`. A change resets `fuel`.
@@ -85,6 +87,11 @@ pub const HYST_K: f32 = 2.0;
 /// Viscosity delay of lava in seconds: after a move, lava waits this long
 /// before it may slide or spread again (falling is never delayed).
 pub const LAVA_DELAY_S: f32 = 0.25;
+/// Latent heat of vaporisation of one water cell, in heat-capacity units x K
+/// (relative to granite like [`heat_capacity`]): 2.257 MJ/kg x 1000 kg/m^3 /
+/// 2.13 MJ/(m^3 K) for granite = 1060. Boiling water absorbs heat into `fuel`
+/// until this budget is spent, then becomes Steam.
+pub const LATENT_WATER: f32 = 1060.0;
 /// Number of entries in the per-material tables: every material plus [`WALL`].
 pub const TABLE_N: usize = MATERIAL_COUNT + 1;
 
@@ -210,7 +217,6 @@ struct Thresholds {
     stone_melt: f32,
     rock_melt: f32,
     sand_melt: f32,
-    evap_ticks: f32,
 }
 
 fn thresholds() -> Thresholds {
@@ -223,7 +229,6 @@ fn thresholds() -> Thresholds {
         stone_melt: m(Material::Stone).melt_k,
         rock_melt: m(Material::Rock).melt_k,
         sand_melt: m(Material::Sand).melt_k,
-        evap_ticks: ticks(m(Material::Water).evap_s) as f32,
     }
 }
 
@@ -277,7 +282,7 @@ pub(crate) fn wgsl_header() -> String {
         ("STONE_MELT_K", th.stone_melt),
         ("ROCK_MELT_K", th.rock_melt),
         ("SAND_MELT_K", th.sand_melt),
-        ("EVAP_TICKS", th.evap_ticks),
+        ("LATENT_WATER", LATENT_WATER),
         ("LAVA_DELAY", lava_delay_ticks() as f32),
         ("FIRE_TICKS", burn_ticks(FIRE) as f32),
     ] {
@@ -417,16 +422,20 @@ impl ThermalReference {
                 match m {
                     _ if m == Ice as u32 && t >= th.ice_melt => mat = Water as u32,
                     _ if m == Water as u32 => {
-                        if t <= th.water_freeze {
-                            mat = Ice as u32;
-                        } else if t >= th.water_boil {
+                        let cw = heat_capacity(WATER);
+                        if t >= th.water_boil {
+                            f += (t - th.water_boil) * cw;
                             t = th.water_boil;
-                            f += 1.0;
-                            if f >= th.evap_ticks {
+                            if f >= LATENT_WATER {
                                 mat = Steam as u32;
                             }
-                        } else {
-                            f = 0.0;
+                        } else if f > 0.0 {
+                            let r = f.min((th.water_boil - t) * cw);
+                            t += r * (1.0 / cw);
+                            f -= r;
+                        }
+                        if mat == m && t <= th.water_freeze {
+                            mat = Ice as u32;
                         }
                     }
                     _ if m == Steam as u32 && t < th.steam_condense => mat = Water as u32,
