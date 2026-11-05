@@ -2,6 +2,7 @@
 
 pub mod air;
 pub mod engine;
+pub mod fire;
 pub mod granular;
 pub mod humidity;
 pub mod liquid;

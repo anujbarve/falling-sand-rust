@@ -3,6 +3,7 @@
 
 use crate::air::AirSystem;
 use crate::engine::System;
+use crate::fire::Fire;
 use crate::granular::Granular;
 use crate::humidity::Humidity;
 use crate::liquid::Liquid;
@@ -21,7 +22,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Fire, "fire");
 stub!(Volcano, "volcano");
 stub!(Particles, "particles");
 stub!(Collisions, "collisions");
