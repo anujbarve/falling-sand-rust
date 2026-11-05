@@ -6,7 +6,8 @@
 //! step pass, the wake pass (chunk sleeping), and their sum, per step. The
 //! passes are timed with timestamp queries; without them it says so and exits.
 
-use sand::physics::{gpu::{GpuSim, PassTimes}, scene};
+use sand::audio::analysis::Analyzer;
+use sand::physics::{gpu::{GpuSim, PassTimes}, scene, SCENES};
 use std::time::{Duration, Instant};
 
 // Same grid sizes and busy scene as `bench` (bench.rs keeps its own copies).
@@ -47,6 +48,8 @@ fn measure(gpu: &mut GpuSim) -> Option<PassTimes> {
 }
 
 fn main() {
+    audio_analysis();
+    println!();
     println!("{:>11} | {:>9} | {:>9} | {:>9}", "grid", "step ms", "wake ms", "sum ms");
     println!("{}", "-".repeat(47));
     for (w, h) in SIZES {
@@ -73,4 +76,31 @@ fn main() {
             None => println!("{:>11} | no per-pass timestamps came back", format!("{w}x{h}")),
         }
     }
+}
+
+/// Audio analysis cost: `Analyzer::analyze` on a 4K world, for every scene,
+/// on the CPU (no GPU needed). Prints the mean ms per call per scene and the
+/// mean over all scenes.
+fn audio_analysis() {
+    const AUDIO_SIZE: (usize, usize) = (3840, 2160);
+    const AUDIO_CALLS: u32 = 20;
+    println!();
+    println!("Audio analysis: Analyzer::analyze on {}x{}, {} calls per scene", AUDIO_SIZE.0, AUDIO_SIZE.1, AUDIO_CALLS);
+    println!("{:>13} | {:>9}", "scene", "ms/call");
+    println!("{}", "-".repeat(26));
+    let mut total = 0.0;
+    for (i, (name, _)) in SCENES.iter().enumerate() {
+        let world = scene(i, AUDIO_SIZE.0, AUDIO_SIZE.1);
+        let mut analyzer = Analyzer::default();
+        analyzer.analyze(&world, 1.0 / 60.0, 1.0, 1.0); // warm up (first frame has no history)
+        let start = Instant::now();
+        for _ in 0..AUDIO_CALLS {
+            std::hint::black_box(analyzer.analyze(std::hint::black_box(&world), 1.0 / 60.0, 1.0, 1.0));
+        }
+        let ms = start.elapsed().as_secs_f64() * 1e3 / AUDIO_CALLS as f64;
+        total += ms;
+        println!("{:>13} | {:>9.3}", name, ms);
+    }
+    println!("{}", "-".repeat(26));
+    println!("{:>13} | {:>9.3}", "mean", total / SCENES.len() as f64);
 }
