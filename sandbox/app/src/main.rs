@@ -54,7 +54,13 @@ fn save_path() -> PathBuf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let scene = std::env::args().nth(1).and_then(|n| Scene::from_name(&n)).unwrap_or(Scene::VolcanoIsland);
+    let arg = std::env::args().nth(1);
+    let scene = arg.as_deref().and_then(Scene::from_name).unwrap_or_else(|| {
+        if let Some(a) = &arg {
+            eprintln!("unknown scene '{a}'; using volcano_island");
+        }
+        Scene::VolcanoIsland
+    });
     let (config, mut notice) = load_scene_config(scene);
 
     let mut world = build(scene, config.seed);

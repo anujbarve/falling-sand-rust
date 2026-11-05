@@ -51,6 +51,7 @@ fn soak(scene: Scene) {
     let start = solids(&w);
     let start_all = w.cells.as_slice().iter().filter(|c| c.mat != Material::Empty).count();
     let mut booms = 0;
+    let start_sand = count(&w, Material::Sand);
     let start_gp = count(&w, Material::Gunpowder);
     let t0 = Instant::now();
     for i in 0..TICKS {
@@ -72,9 +73,15 @@ fn soak(scene: Scene) {
         "SOAK {scene:?}: mean tick {mean_ms:.3} ms, solids {start} -> {end} (drift {drift:.2e}), non-empty {start_all} -> {end_all}"
     );
     if scene == Scene::ExplosionLab {
-        // Explosions may destroy mass; the loss is recorded above, only finiteness is required.
+        // Explosions destroy gunpowder and leave debris/ash: gunpowder strictly drops, non-empty cells never shrink.
+        assert!(gp < start_gp, "gunpowder {start_gp} -> {gp}");
+        assert!(end_all >= start_all, "non-empty {start_all} -> {end_all}");
         return;
     }
+    let sand = count(&w, Material::Sand);
+    let sand_drift = (sand as f64 - start_sand as f64).abs() / start_sand.max(1) as f64;
+    println!("SOAK {scene:?}: sand {start_sand} -> {sand} (drift {sand_drift:.2e})");
+    assert!(sand_drift <= 1e-3, "{scene:?}: sand drift {sand_drift}");
     assert!(drift <= 1e-3, "{scene:?}: solid drift {drift}");
 }
 
