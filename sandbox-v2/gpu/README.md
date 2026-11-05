@@ -65,9 +65,16 @@ dispatches in one encoder. (The plan's free function `dispatch_air` is a method 
   neighbours that are solid or outside use the centre value. Speeds are clamped to 60 cells/s = 1 cell/tick so a backtrace
   cannot jump a one-cell wall (holds for `dt <= DT`).
 - `wind` (cells/s) is an ambient velocity added to the transport velocity only. It is blocked by solids but does not flow around them.
-- Vapor is conserved by construction in open air (bilinear weights sum to 1); vapor entering a solid is absorbed. No rescale.
-  Test: relative leak 1.5e-7 over 2 s of wind.
+- Conservation: vapor is conserved to 1e-3 only for the uniform-wind test (measured leak 1.5e-7). Bilinear weights summing to 1
+  does not make semi-Lagrangian advection conservative in general: divergent buoyant flow is NOT a conservation test and may
+  gain or lose vapor. Vapor entering a solid is absorbed. No rescale is applied.
+- Open boundary: the grid edge is open, not a wall. Backtrace sample positions are clamped to the grid, so the edge cells
+  re-sample themselves and vapor/air can pile up or drain there. Use WALL cells for a closed box.
+- Sanitizing: NaN/Inf vapor, pressure and air velocity are zeroed at the start of each tick and counted in a debug counter
+  (`AirPass::sanitized_count`, test use only).
+- Known limits: a one-cell diagonal staircase of solids can leak vapor through its corners; the pass caches buffers for ONE
+  grid at a time (dispatching alternately on two grids resets the cached air velocity).
 - Parity is float, not bitwise (fma/contraction differ): tolerance 1e-4 (vapor), 1e-3 (pressure, velocity) of the field maximum;
-  measured 1.6e-8/1.5e-2, 2.5e-5/27.3, 7.8e-5/60.5 (abs diff / field max).
+  measured 1.6e-8/1.5e-2, 4.2e-5/27.3, 1.9e-4/60.5 (abs diff / field max).
 
 Tests: `cargo test -p sandbox_v2_gpu --test air -- --nocapture` (CPU-only tests run without a GPU; the rest skip).

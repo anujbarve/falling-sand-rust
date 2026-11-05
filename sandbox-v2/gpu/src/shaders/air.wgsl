@@ -17,6 +17,10 @@ struct Params {
 @group(0) @binding(5) var<storage, read_write> p_a: array<f32>;
 @group(0) @binding(6) var<storage, read_write> p_b: array<f32>;
 @group(0) @binding(7) var<storage, read_write> vtmp: array<f32>;
+// Debug: number of non-finite vapor/pressure/velocity values zeroed (test readback only).
+@group(0) @binding(8) var<storage, read_write> sanitized: atomic<u32>;
+
+fn bad(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) == 0x7f800000u; }
 
 fn dims() -> Dims { return Dims(prm.w, prm.h); }
 
@@ -76,6 +80,10 @@ fn stage_force(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = cell_id(gid);
     if (c.z == 0) { return; }
     let i = idx(dims(), c.x, c.y);
+    // Sanitize: NaN/Inf vapor, pressure and velocity become 0 (counted).
+    if (bad(cells[i].vapor)) { cells[i].vapor = 0.0; atomicAdd(&sanitized, 1u); }
+    if (bad(cells[i].pressure)) { cells[i].pressure = 0.0; atomicAdd(&sanitized, 1u); }
+    if (bad(vel_a[i].x) || bad(vel_a[i].y)) { vel_a[i] = vec2<f32>(0.0, 0.0); atomicAdd(&sanitized, 1u); }
     if (solid_at(i)) { vel_a[i] = vec2<f32>(0.0, 0.0); return; }
     var d = cells[i].temp - AMBIENT_K;
     d = select(0.0, d, abs(d) <= MAX_TEMP_EXCESS);

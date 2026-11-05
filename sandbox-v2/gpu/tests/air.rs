@@ -292,3 +292,58 @@ fn gpu_matches_reference() {
     );
     assert!(dv <= 1e-4 * sv && dp <= 1e-3 * sp && du <= 1e-3 * su);
 }
+
+fn hot_scene() -> Scene {
+    let mut s = Scene::new(64, 64, [0.0, 0.0]);
+    let i = s.i(32, 32);
+    s.temp[i] = 600.0;
+    s
+}
+
+#[test]
+fn cpu_hot_air_rises() {
+    let s = hot_scene();
+    let o = run_cpu(&s, 60);
+    let vy = o.vel[s.i(32, 32)][1];
+    println!("cpu: vy at hot cell {vy}");
+    assert!(vy < 0.0, "hot air must move up (-y), got {vy}");
+}
+
+#[test]
+fn gpu_hot_air_rises() {
+    let Some(gpu) = Gpu::new_headless() else {
+        eprintln!("SKIPPED: no GPU adapter available");
+        return;
+    };
+    let s = hot_scene();
+    let o = run_gpu(&gpu, &s, 60);
+    let vy = o.vel[s.i(32, 32)][1];
+    println!("gpu: vy at hot cell {vy}");
+    assert!(vy < 0.0, "hot air must move up (-y), got {vy}");
+}
+
+#[test]
+fn gpu_nan_vapor_is_zeroed_and_counted() {
+    let Some(gpu) = Gpu::new_headless() else {
+        eprintln!("SKIPPED: no GPU adapter available");
+        return;
+    };
+    let s = Scene::new(32, 32, [0.0, 0.0]);
+    let grid = GridState::new(&gpu, 32, 32).unwrap();
+    let mut cells: Vec<CellRaw> = (0..32 * 32)
+        .map(|i| CellRaw {
+            mat: s.mat[i],
+            temp: 293.0,
+            ..Default::default()
+        })
+        .collect();
+    cells[10 * 32 + 10].vapor = f32::NAN;
+    grid.upload(&gpu, &cells);
+    let air = AirPass::new(&gpu);
+    air.dispatch(&gpu, &grid, DT, [0.0, 0.0]);
+    let got = grid.readback(&gpu);
+    assert!(got
+        .iter()
+        .all(|c| c.vapor.is_finite() && c.pressure.is_finite()));
+    assert_eq!(air.sanitized_count(&gpu), 1);
+}

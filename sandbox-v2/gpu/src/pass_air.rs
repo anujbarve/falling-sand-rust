@@ -10,6 +10,8 @@ use crate::air::{
 use crate::materials::WALL;
 use crate::{Gpu, GridState};
 
+const _: () = assert!(AIR_SWEEPS % 2 == 0, "Jacobi result must land in p_a");
+
 const ENTRY_POINTS: [&str; 7] = [
     "stage_force",
     "stage_advect_vel",
@@ -38,6 +40,7 @@ pub struct AirPass {
     pipelines: Vec<wgpu::ComputePipeline>,
     layout: wgpu::BindGroupLayout,
     ubo: wgpu::Buffer,
+    sanitized: wgpu::Buffer,
     cache: Mutex<Option<Cached>>,
     dispatches: AtomicU64,
 }
@@ -88,7 +91,7 @@ impl AirPass {
             },
             count: None,
         }];
-        entries.extend((1..=7).map(storage));
+        entries.extend((1..=8).map(storage));
         let layout = gpu
             .device
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -122,10 +125,19 @@ impl AirPass {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let sanitized = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("air_sanitized"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         AirPass {
             pipelines,
             layout,
             ubo,
+            sanitized,
             cache: Mutex::new(None),
             dispatches: AtomicU64::new(0),
         }
@@ -168,6 +180,7 @@ impl AirPass {
                     e(5, &p[swap]),
                     e(6, &p[1 - swap]),
                     e(7, &vtmp),
+                    e(8, &self.sanitized),
                 ],
             })
         };
@@ -218,6 +231,31 @@ impl AirPass {
     /// `AIR_SWEEPS + 6`, whatever the grid contains).
     pub fn dispatch_count(&self) -> u64 {
         self.dispatches.load(Ordering::Relaxed)
+    }
+
+    /// Number of non-finite vapor, pressure or velocity values zeroed so far
+    /// (debug counter; blocking readback, intended for tests).
+    pub fn sanitized_count(&self, gpu: &Gpu) -> u32 {
+        let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("air_sanitized_readback"),
+            size: 4,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        enc.copy_buffer_to_buffer(&self.sanitized, 0, &staging, 0, 4);
+        gpu.queue.submit(Some(enc.finish()));
+        staging
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, |r| r.expect("map sanitized"));
+        gpu.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("poll sanitized");
+        let view = staging.slice(..).get_mapped_range().expect("mapped range");
+        let out = bytemuck::cast_slice::<u8, u32>(&view)[0];
+        drop(view);
+        staging.unmap();
+        out
     }
 
     /// Copies the air velocity (cells/s, wind excluded) of `grid` back to the

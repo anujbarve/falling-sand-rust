@@ -2,7 +2,7 @@
 //!
 //! Per tick, for every non-solid cell (solid cells hold zero velocity, zero
 //! vapor and zero pressure):
-//! 1. force: `vy -= BUOYANCY_K * (temp - AMBIENT_K) * dt` (hot air rises, +y is
+//! 1. sanitize (NaN/Inf vapor, pressure, velocity become 0), then force: `vy -= BUOYANCY_K * (temp - AMBIENT_K) * dt` (hot air rises, +y is
 //!    down), drag `v *= max(0, 1 - AIR_DRAG * dt)`, clamp `|v|` to [`MAX_AIR_CPS`].
 //! 2. advect velocity (Stam semi-Lagrangian, bilinear) by `v + wind`.
 //! 3. divergence of the advected field, then [`AIR_SWEEPS`] Jacobi sweeps of
@@ -148,8 +148,17 @@ impl AirReference {
         let vlerp = |a: [f32; 2], b: [f32; 2], t: f32| {
             [a[0] * (1.0 - t) + b[0] * t, a[1] * (1.0 - t) + b[1] * t]
         };
-        // 1. force
+        // 1. force (first sanitize: non-finite vapor, pressure, velocity -> 0)
         for i in 0..n {
+            if !self.vapor[i].is_finite() {
+                self.vapor[i] = 0.0;
+            }
+            if !self.pressure[i].is_finite() {
+                self.pressure[i] = 0.0;
+            }
+            if !(self.vel[i][0].is_finite() && self.vel[i][1].is_finite()) {
+                self.vel[i] = [0.0; 2];
+            }
             if self.solid(i) {
                 self.vel[i] = [0.0; 2];
                 continue;
