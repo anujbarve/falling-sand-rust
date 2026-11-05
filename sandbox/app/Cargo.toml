@@ -1,0 +1,11 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sandbox_core = { path = "../core" }
+sandbox_systems = { path = "../systems" }
+sandbox_render = { path = "../render" }
+sandbox_audio = { path = "../audio" }
+macroquad = { workspace = true }

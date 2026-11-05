@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["core", "systems", "render", "audio", "app"]
+
+[workspace.dependencies]
+macroquad = "=0.4.16"
+
+[profile.release]
+debug = "line-tables-only"
