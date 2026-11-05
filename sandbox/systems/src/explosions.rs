@@ -44,6 +44,17 @@ pub struct Explosions {
     pub shocks: Vec<Shock>,
 }
 
+/// Inclusive `(x0, x1, y0, y1)` square around `(cx, cy)` clipped to the grid.
+fn clip(w: &World, cx: i32, cy: i32, reach: i32) -> (i32, i32, i32, i32) {
+    let (gw, gh) = (w.cells.width() as i32, w.cells.height() as i32);
+    (
+        cx.saturating_sub(reach).max(0),
+        cx.saturating_add(reach).min(gw - 1),
+        cy.saturating_sub(reach).max(0),
+        cy.saturating_add(reach).min(gh - 1),
+    )
+}
+
 fn add_pressure(w: &mut World, x: i32, y: i32, amount: f32) {
     if let Some(i) = w.cells.index(x, y) {
         w.air.pressure[i] += amount;
@@ -56,8 +67,9 @@ fn apply_ring(w: &mut World, s: &Shock) {
     let amp = s.energy * (1.0 - s.age / SHOCK_TIME);
     let reach = ring.ceil() as i32 + 1;
     let (cx, cy) = (s.x.round() as i32, s.y.round() as i32);
-    for y in cy - reach..=cy + reach {
-        for x in cx - reach..=cx + reach {
+    let (x0, x1, y0, y1) = clip(w, cx, cy, reach);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
             let d = ((x as f32 - s.x).powi(2) + (y as f32 - s.y).powi(2)).sqrt();
             if (d - ring).abs() <= 0.5 {
                 add_pressure(w, x, y, amp);
@@ -75,8 +87,9 @@ fn detonate(w: &mut World, rng: &mut Rng, x: f32, y: f32, r: f32, energy: f32) -
     let (cx, cy) = (x.round() as i32, y.round() as i32);
     let mut debris = 0usize;
     let cap = energy.max(0.0) as usize;
-    for gy in cy - reach..=cy + reach {
-        for gx in cx - reach..=cx + reach {
+    let (x0, x1, y0, y1) = clip(w, cx, cy, reach);
+    for gy in y0..=y1 {
+        for gx in x0..=x1 {
             let (dx, dy) = (gx as f32 - x, gy as f32 - y);
             let d = (dx * dx + dy * dy).sqrt();
             let Some(cell) = w.cells.get(gx, gy).copied() else { continue };

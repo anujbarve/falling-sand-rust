@@ -78,11 +78,40 @@ fn scorches_wood_to_hot_ash() {
 }
 
 #[test]
-fn edges_do_not_panic() {
-    let mut w = World::new(20, 10);
+fn edges_do_not_panic_and_act() {
+    let (gw, gh) = (20usize, 10usize);
+    let mut w = World::new(gw, gh);
+    put(&mut w, 0, 0, Material::Sand);
     boom(&mut w, 0.0, 0.0, 8.0, 80.0);
     boom(&mut w, 19.0, 9.0, 8.0, 80.0);
+    let mut e = Explosions::default();
+    for _ in 0..30 {
+        step(&mut e, &mut w);
+    }
+    assert!(w.air.pressure[0] > 0.0);
+    assert!(w.air.pressure[gw * gh - 1] > 0.0);
+    assert_ne!(w.cells.get(0, 0).unwrap().mat, Material::Sand);
+}
+
+#[test]
+fn off_grid_blast_leaves_grid_unchanged() {
+    let mut w = World::new(20, 10);
+    put(&mut w, 3, 3, Material::Stone);
+    let before: Vec<(Material, f32)> = w.cells.as_slice().iter().map(|c| (c.mat, c.temp)).collect();
     boom(&mut w, -5.0, 50.0, 8.0, 80.0);
+    let mut e = Explosions::default();
+    for _ in 0..30 {
+        step(&mut e, &mut w);
+    }
+    let after: Vec<(Material, f32)> = w.cells.as_slice().iter().map(|c| (c.mat, c.temp)).collect();
+    assert_eq!(before, after);
+    assert!(w.air.pressure.iter().all(|&p| p == 0.0));
+}
+
+#[test]
+fn huge_radius_finishes() {
+    let mut w = World::new(20, 10);
+    boom(&mut w, 10.0, 5.0, 1e6, 80.0);
     let mut e = Explosions::default();
     for _ in 0..30 {
         step(&mut e, &mut w);
