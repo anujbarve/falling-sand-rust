@@ -1,6 +1,6 @@
 # sandbox_v2_gpu
 
-Purpose: wgpu device creation and window-surface handling for sandbox v2.
+Purpose: wgpu device creation, window-surface handling, GPU simulation passes and the renderer for sandbox v2.
 
 Interfaces:
 - `Gpu { instance, adapter, device, queue }`
@@ -160,14 +160,78 @@ the grid's current buffer, bind groups cached per grid; `readback`, `count`, `ca
   `-(v*3)/5` (restitution 0.6), places the particle at the crossing point clamped inside the previous cell and drops the rest
   of the move. No live particle ends a step inside a solid; a 1800 cells/s particle cannot tunnel through a one-cell wall.
   A live particle found outside the grid or inside a solid at the start of a step (e.g. a cell became solid under it) is
-  killed. No friction: a particle on a floor keeps its horizontal speed and micro-bounces in place vertically.
+  killed.
+- Resting contact and friction (Task 8): a particle is SUPPORTED when its fixed-point `y` is the last unit of its cell,
+  the cell below is solid or outside, and `|vy| <= REST_VY_CPS = 30` cells/s (a 30 cells/s bounce rises 0.46 cell). A
+  supported particle gets `vy = 0` (no gravity kick: the floor's normal force) and Coulomb friction `FRICTION_MU = 0.5`
+  (dry stone/granular, 0.4..0.7): `vx` moves toward 0 by `round(mu*g*1024/hz)` (8371 at 60 Hz) per step, never past 0. It
+  then moves the full `vx/hz` horizontally (fixes the Task 7 "crawl": a floor hit dropped all but ~1/170 of the move while
+  `vx` stayed large). A 300 cells/s slide stops after 89.24 cells in 37 ticks (ideal `v^2/(2 mu g)` = 91.74; the 2.7%
+  short is the kick-then-drift bias `v*dt/2`). A dropped particle bounces, rests and stays put. Off a ledge it falls.
+- `ParticleRaw::launched` hard-codes `DT = 1/60` for its half kick (documented; a `dt` argument is a carried follow-up).
 - Life: seconds directly, `life -= dt` in f32 each step after motion; `<= 0` becomes exactly 0 (dead, skipped). `+inf`
   never expires.
 - Sanitizing (Review Focus 8): non-finite `pos`, `vel` or `temp`, or NaN `life`, zeroes the particle (dead, `mat` kept) and
   increments a debug counter (`sanitized_count`).
 - Bindings: 1 uniform + 3 storage (particles rw, grid cells read-only, counter). Max storage bindings for this pass: 3 of 8.
+  The particle buffer also has VERTEX usage (the renderer draws it as instances).
+- Parity with the resting rule: `parity_300_ticks` 0 mismatches of 40 000; `friction_parity_gpu` (2000 sliders and
+  droppers, a step, 240 ticks) 0 mismatches, all 2000 at rest at the end.
 - Measured: 1 000 000 particles spawn, one step + 32 MB readback 30 ms (debug test build), bitwise equal to the reference;
   parity over 300 ticks (40 000 slots, mid-run spawn wraps the ring, NaN and expiring particles): 0 mismatches; 20 000
   particles at random speeds through an obstacle course for 300 ticks: 0 in-solid endings (CPU every tick, GPU every 10).
 
 Tests: `cargo test -p sandbox_v2_gpu --test particles -- --nocapture`.
+
+## Rendering: lighting, shading, bloom
+
+`src/render.rs` holds every look constant (documented with sources) and `Renderer`; shaders `light.wgsl`, `shade.wgsl`,
+`scene.wgsl`, `bloom.wgsl`, `composite.wgsl` (+ shared `look.wgsl`, `fullscreen.wgsl`) receive them via a generated header.
+`Renderer::new(&gpu, target_format)` builds every pipeline once; `renderer.frame(&gpu, &grid, &particles, &target_view)`
+records one encoder and one submit. Grid-sized textures and bind groups are rebuilt only when the grid changes. The
+render is NOT parity-checked: `tests/render_golden.rs` is the spec. Same input gives identical output bytes (tested).
+
+Look rules, per frame:
+1. Light (cell resolution). `emit`: blackbody emission of each cell (below). `jump`: jump flood (Rong & Tan 2006), steps
+   `LIGHT_STEPS = [16, 8, 4, 2, 1, 1]`: each cell keeps two candidate emitters, the BRIGHTEST (`luma(E) * falloff(d)`) and the
+   NEAREST, within `LIGHT_RADIUS = 32` cells. `resolve`: for both, `E * falloff(d)`, zero if a solid cell lies on the
+   straight line to the emitter (ray-marched occluder test, <= 32 steps): hard shadows. Light = max of the two and the cell's
+   own emission. `falloff(d) = clamp(1 - (d/32)^4, 0, 1)^2 / (1 + (d/LIGHT_D0)^2)`, `LIGHT_D0 = 6` (windowed inverse square,
+   Karis 2013): round glows that reach exactly 0 at the radius (an earlier max-flood gave square glows with a hard edge).
+2. Shade (cell resolution, HDR `rgba16float`). Albedo table (linear, per material) times `1 +- amp * noise`, noise =
+   `cell_hash(0, x, y, NOISE_SEED)`; lit by `AMBIENT 0.55 + LIGHT_GAIN 0.35 * light`. Liquids (water, oil, acid, lava):
+   Beer-Lambert depth darkening over up to `DEPTH_MAX = 12` liquid cells above, water absorbs `(0.30, 0.10, 0.03)` per
+   cell (red first, so deep water is blue), others 0.08; the top liquid cell gets a highlight
+   `SURF_RGB * 0.8 * max(n . SUN_DIR, 0)^16` with the surface normal from the neighbour columns' surface heights
+   (searched +-4 cells). Gases (empty, steam, smoke, fire): background gradient + `AIR_GLOW 0.04 * light`, overlaid by
+   vapor/steam/smoke with `alpha = 1 - exp(-2 * vapor)` (Steam cells >= 0.55, Smoke >= 0.75), premultiplied and blurred
+   3x3 (binomial) for soft edges, alpha varied by noise 0.85..1.15. Fire emission flickers spatially (0.6..1.0 by noise).
+3. Emission: cells hotter than `EMIT_MIN_K = 800` K (Draper point 798 K) glow; colour from a blackbody table (Mitchell
+   Charity, vendian.org, CIE 1931 2 deg, sRGB -> linear): 800 K pure red, 1000 K (1, .040, 0), 1200 K (1, .087, 0),
+   1500 K (1, .153, 0), 2000 K (1, .254, .006), 3000 K (1, .456, .147), 5000 K (1, .776, .617), 6500 K (1, .947, .982):
+   dim red -> orange -> yellow-white. Intensity `2.5 * (T/1200)^4` (Stefan-Boltzmann) faded in by smoothstep 800..1000 K,
+   capped at 32.
+4. Scene (`scene_scale = clamp(2048 / max(w, h), 1, 4)` pixels per cell, HDR). Sharpened bilinear upsample: flat inside a
+   cell, blended over `EDGE_PX = 2` pixels across each cell boundary (no hard pixel blocks). Particles: ONE instanced draw
+   of every occupied slot (cap `PARTICLE_DRAW_CAP = Particles::MAX = 1 000 000`), triangle strip quads read straight from
+   the particle buffer as a per-instance vertex buffer; dead slots collapse off screen. Cold particles: round grains of
+   radius 0.6 cell in albedo x light; hotter than 800 K: soft glow `(1-d)^2` of radius 1.5 cells + blackbody emission.
+5. Bloom: bright pass `c * max(Y - 1, 0) / Y` at quarter scene resolution (4 bilinear taps per 4x4 block), separable
+   Gaussian sigma 2 texels, radius 4 (9 taps), horizontal then vertical.
+6. Composite: `scene + 0.6 * bloom`, exposure 1, ACES filmic fit (Narkowicz 2015,
+   `x(2.51x+0.03)/(x(2.43x+0.59)+0.14)`), clamp 0..1, non-finite -> 0; non-sRGB targets get the sRGB transfer in the shader.
+
+Binding budget (storage buffers / storage textures per stage; limit 8): light emit 1/2, light jump 0/1, light resolve 1/1,
+shade 1/1, scene fill 0/0, sprites 0/0 (vertex buffer), bloom 0/0, composite 0/0. Dispatches per frame: 1 emit + 6 jump +
+1 resolve + 1 shade (compute), then 5 render passes (scene, down, blur h, blur v, composite).
+
+Measured (golden 64x64 -> 256x256 `Rgba32Float`): lava cell Y 0.901 vs surrounding air 0.273 (margin 0.628, asserted
+> 0.3); deep water rgb (0.003, 0.128, 0.508), blue-dominant; air 8 cells behind a stone wall Y 0.088 vs open air at the same
+distance 0.203 (ratio 0.434, asserted < 0.8); 0 non-finite or out-of-range components; identical bytes across repeated
+frames and fresh renderers. Ramp: 700 K no glow, 1000 / 1500 / 3000 K lava Y 0.61 / 0.90 / 1.00 with g/r 0.56 / 0.92 / 1.00.
+
+Known limits: each cell is lit by at most two emitters (brightest and nearest), so a third visible emitter can be missed;
+shadows are hard and cell-stepped (light is per cell); the scene stretches to the target (no letterbox); render time at
+1024x1024 not yet measured (Task 10).
+
+Tests: `cargo test -p sandbox_v2_gpu --test render_golden -- --nocapture`.

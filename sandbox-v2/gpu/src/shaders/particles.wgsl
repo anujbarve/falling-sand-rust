@@ -20,7 +20,7 @@ struct Params {
     hz: i32,
     grav_fp: i32,
     dt: f32,
-    pad0: u32,
+    fric_fp: i32,
     pad1: u32,
 }
 
@@ -76,7 +76,16 @@ fn step(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     var vx = vel_fp(p.vel.x);
-    var vy = clamp(vel_fp(p.vel.y) + params.grav_fp, -MAX_SPEED_FP, MAX_SPEED_FP);
+    let vy0 = vel_fp(p.vel.y);
+    let supported = (py & (FP_ONE - 1)) == FP_ONE - 1
+        && is_solid(mat_at(cx, cy + 1))
+        && abs(vy0) <= REST_VY_FP;
+    var vy = 0;
+    if supported {
+        if vx > 0 { vx = max(vx - params.fric_fp, 0); } else { vx = min(vx + params.fric_fp, 0); }
+    } else {
+        vy = clamp(vy0 + params.grav_fp, -MAX_SPEED_FP, MAX_SPEED_FP);
+    }
     let dx = vx / params.hz;
     let dy = vy / params.hz;
     let ex = (px + dx) >> FP_BITS;

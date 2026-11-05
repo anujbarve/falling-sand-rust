@@ -14,6 +14,7 @@ use crate::layout::ParticleRaw;
 use crate::materials::WALL;
 use crate::reference_particles::{
     Ring, StepConsts, FP_BITS, FP_ONE, MAX_SIDE, MAX_SPEED_CPS, MAX_SPEED_FP, REST_DEN, REST_NUM,
+    REST_VY_FP,
 };
 use crate::{Gpu, GridState};
 
@@ -39,6 +40,7 @@ fn header() -> String {
         "const WALL: u32 = {WALL}u;\nconst FP_ONE: i32 = {FP_ONE};\nconst FP_BITS: u32 = {FP_BITS}u;\n\
          const MAX_SPEED_CPS: f32 = {MAX_SPEED_CPS:?};\nconst MAX_SPEED_FP: i32 = {MAX_SPEED_FP};\n\
          const REST_NUM: i32 = {REST_NUM};\nconst REST_DEN: i32 = {REST_DEN};\n\
+         const REST_VY_FP: i32 = {REST_VY_FP};\n\
          fn is_solid(m: u32) -> bool {{ return {}; }}\n",
         solids.join(" || ")
     )
@@ -197,7 +199,9 @@ impl Particles {
         let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particles"),
             size: u64::from(cap) * PART_BYTES,
+            // VERTEX: the renderer draws particles as instanced sprites.
             usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -249,7 +253,15 @@ impl Particles {
         assert!(w <= MAX_SIDE && h <= MAX_SIDE, "grid side above {MAX_SIDE}");
         let count = self.ring.count();
         let mut params = [0u32; 8];
-        params[..6].copy_from_slice(&[count, w, h, k.hz as u32, k.grav_fp as u32, k.dt.to_bits()]);
+        params[..7].copy_from_slice(&[
+            count,
+            w,
+            h,
+            k.hz as u32,
+            k.grav_fp as u32,
+            k.dt.to_bits(),
+            k.fric_fp as u32,
+        ]);
         gpu.queue
             .write_buffer(&self.pass.ubo, 0, bytemuck::cast_slice(&params));
         self.pass.ensure_groups(gpu, &self.buf, grid);

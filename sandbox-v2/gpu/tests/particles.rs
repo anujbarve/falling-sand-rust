@@ -4,7 +4,7 @@
 
 use sandbox_v2_gpu::materials::{Material, WALL};
 use sandbox_v2_gpu::reference_particles::{
-    is_solid, ParticleReference, Ring, FP_ONE, MAX_SPEED_CPS,
+    is_solid, ParticleReference, Ring, FP_ONE, FRICTION_MU, MAX_SPEED_CPS, REST_VY_CPS,
 };
 use sandbox_v2_gpu::units::{DT, GRAVITY_CELLS};
 use sandbox_v2_gpu::{CellRaw, Gpu, GridState, ParticleRaw, Particles};
@@ -432,4 +432,118 @@ fn parity_300_ticks() {
     assert_eq!(parts.sanitized_count(&gpu), r.sanitized());
     assert_eq!(r.sanitized(), 2, "one NaN per swarm");
     assert_eq!(FP_ONE, 1024);
+}
+
+/// A 256x16 strip with a stone floor at row 10.
+fn floor_strip() -> (u32, u32, Vec<CellRaw>) {
+    let (w, h) = (256u32, 16u32);
+    let mut cells = empty_cells(w, h);
+    for y in 10..h {
+        for x in 0..w {
+            cells[(y * w + x) as usize].mat = STONE;
+        }
+    }
+    (w, h, cells)
+}
+
+// Resting contact + Coulomb friction: a particle sliding on a floor at
+// 300 cells/s travels v^2 / (2 mu g) and stops (no endless crawl).
+#[test]
+fn floor_slide_stops_after_coulomb_distance() {
+    let (w, h, cells) = floor_strip();
+    let v = 300.0f32;
+    let mut r = ParticleReference::new(1);
+    r.spawn(&[ParticleRaw {
+        pos: [20.0, 10.0 - 1.0 / FP_ONE as f32],
+        vel: [v, 0.0],
+        life: f32::INFINITY,
+        ..Default::default()
+    }]);
+    let mut stop_tick = None;
+    for t in 0..120 {
+        r.step(&cells, w, h, DT);
+        if stop_tick.is_none() && r.particles()[0].vel[0] == 0.0 {
+            stop_tick = Some(t + 1);
+        }
+    }
+    let p = r.particles()[0];
+    let slid = p.pos[0] - 20.0;
+    let ideal = v * v / (2.0 * FRICTION_MU * GRAVITY_CELLS);
+    let err = (slid - ideal).abs() / ideal;
+    eprintln!(
+        "slide {slid:.3} cells (ideal {ideal:.3}, error {:.3}%), stopped after {:?} ticks, vy {}",
+        err * 100.0,
+        stop_tick,
+        p.vel[1]
+    );
+    assert!(err < 0.04, "slide distance error {:.3}%", err * 100.0);
+    assert_eq!(p.vel, [0.0, 0.0], "at rest");
+    assert!(p.pos[1] < 10.0 && p.pos[1] >= 9.0, "on the floor");
+}
+
+// A dropped particle bounces, settles within 2 s and then stays put.
+#[test]
+fn dropped_particle_comes_to_rest() {
+    let (w, h, cells) = floor_strip();
+    let mut r = ParticleReference::new(1);
+    r.spawn(&[ParticleRaw {
+        pos: [100.5, 2.5],
+        vel: [40.0, 0.0],
+        life: f32::INFINITY,
+        ..Default::default()
+    }]);
+    for _ in 0..120 {
+        r.step(&cells, w, h, DT);
+    }
+    let rest = r.particles()[0];
+    for _ in 0..60 {
+        r.step(&cells, w, h, DT);
+    }
+    let later = r.particles()[0];
+    eprintln!(
+        "rest at {:?}, vel {:?}, rest bounce cap {REST_VY_CPS} cells/s",
+        rest.pos, rest.vel
+    );
+    assert_eq!(rest.vel, [0.0, 0.0]);
+    assert_eq!(rest.pos, later.pos, "no crawl, no micro-bounce");
+}
+
+// GPU parity of the resting rule: sliders, droppers and a ledge.
+#[test]
+fn friction_parity_gpu() {
+    let Some(gpu) = gpu_or_skip("friction_parity_gpu") else {
+        return;
+    };
+    let (w, h, mut cells) = floor_strip();
+    for x in 150..256 {
+        cells[(9 * w + x) as usize].mat = STONE; // a one-cell step up
+    }
+    let batch: Vec<ParticleRaw> = (0..2000)
+        .map(|i| ParticleRaw {
+            pos: [1.0 + (i % 140) as f32, 1.0 + (i % 7) as f32],
+            vel: [
+                (i as f32 * 7.3) % 600.0 - 300.0,
+                (i as f32 * 3.1) % 100.0 - 50.0,
+            ],
+            life: f32::INFINITY,
+            ..Default::default()
+        })
+        .collect();
+    let grid = grid_with(&gpu, w, h, &cells);
+    let mut parts = Particles::new(&gpu, 2000);
+    let mut r = ParticleReference::new(2000);
+    parts.spawn(&gpu, &batch);
+    r.spawn(&batch);
+    let mut worst = 0;
+    for t in 0..240 {
+        parts.step(&gpu, &grid, DT);
+        r.step(&cells, w, h, DT);
+        if t % 40 == 39 {
+            worst = worst.max(assert_same(&parts.readback(&gpu), r.particles()));
+        }
+    }
+    let resting = r.particles().iter().filter(|p| p.vel == [0.0, 0.0]).count();
+    eprintln!("friction parity: worst {worst} mismatches of 2000; {resting} at rest");
+    assert_eq!(worst, 0);
+    assert!(resting > 1000);
 }

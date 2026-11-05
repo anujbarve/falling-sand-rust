@@ -59,6 +59,10 @@ impl ParticleRaw {
     /// velocity is effectively the half-step velocity. This stores
     /// `vel.y - g*DT/2` (leapfrog start) so the integrated positions lie on
     /// the exact parabola of `vel` instead of one launched `g*DT/2` slower.
+    ///
+    /// Note: the half kick hard-codes the fixed tick `DT = 1/60` s. Stepping
+    /// with another `dt` (e.g. 1/120) leaves a start bias of `g*(DT-dt)/2`;
+    /// taking `dt` as an argument is a carried follow-up.
     pub fn launched(pos: [f32; 2], vel: [f32; 2], mat: u32, temp: f32, life: f32) -> ParticleRaw {
         use crate::units::{DT, GRAVITY_CELLS};
         ParticleRaw {

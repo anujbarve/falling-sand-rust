@@ -11,7 +11,9 @@
 //! changes, burning and viscous lava flow; their rule is in
 //! [`reference_thermal`]. [`Particles`] is a ring buffer of up to one
 //! million [`ParticleRaw`] stepped on the GPU; its rule is in
-//! [`reference_particles`].
+//! [`reference_particles`]. [`Renderer`] draws the grid and particles with
+//! lighting, shading, bloom and tone mapping; its look rules are in
+//! [`mod@render`].
 
 pub mod air;
 mod layout;
@@ -22,12 +24,14 @@ mod pass_cells;
 mod pass_fire;
 mod pass_granular;
 mod pass_lava;
+mod pass_light;
 mod pass_liquid;
 mod pass_rows;
 mod pass_thermal;
 pub mod reference;
 pub mod reference_particles;
 pub mod reference_thermal;
+pub mod render;
 mod state;
 mod surface;
 pub mod units;
@@ -40,6 +44,7 @@ pub use pass_granular::GranularPass;
 pub use pass_lava::LavaPass;
 pub use pass_liquid::LiquidPass;
 pub use pass_thermal::ThermalPass;
+pub use render::Renderer;
 pub use state::{GridError, GridState};
 pub use surface::WindowSurface;
 

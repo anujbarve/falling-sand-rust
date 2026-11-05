@@ -14,8 +14,15 @@
 //!    killed (buried). Otherwise it is quantized: `fp = floor(x * 1024)` (exact, so
 //!    the fixed-point cell is exactly `floor(x)`);
 //!    velocity is clamped to +-[`MAX_SPEED_CPS`] first.
-//! 3. Kick: `vy += round(g * 1024 / hz)` (g = 981 cells/s^2, `hz = 1/dt`),
-//!    clamped again. Drift: `d = v / hz` (truncating integer division).
+//! 3. Resting contact: a particle SUPPORTED by a floor (its fixed-point `y`
+//!    is the last unit of its cell, the cell below is solid or outside, and
+//!    `|vy| <= REST_VY_CPS`) gets `vy = 0` (the floor's normal force cancels
+//!    gravity) and Coulomb friction: `vx` moves toward 0 by
+//!    `round(FRICTION_MU * g * 1024 / hz)` per step, never past 0. So a slide
+//!    stops after about `v^2 / (2 mu g)` and the horizontal move is the full
+//!    `vx / hz` (no crawl). Otherwise kick: `vy += round(g * 1024 / hz)`
+//!    (g = 981 cells/s^2, `hz = 1/dt`), clamped again.
+//!    Drift: `d = v / hz` (truncating integer division).
 //! 4. Collision: the segment is walked cell by cell (grid DDA, x first on a
 //!    tie). On entering a solid cell or leaving the grid, the velocity
 //!    component on the crossed axis becomes `-(v * 3) / 5` (restitution 0.6),
@@ -44,6 +51,17 @@ pub const MAX_SPEED_FP: i32 = MAX_SPEED_CPS as i32 * FP_ONE;
 pub const REST_NUM: i32 = 3;
 /// Restitution denominator.
 pub const REST_DEN: i32 = 5;
+/// Coulomb friction coefficient for a particle resting on a floor (dry
+/// granular or stone on stone, typically 0.4 to 0.7; Engineering ToolBox
+/// "Friction and Friction Coefficients"). Deceleration `mu * g` = 490.5
+/// cells/s^2.
+pub const FRICTION_MU: f32 = 0.5;
+/// Largest vertical speed (cells/s) at which a supported particle stops
+/// bouncing and rests. A 30 cells/s bounce would rise `v^2 / 2g` = 0.46 cell,
+/// less than one cell, so resting it is invisible.
+pub const REST_VY_CPS: i32 = 30;
+/// [`REST_VY_CPS`] in fixed point.
+pub const REST_VY_FP: i32 = REST_VY_CPS * FP_ONE;
 /// Largest grid side (cells) for which fixed-point positions are exact in f32.
 pub const MAX_SIDE: u32 = 1 << (24 - FP_BITS);
 
@@ -56,6 +74,8 @@ pub struct StepConsts {
     pub grav_fp: i32,
     /// Step length in seconds (life countdown).
     pub dt: f32,
+    /// Friction speed loss per step for a resting particle, fixed-point cells/s.
+    pub fric_fp: i32,
 }
 
 impl StepConsts {
@@ -75,6 +95,9 @@ impl StepConsts {
             hz,
             grav_fp: (f64::from(GRAVITY_CELLS) * f64::from(FP_ONE) / f64::from(hz)).round() as i32,
             dt,
+            fric_fp: (f64::from(FRICTION_MU) * f64::from(GRAVITY_CELLS) * f64::from(FP_ONE)
+                / f64::from(hz))
+            .round() as i32,
         }
     }
 }
@@ -205,7 +228,20 @@ pub fn step_particle(
         return false;
     }
     let mut vx = vel_fp(p.vel[0]);
-    let mut vy = (vel_fp(p.vel[1]) + k.grav_fp).clamp(-MAX_SPEED_FP, MAX_SPEED_FP);
+    let vy0 = vel_fp(p.vel[1]);
+    let supported = (py & (FP_ONE - 1)) == FP_ONE - 1
+        && is_solid(mat(cells, w, h, cx, cy + 1))
+        && vy0.abs() <= REST_VY_FP;
+    let mut vy = if supported {
+        vx = if vx > 0 {
+            (vx - k.fric_fp).max(0)
+        } else {
+            (vx + k.fric_fp).min(0)
+        };
+        0
+    } else {
+        (vy0 + k.grav_fp).clamp(-MAX_SPEED_FP, MAX_SPEED_FP)
+    };
     let (dx, dy) = (vx / k.hz, vy / k.hz);
     let (ex, ey) = ((px + dx) >> FP_BITS, (py + dy) >> FP_BITS);
     let (ax, ay) = (dx.abs(), dy.abs());
