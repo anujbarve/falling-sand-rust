@@ -88,3 +88,34 @@ fn velocity_is_clamped() {
     run(&mut w, Vec2 { x: 100.0, y: 0.0 }, 60);
     assert!(w.air.vel.iter().all(|v| v.length() <= 4.0 + 1e-4));
 }
+
+#[test]
+fn explosion_pressure_is_conserved_finite_and_keeps_equalising_over_600_ticks() {
+    use sandbox_core::event::Event;
+    use sandbox_systems::explosions::Explosions;
+    // Pressure is conserved, so it never returns to zero; it only diffuses toward uniform (slowly:
+    // the implicit solve damps the slowest mode by ~0.2% per tick). Cost is therefore bounded not by
+    // settling but by construction: the solve does a fixed number of branch-free sweeps whatever the
+    // field holds (see the post_explosion_full_tick bench).
+    let mut w = World::new(32, 32);
+    w.events.push(Event::Explosion { x: 16.0, y: 16.0, radius: 6.0, energy: 20.0 });
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Explosions::default()), Box::new(AirSystem::default())];
+    let mut rng = Rng::new(1);
+    let spread = |w: &World| {
+        let mean = w.air.pressure.iter().sum::<f32>() / w.air.pressure.len() as f32;
+        w.air.pressure.iter().map(|p| (p - mean).abs()).fold(0.0, f32::max)
+    };
+    let (mut total, mut at_40) = (0.0, 0.0);
+    for t in 0..600 {
+        run_tick(&mut w, &mut s, &mut rng);
+        if t == 40 {
+            total = w.air.pressure.iter().sum::<f32>();
+            at_40 = spread(&w);
+            assert!(total > 1.0, "blast must have added pressure");
+        }
+    }
+    let after = w.air.pressure.iter().sum::<f32>();
+    assert!(((after - total) / total).abs() < 1e-3, "total {total} -> {after}");
+    assert!(w.air.pressure.iter().all(|p| p.is_finite()));
+    assert!(spread(&w) < 0.5 * at_40, "spread {at_40} -> {}", spread(&w));
+}

@@ -8,8 +8,8 @@ use sandbox_core::rng::Rng;
 use sandbox_core::vec2::Vec2;
 use sandbox_core::world::World;
 
-/// Gauss-Seidel sweeps of the pressure solve per tick.
-const PRESSURE_ITERS: usize = 20;
+/// Jacobi sweeps of the pressure solve per tick (even, so the result lands in the field).
+const PRESSURE_ITERS: usize = 20; // must be even (ping-pong buffers)
 /// Maximum air speed (velocity magnitude).
 const MAX_VEL: f32 = 4.0;
 /// Cells travelled per second by a velocity of 1.0.
@@ -61,6 +61,32 @@ fn clamp_vel(v: Vec2) -> Vec2 {
     if l > MAX_VEL { v * (MAX_VEL / l) } else { v }
 }
 
+/// One Jacobi sweep of the pressure diffusion: `dst = (rhs + a * sum of src neighbours) / (1 + 4a)`
+/// (walls reflect: a missing neighbour counts as the cell itself). Reads only `src`, so the
+/// interior loop has no loop-carried dependency and vectorises.
+fn jacobi_sweep(src: &[f32], dst: &mut [f32], rhs: &[f32], gw: usize, gh: usize) {
+    let a = PRESSURE_DIFFUSION;
+    let denom = 1.0 + 4.0 * a;
+    for y in 0..gh {
+        let row = |yy: usize| &src[yy * gw..(yy + 1) * gw];
+        let (cur, up, down) = (row(y), row(y.saturating_sub(1)), row((y + 1).min(gh - 1)));
+        let (rhs, out) = (&rhs[y * gw..(y + 1) * gw], &mut dst[y * gw..(y + 1) * gw]);
+        let edge = |x: usize| {
+            let (l, r) = (cur[x.saturating_sub(1)], cur[(x + 1).min(gw - 1)]);
+            (rhs[x] + a * (l + r + up[x] + down[x])) / denom
+        };
+        out[0] = edge(0);
+        out[gw - 1] = edge(gw - 1);
+        if gw > 2 {
+            let n = gw - 2;
+            for i in 0..n {
+                let s = cur[i] + cur[i + 2] + up[i + 1] + down[i + 1];
+                out[i + 1] = (rhs[i + 1] + a * s) / denom;
+            }
+        }
+    }
+}
+
 impl System for AirSystem {
     fn name(&self) -> &'static str {
         "air"
@@ -108,19 +134,10 @@ impl System for AirSystem {
         // total is exactly conserved.
         let before: f32 = w.air.pressure.iter().sum();
         let rhs = w.air.pressure.clone();
-        let a = PRESSURE_DIFFUSION;
-        for _ in 0..PRESSURE_ITERS {
-            for y in 0..gh {
-                for x in 0..gw {
-                    let i = y * gw + x;
-                    let p = &w.air.pressure;
-                    let l = p[if x > 0 { i - 1 } else { i }];
-                    let r = p[if x + 1 < gw { i + 1 } else { i }];
-                    let u = p[if y > 0 { i - gw } else { i }];
-                    let d = p[if y + 1 < gh { i + gw } else { i }];
-                    w.air.pressure[i] = (rhs[i] + a * (l + r + u + d)) / (1.0 + 4.0 * a);
-                }
-            }
+        let mut scratch = rhs.clone();
+        for _ in 0..PRESSURE_ITERS / 2 {
+            jacobi_sweep(&w.air.pressure, &mut scratch, &rhs, gw, gh);
+            jacobi_sweep(&scratch, &mut w.air.pressure, &rhs, gw, gh);
         }
         let after: f32 = w.air.pressure.iter().sum();
         if after.abs() > f32::EPSILON && before.is_finite() {

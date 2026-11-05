@@ -9,7 +9,7 @@ Simulation systems that operate on `sandbox_core` data.
 - `movers` (internal) — the shared banded sweep behind `Granular` and `Liquid`. Rows are cut into 32-row bands (two chunk rows). Phase 1 sweeps each band except its last row; phase 2 sweeps each band's last row with the first row below it, top seam to bottom seam. Randomness is a hash of (tick seed, x, y), so skipping chunks or running bands on threads cannot change it. A chunk is active when a cell in it or a neighbour chunk was swapped by this system's last sweep or had its material changed from outside since; inactive chunks are skipped. `Granular::with_chunks(false)` / `Liquid::with_chunks(false)` is the reference path: output is byte-identical to the default over 300 ticks. After the first tick the sweep allocates nothing.
 - `parallel` — `tick_parallel(world, &mut ParallelMovers, rng)`: the same banded sweeps with phase 1 on rayon (`par_chunks_mut`, safe code). Equivalent to `run_tick` over `[Granular, Liquid]`, and identical on any thread count (pick one with `ThreadPool::install`). On the 256x256 scene the serial path (0.23 ms) beats it (about 1 ms): threads pay off only on much larger grids.
 - `liquid` — `Liquid`: water, oil and acid fall, slide diagonally, then flow sideways up to 4 cells; acid is only moved, not reacted.
-- `air` — `AirSystem { wind }`: semi-Lagrangian advection of velocity and vapor, buoyancy from cell temperature, relaxation toward the background wind, pressure diffusion (Gauss-Seidel, total conserved) with a gradient force, velocity clamped to `MAX_VEL`.
+- `air` — `AirSystem { wind }`: semi-Lagrangian advection of velocity and vapor, buoyancy from cell temperature, relaxation toward the background wind, pressure diffusion (20 Jacobi sweeps, total conserved) with a gradient force, velocity clamped to `MAX_VEL`.
 - `thermal` — `Thermal`: explicit 4-neighbour heat diffusion (`CONDUCT = 0.2`, checked <= 0.25, edges insulated, total heat conserved) after applying the `PHASES` table (sand melts to glass, water boils to steam or freezes to ice, ice melts, lava cools to rock). Heat sources (lava, fire) are added by their own systems.
 - `humidity` — `Humidity`: Steam cells become 1.0 vapor (only into vapor-free cells), water above `EVAP_TEMP = 350` evaporates (5% per tick), and an empty cell below `DEW_POINT = 285` with vapor > 0.8 becomes Water, gathering 1.0 vapor from itself and its 4-neighbours. One Steam/Water cell = 1.0 vapor, so mass is conserved; vapor is clamped to [0, 1]. Rain is just `Liquid` moving the condensed water.
 - `fire` — `Fire`: consumes `Event::Ignite` (other events are left), then each Fire cell heats its 8 neighbours (+40, capped), ignites Wood/Gunpowder neighbours with chance `0.15 * (1 + wind_dot) / (1 + adjacent_water)` (`wind_dot` = neighbour direction dot normalised local wind, clamped to [-0.5, 1]), may release Smoke upward, and turns to Ash (5% Ember if no flammable neighbour remains) when its `fuel` reaches 0 (ignited cells with no fuel get 60).
@@ -24,13 +24,13 @@ Simulation systems that operate on `sandbox_core` data.
 
 ## Performance
 
-The `air` pressure solve is skipped while every pressure value is exactly 0 (the result is provably unchanged). Zero-alloc steady state is asserted for granular + liquid only (`tests/alloc.rs`); `air` still clones its velocity and vapor fields each tick.
+The `air` pressure solve is skipped while every pressure value is exactly 0 (the result is provably unchanged). Otherwise it is 20 Jacobi sweeps with no loop-carried dependency (vectorises), so its cost is fixed whatever the field holds: conserved pressure never returns to zero after an explosion, so the cost cannot rely on settling. Zero-alloc steady state is asserted for granular + liquid only (`tests/alloc.rs`); `air` still clones its velocity and vapor fields each tick.
 
 ```bash
 cargo bench -p sandbox_systems
 ```
 
-Benchmarks: `default_scene_full_tick` (all 13 systems, 256x256 with a volcano, forest and ocean strip; budget 8 ms), `granular_liquid_serial` and `granular_liquid_parallel`.
+Benchmarks: `default_scene_full_tick` (all 13 systems, 256x256 with a volcano, forest and ocean strip; budget 8 ms), `post_explosion_full_tick` (same scene 120 ticks after one radius-14, energy-80 blast), `granular_liquid_serial` and `granular_liquid_parallel`.
 
 ## Tests
 

@@ -41,11 +41,6 @@ fn default_scene() -> World {
     }
     for y in 190..N - 8 {
         for x in 6..80 {
-            put(&mut w, x, y, if y < 200 { Material::Water } else { Material::Empty });
-        }
-    }
-    for y in 200..N - 8 {
-        for x in 6..80 {
             put(&mut w, x, y, Material::Water);
         }
     }
@@ -101,6 +96,26 @@ fn bench(c: &mut Criterion) {
         w.events.clear();
     }
     c.bench_function("default_scene_full_tick", |b| {
+        b.iter(|| {
+            run_tick(&mut w, &mut s, &mut rng);
+            w.events.clear();
+        })
+    });
+
+    // One large explosion, then 120 ticks of aftermath: pressure is non-zero everywhere from here on.
+    let mut w = default_scene();
+    let mut s = systems();
+    let mut rng = Rng::new(1);
+    for _ in 0..300 {
+        run_tick(&mut w, &mut s, &mut rng);
+        w.events.clear();
+    }
+    w.events.push(Event::Explosion { x: 200.0, y: 150.0, radius: 14.0, energy: 80.0 });
+    for _ in 0..120 {
+        run_tick(&mut w, &mut s, &mut rng);
+        w.events.clear();
+    }
+    c.bench_function("post_explosion_full_tick", |b| {
         b.iter(|| {
             run_tick(&mut w, &mut s, &mut rng);
             w.events.clear();

@@ -128,3 +128,21 @@ fn matter_is_conserved_across_band_seams() {
         assert_eq!(count(&a, mat), count(&w, mat), "{mat:?}");
     }
 }
+
+#[test]
+fn a_falling_grain_never_stalls_two_ticks_at_a_band_seam() {
+    let mut w = World::new(8, 100);
+    put(&mut w, 3, 0, Material::Sand);
+    let mut rng = Rng::new(1);
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Granular::default())];
+    let row = |w: &World| (0..100).find(|&y| w.cells.get(3, y).unwrap().mat == Material::Sand).unwrap();
+    let (mut prev, mut stalled) = (0, 0);
+    for _ in 0..120 {
+        run_tick(&mut w, &mut s, &mut rng);
+        let y = row(&w);
+        stalled = if y == prev && y < 99 { stalled + 1 } else { 0 };
+        assert!(stalled <= 1, "stalled {stalled} ticks at row {y}");
+        prev = y;
+    }
+    assert_eq!(prev, 99);
+}
