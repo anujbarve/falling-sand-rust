@@ -9,6 +9,7 @@ pub mod fire;
 pub mod granular;
 pub mod humidity;
 pub mod liquid;
+pub mod ocean;
 pub mod particles;
 pub mod thermal;
 pub mod stubs;

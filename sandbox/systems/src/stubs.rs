@@ -10,6 +10,7 @@ use crate::fire::Fire;
 use crate::granular::Granular;
 use crate::humidity::Humidity;
 use crate::liquid::Liquid;
+use crate::ocean::Ocean;
 use crate::particles::Particles;
 use crate::thermal::Thermal;
 use crate::volcano::Volcano;
@@ -27,7 +28,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Ocean, "ocean");
 stub!(Lighting, "lighting");
 
 /// Returns every system in the binding execution order.
@@ -36,6 +36,6 @@ pub fn registry() -> Vec<Box<dyn System>> {
         Box::new(Granular), Box::new(Liquid), Box::new(AirSystem::default()), Box::new(Thermal),
         Box::new(Humidity), Box::new(Fire::default()), Box::new(Volcano::default()), Box::new(Particles),
         Box::new(Collisions), Box::new(Explosions::default()), Box::new(Chemistry),
-        Box::new(Ocean), Box::new(Lighting),
+        Box::new(Ocean::default()), Box::new(Lighting),
     ]
 }
