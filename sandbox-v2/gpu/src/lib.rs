@@ -5,10 +5,13 @@
 //! [`GridState`] holds the double-buffered cell grid ([`CellRaw`]).
 //! [`GranularPass`] and [`LiquidPass`] are persistent compute passes whose
 //! behaviour is defined by [`mod@reference`]. [`units`] fixes the physical scale and
-//! [`materials`] holds per-material constants.
+//! [`materials`] holds per-material constants. [`AirPass`] advects vapor and air,
+//! solves pressure and applies buoyancy; its rule is in [`air`].
 
+pub mod air;
 mod layout;
 pub mod materials;
+mod pass_air;
 mod pass_granular;
 mod pass_liquid;
 mod pass_rows;
@@ -18,6 +21,7 @@ mod surface;
 pub mod units;
 
 pub use layout::{CellRaw, MAX_CELLS};
+pub use pass_air::AirPass;
 pub use pass_granular::GranularPass;
 pub use pass_liquid::LiquidPass;
 pub use state::{GridError, GridState};
