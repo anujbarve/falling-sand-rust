@@ -1,12 +1,12 @@
 //! Behaviour tests for the `Chemistry` system. Fixed seeds are named in each test.
 
 use sandbox_core::cell::Cell;
-use sandbox_core::event::Event;
 use sandbox_core::material::Material;
 use sandbox_core::rng::Rng;
 use sandbox_core::world::World;
 use sandbox_systems::chemistry::{Chemistry, ReactionEmit, REACTIONS};
 use sandbox_systems::engine::run_tick;
+use sandbox_systems::fire::Fire;
 use sandbox_systems::System;
 
 fn put(w: &mut World, x: i32, y: i32, m: Material) {
@@ -59,7 +59,7 @@ fn acid_eats_stone_slowly_seed_7() {
         run_tick(&mut w, &mut s, &mut rng);
     }
     let removed = 3 - count(&w, Material::Stone);
-    assert!(removed <= 3, "removed {removed}");
+    assert!((1..=3).contains(&removed), "removed {removed}");
 }
 
 #[test]
@@ -70,18 +70,27 @@ fn gunpowder_line_burns_through_within_200_ticks_seed_3() {
         put(&mut w, x, 0, Material::Gunpowder);
     }
     let mut rng = Rng::new(3);
-    let mut s = systems();
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Chemistry), Box::new(Fire::default())];
     for _ in 0..200 {
         run_tick(&mut w, &mut s, &mut rng);
     }
     for x in 0..21 {
-        assert!(matches!(mat(&w, x, 0), Material::Fire | Material::Ash), "x={x}: {:?}", mat(&w, x, 0));
+        assert!(matches!(mat(&w, x, 0), Material::Fire | Material::Ash | Material::Ember), "x={x}: {:?}", mat(&w, x, 0));
     }
-    assert!(w.events.iter().any(|e| matches!(e, Event::Ignite { .. })), "Ignite events emitted");
+    assert!(count(&w, Material::Ash) >= 1, "Fire system should have burnt some cells to Ash");
 }
 
 #[test]
 fn each_cell_reacts_once_per_tick() {
+    // Acid, Metal, Acid: the shared metal can serve only one acid in a tick.
+    let mut w = World::new(3, 1);
+    put(&mut w, 0, 0, Material::Acid);
+    put(&mut w, 1, 0, Material::Metal);
+    put(&mut w, 2, 0, Material::Acid);
+    run_tick(&mut w, &mut systems(), &mut Rng::new(1));
+    assert_eq!(count(&w, Material::Acid), 1, "exactly one acid reacted");
+    assert_eq!(count(&w, Material::Steam), 1);
+
     // Fire at one end of a gunpowder line: only the adjacent cell can ignite in one tick.
     let mut w = World::new(5, 1);
     put(&mut w, 0, 0, Material::Fire);
@@ -90,11 +99,15 @@ fn each_cell_reacts_once_per_tick() {
     }
     let mut rng = Rng::new(5);
     let mut s = systems();
+    let mut grew = false;
     for _ in 0..50 {
         let before = count(&w, Material::Fire);
         run_tick(&mut w, &mut s, &mut rng);
-        assert!(count(&w, Material::Fire) <= before + 1, "chain advanced more than one cell in a tick");
+        let after = count(&w, Material::Fire);
+        assert!(after <= before + 1, "chain advanced more than one cell in a tick");
+        grew |= after > before;
     }
+    assert!(grew, "at least one reaction occurred");
 }
 
 #[test]
@@ -102,7 +115,8 @@ fn table_is_sane() {
     for (i, r) in REACTIONS.iter().enumerate() {
         assert!((0.0..=1.0).contains(&r.chance));
         for q in &REACTIONS[i + 1..] {
-            assert!(!(r.a == q.a && r.b == q.b), "duplicate pair {:?}/{:?}", r.a, r.b);
+            let same = (r.a == q.a && r.b == q.b) || (r.a == q.b && r.b == q.a);
+            assert!(!same, "duplicate pair {:?}/{:?}", r.a, r.b);
         }
     }
     assert!(REACTIONS.iter().any(|r| r.emit == Some(ReactionEmit::Ignite)));
