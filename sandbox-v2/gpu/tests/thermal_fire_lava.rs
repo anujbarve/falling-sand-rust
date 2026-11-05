@@ -4,8 +4,8 @@
 
 use sandbox_v2_gpu::materials::{Material, MATERIALS, WALL};
 use sandbox_v2_gpu::reference_thermal::{
-    edge_flux, heat_capacity, stability_number, ThermalReference, AMBIENT_K, IGNITE_K,
-    LAVA_DELAY_S, LAVA_FREEZE_K,
+    edge_flux, heat_capacity, stability_number, ThermalReference, AMBIENT_K, LAVA_DELAY_S,
+    LAVA_FREEZE_K,
 };
 use sandbox_v2_gpu::units::{ticks, DT};
 use sandbox_v2_gpu::{CellRaw, FirePass, Gpu, GridState, LavaPass, ThermalPass};
@@ -124,6 +124,7 @@ struct LavaWatch {
     hold: Option<u32>,
     half: Option<u32>,
     landed: bool,
+    hot_at_20: Option<usize>,
 }
 
 impl LavaWatch {
@@ -132,11 +133,15 @@ impl LavaWatch {
             hold: None,
             half: None,
             landed: false,
+            hot_at_20: None,
         }
     }
     fn see(&mut self, t: u32, cells: &[CellRaw]) {
         let lava: Vec<&CellRaw> = cells.iter().filter(|c| c.mat == LAVA).collect();
         let hot = lava.iter().any(|c| c.temp > LAVA_FREEZE_K);
+        if t == ticks(20.0) {
+            self.hot_at_20 = Some(lava.iter().filter(|c| c.temp > LAVA_FREEZE_K).count());
+        }
         if !hot && self.hold.is_none() {
             self.hold = Some(t);
         }
@@ -152,9 +157,10 @@ impl LavaWatch {
             None => format!("> {run_s} s"),
         };
         println!(
-            "{who}: lava hold above 700 K {}, half the blob frozen {}",
+            "{who}: lava hold above 700 K {}, half the blob frozen {}, cells above 700 K at 20 s: {:?} of 9",
             fmt(self.hold),
-            fmt(self.half)
+            fmt(self.half),
+            self.hot_at_20
         );
         assert!(self.landed, "{who}: lava never reached the stone floor");
         let need = ticks(20.0);
@@ -162,6 +168,11 @@ impl LavaWatch {
             self.hold.is_none_or(|t| t >= need),
             "{who}: lava froze below 700 K after {} s",
             fmt(self.hold)
+        );
+        let hot = self.hot_at_20.expect("run shorter than 20 s");
+        assert!(
+            hot >= 5,
+            "{who}: only {hot} of 9 lava cells above 700 K at 20 s"
         );
     }
 }
@@ -351,46 +362,69 @@ type Runner<'a> = &'a dyn Fn(&Scene, &mut dyn FnMut(u32, &[CellRaw]));
 
 fn check_wet_and_dry(who: &str, run: Runner) {
     let dry = torch_scene(EMPTY);
-    let lit = ignition(&dry, |o| run(&dry, o));
-    println!(
-        "{who}: dry wood next to a flame ignites after {:?} s",
-        lit.map(|t| t as f32 * DT)
-    );
+    let dry_lit = ignition(&dry, |o| run(&dry, o));
     assert!(
-        lit.is_some_and(|t| t <= ticks(10.0)),
+        dry_lit.is_some_and(|t| t <= ticks(10.0)),
         "{who}: dry wood did not ignite in 10 s"
     );
 
+    // Wet: the cap moves the wood's excess heat into the two water cells, which
+    // boil (held at 373.15 K for ticks(evap_s)) and turn to steam. The wood
+    // must stay at or below 373.15 K while ANY water touches it.
     let wet = torch_scene(WATER);
-    let mut wood_max = 0.0f32;
-    let mut water_left = true;
+    let (mut boil, mut gone) = (None, None);
+    let mut capped = true;
     let lit = ignition(&wet, |o| {
         run(&wet, &mut |t, c| {
-            wood_max = wood_max.max(wet.at(c, 8, 10).temp);
-            water_left &= wet.at(c, 7, 10).mat == WATER && wet.at(c, 9, 10).mat == WATER;
+            let (l, r) = (wet.at(c, 7, 10), wet.at(c, 9, 10));
+            let touching = l.mat == WATER || r.mat == WATER;
+            if touching {
+                capped &= wet.at(c, 8, 10).temp <= 373.15 && wet.at(c, 8, 10).mat == WOOD;
+            }
+            if boil.is_none() && (l.fuel > 0.0 || r.fuel > 0.0) {
+                boil = Some(t);
+            }
+            if gone.is_none() && !touching {
+                gone = Some(t);
+            }
             o(t, c);
         })
     });
+    let s_of = |v: Option<u32>| v.map(|t| t as f32 * DT);
     println!(
-        "{who}: wet wood after 10 s: ignited {:?}, max wood temp {wood_max:.1} K, both water cells left: {water_left}",
-        lit
+        "{who}: wet wood: water starts boiling {:?} s, last water gone {:?} s, wood ignites {:?} s (dry {:?} s)",
+        s_of(boil),
+        s_of(gone),
+        s_of(lit),
+        s_of(dry_lit)
     );
-    assert!(lit.is_none(), "{who}: wet wood ignited at tick {lit:?}");
-    assert!(wood_max < IGNITE_K);
+    assert!(
+        capped,
+        "{who}: wet wood exceeded 373.15 K or ignited while touching water"
+    );
+    let (lit, gone) = (
+        lit.expect("wet wood never ignited"),
+        gone.expect("water never left"),
+    );
+    assert!(lit > gone, "{who}: ignited before the water was gone");
+    assert!(
+        lit >= 3 * dry_lit.unwrap(),
+        "{who}: wetness barely delayed ignition"
+    );
 }
 
 #[test]
-fn cpu_wet_wood_does_not_ignite_in_10_s() {
+fn cpu_wet_wood_cannot_ignite_while_water_touches_it() {
     check_wet_and_dry("cpu", &|s, o| {
-        run_cpu(s, ticks(10.0), o);
+        run_cpu(s, ticks(15.0), o);
     });
 }
 
 #[test]
-fn gpu_wet_wood_does_not_ignite_in_10_s() {
+fn gpu_wet_wood_cannot_ignite_while_water_touches_it() {
     let Some(gpu) = gpu_or_skip() else { return };
     check_wet_and_dry("gpu", &|s, o| {
-        run_gpu(&gpu, s, ticks(10.0), 1, o);
+        run_gpu(&gpu, s, ticks(15.0), 1, o);
     });
 }
 
@@ -448,7 +482,67 @@ fn energy(c: &[CellRaw]) -> f64 {
         .sum()
 }
 
-fn check_conservation(s: &Scene, out: &[CellRaw], who: &str) {
+/// Wet wood (380..500 K, above the 373 K moisture cap) mixed with water
+/// (280..320 K), stone and air: exercises the cap's heat transfer into water.
+fn wet_scene() -> Scene {
+    let mut s = Scene::new(32, 32);
+    let mut h = 0x0BAD_5EEDu32;
+    for i in 0..s.cells.len() {
+        h ^= h << 13;
+        h ^= h >> 17;
+        h ^= h << 5;
+        let u = (h >> 8) as f32 / (1u32 << 24) as f32;
+        let (mat, temp) = match h % 4 {
+            0 => (WATER, 280.0 + 40.0 * u),
+            1 => (WOOD, 380.0 + 120.0 * u),
+            2 => (STONE, 280.0 + 100.0 * u),
+            _ => (EMPTY, 293.0),
+        };
+        s.cells[i] = CellRaw {
+            mat,
+            temp,
+            ..Default::default()
+        };
+    }
+    s
+}
+
+fn wet_wood_cells(s: &Scene) -> usize {
+    (0..s.cells.len())
+        .filter(|&i| {
+            let (x, y) = (i as u32 % s.w, i as u32 / s.w);
+            s.cells[i].mat == WOOD
+                && [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|&(dx, dy)| {
+                        let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                        nx >= 0
+                            && ny >= 0
+                            && nx < s.w as i32
+                            && ny < s.h as i32
+                            && s.at(&s.cells, nx as u32, ny as u32).mat == WATER
+                    })
+        })
+        .count()
+}
+
+#[test]
+fn cpu_moisture_cap_conserves_heat() {
+    let s = wet_scene();
+    println!("wet scene: {} wood cells touch water", wet_wood_cells(&s));
+    let out = run_cpu(&s, 300, |_, _| {});
+    check_conservation(&s, &out, "cpu wet", false);
+}
+
+#[test]
+fn gpu_moisture_cap_conserves_heat() {
+    let Some(gpu) = gpu_or_skip() else { return };
+    let s = wet_scene();
+    let out = run_gpu(&gpu, &s, 300, 300, |_, _| {});
+    check_conservation(&s, &out, "gpu wet", false);
+}
+
+fn check_conservation(s: &Scene, out: &[CellRaw], who: &str, max_principle: bool) {
     let (e0, e1) = (energy(&s.cells), energy(out));
     let rel = ((e1 - e0) / e0).abs();
     let lo = s.cells.iter().map(|c| c.temp).fold(f32::MAX, f32::min);
@@ -457,16 +551,21 @@ fn check_conservation(s: &Scene, out: &[CellRaw], who: &str) {
         (a.min(c.temp), b.max(c.temp))
     });
     println!("{who}: heat {e0:.3} -> {e1:.3}, relative change {rel:e}; temp range [{lo}, {hi}] -> [{olo}, {ohi}]");
-    assert!(rel < 1e-5, "{who}: heat not conserved ({rel})");
-    assert!(out.iter().zip(&s.cells).all(|(a, b)| a.mat == b.mat));
-    assert!(olo >= lo - 1e-3 && ohi <= hi + 1e-3, "{who}: new extremum");
+    assert!(rel < 1e-7, "{who}: heat not conserved ({rel})");
+    assert!(
+        out.iter().zip(&s.cells).all(|(a, b)| a.mat == b.mat),
+        "{who}: phase change"
+    );
+    if max_principle {
+        assert!(olo >= lo - 1e-3 && ohi <= hi + 1e-3, "{who}: new extremum");
+    }
 }
 
 #[test]
 fn cpu_conduction_conserves_heat() {
     let s = conduction_scene();
     let out = run_cpu(&s, 600, |_, _| {});
-    check_conservation(&s, &out, "cpu");
+    check_conservation(&s, &out, "cpu", true);
 }
 
 #[test]
@@ -474,7 +573,7 @@ fn gpu_conduction_conserves_heat() {
     let Some(gpu) = gpu_or_skip() else { return };
     let s = conduction_scene();
     let out = run_gpu(&gpu, &s, 600, 600, |_, _| {});
-    check_conservation(&s, &out, "gpu");
+    check_conservation(&s, &out, "gpu", true);
 }
 
 #[test]
@@ -498,7 +597,7 @@ fn gpu_nan_temperature_is_reset_and_counted() {
 // ---------------------------------------------------------------- parity
 
 /// Mixed 64x64 scene: stone basin, lava blob, burning wood plank, water with
-/// ice, hot metal bar, sand.
+/// ice, hot wet wood in the water, hot metal bar, sand.
 fn parity_scene() -> Scene {
     let mut s = Scene::new(64, 64);
     for x in 0..64 {
@@ -518,6 +617,10 @@ fn parity_scene() -> Scene {
     }
     for x in 40..46 {
         s.set(x, 45, Material::Ice as u32, 250.0);
+    }
+    // Hot wet wood in the pool: exercises the moisture heat transfer.
+    for x in 34..40 {
+        s.set(x, 50, WOOD, 520.0);
     }
     for y in 30..36 {
         for x in 8..14 {

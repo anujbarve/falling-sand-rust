@@ -17,13 +17,17 @@
 //!    identically from both sides with opposite sign, so heat (`sum C * T`)
 //!    leaves one cell exactly as it enters the other.
 //! 3. Moisture: a flammable cell with an orthogonal Water neighbour is wet;
-//!    its temperature is capped at water's `boil_k` (its moisture absorbs the
-//!    heat as latent heat), so it cannot reach [`IGNITE_K`] while wet.
+//!    its temperature is capped at water's `boil_k`, and the excess heat
+//!    `C * (T - cap)` is moved (not deleted) into its water neighbours, split
+//!    equally. The water warms, boils and evaporates; once no water touches
+//!    the cell it heats normally and can ignite.
 //! 4. Phase changes on the new temperature, using `MATERIALS` thresholds:
 //!    Ice -> Water at `melt_k + HYST_K`; Water -> Ice at `melt_k - HYST_K`;
 //!    Water at or above `boil_k` is held at `boil_k` and counts boiling ticks
 //!    in `fuel`, becoming Steam after `ticks(evap_s)` (below `boil_k` the
-//!    count resets); Steam -> Water below `condense_k - HYST_K`;
+//!    count resets; the heat above `boil_k` is the latent heat of
+//!    vaporisation, consumed by the count: the one deliberate heat sink);
+//!    Steam -> Water below `condense_k - HYST_K`;
 //!    Lava -> Rock below [`LAVA_FREEZE_K`]; Stone and Rock -> Lava at their
 //!    `melt_k`; Sand -> Glass at its `melt_k`. A change resets `fuel`.
 //!
@@ -67,11 +71,14 @@ pub const AMBIENT_K: f32 = crate::air::AMBIENT_K;
 pub const MAX_TEMP_K: f32 = 10_000.0;
 /// Upper clamp for the per-cell timer (`fuel`), ticks.
 pub const MAX_TIMER: f32 = 1.0e6;
-/// Ignition temperature of flammable materials, kelvin (wood autoignites near 570 K).
+/// Ignition temperature of flammable materials, kelvin. Wood autoignition is
+/// about 573 K (300 C; Babrauskas, "Ignition Handbook", 2003, wood 250-400 C).
 pub const IGNITE_K: f32 = 573.0;
-/// Temperature a burning cell holds itself at, kelvin (wood flame).
+/// Temperature a burning cell holds itself at, kelvin: a wood fire's flame
+/// is about 1100-1300 K (Drysdale, "An Introduction to Fire Dynamics", 3rd ed.).
 pub const FIRE_K: f32 = 1200.0;
-/// Lava solidifies to Rock below this, kelvin (v1's threshold).
+/// Lava solidifies to Rock below this, kelvin. A GAMEPLAY value carried over
+/// from v1: real basalt solidifies near 1250 K.
 pub const LAVA_FREEZE_K: f32 = 700.0;
 /// Hysteresis around melting and condensation points, kelvin (no flicker).
 pub const HYST_K: f32 = 2.0;
@@ -281,6 +288,7 @@ pub(crate) fn wgsl_header() -> String {
         "EDGE_BITS",
         (0..n * n).map(|i| edge_rate(i / n, i % n).to_bits()),
     );
+    s += &wgsl_bits("C_BITS", (0..n).map(|m| heat_capacity(m).to_bits()));
     s += &wgsl_bits(
         "INV_C_BITS",
         (0..n).map(|m| (1.0 / heat_capacity(m)).to_bits()),
@@ -341,6 +349,42 @@ impl ThermalReference {
         self.lava(tick, seed);
     }
 
+    /// Sanitized temperature of (`x`, `y`) after conduction, and its number
+    /// of orthogonal Water neighbours.
+    fn conducted(&self, old: &[CellRaw], x: i64, y: i64) -> (f32, u32) {
+        let c = old[self.ix(x, y)];
+        let t = san_temp(c.temp);
+        let (mut acc, mut waters) = (0.0f32, 0u32);
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            if !self.inside(x + dx, y + dy) {
+                continue;
+            }
+            let n = old[self.ix(x + dx, y + dy)];
+            acc += edge_flux(c.mat, t, n.mat, san_temp(n.temp));
+            waters += u32::from(n.mat == WATER);
+        }
+        (t + acc * (1.0 / heat_capacity(c.mat)), waters)
+    }
+
+    /// Temperature rise of the water cell (`x`, `y`) from the heat its wet
+    /// flammable neighbours shed at the moisture cap: each neighbour's excess
+    /// `C * (T - cap)` is split equally between its water neighbours.
+    fn moisture_heat(&self, old: &[CellRaw], x: i64, y: i64, cap: f32) -> f32 {
+        let mut gain = 0.0f32;
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if !self.inside(nx, ny) || !is_flammable(old[self.ix(nx, ny)].mat) {
+                continue;
+            }
+            let (tn, wn) = self.conducted(old, nx, ny);
+            if tn > cap {
+                let excess = (tn - cap) * heat_capacity(old[self.ix(nx, ny)].mat);
+                gain += excess / wn as f32;
+            }
+        }
+        gain * (1.0 / heat_capacity(WATER))
+    }
+
     /// The thermal pass: sanitize, conduct, moisture cap, phase changes.
     pub fn thermal(&mut self) {
         let th = thresholds();
@@ -356,25 +400,17 @@ impl ThermalReference {
                 if !c.fuel.is_finite() {
                     self.sanitized += 1;
                 }
-                let mut t = san_temp(c.temp);
                 let mut f = if c.fuel.is_finite() {
                     c.fuel.clamp(0.0, MAX_TIMER)
                 } else {
                     0.0
                 };
-                let mut acc = 0.0f32;
-                let mut wet = false;
-                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    if !self.inside(x + dx, y + dy) {
-                        continue;
-                    }
-                    let n = old[self.ix(x + dx, y + dy)];
-                    acc += edge_flux(m, t, n.mat, san_temp(n.temp));
-                    wet |= n.mat == WATER;
-                }
-                t += acc * (1.0 / heat_capacity(m));
-                if wet && is_flammable(m) {
+                let (mut t, waters) = self.conducted(&old, x, y);
+                if waters > 0 && is_flammable(m) {
                     t = t.min(th.water_boil);
+                }
+                if m == WATER {
+                    t += self.moisture_heat(&old, x, y, th.water_boil);
                 }
                 let mut mat = m;
                 use Material::*;

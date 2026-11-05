@@ -89,7 +89,8 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
 
 - Conduction (double-buffered): `T += sum_edges(rate(m, n) * (T_n - T)) / C(m)`, `rate = DT * 2 ka kb / (ka + kb)` (harmonic
   mean = series resistance), outside the grid and WALL are insulating. The edge flux is exactly antisymmetric, so heat
-  (`sum C*T`) is conserved; measured relative change 9e-9 (CPU) / 1e-8 (GPU) over 600 ticks. Explicit stability number 0.33 (<= 0.5, tested).
+  (`sum C*T`) is conserved; measured relative change 9e-9 (CPU) / 1e-8 (GPU) over 600 ticks, and 2.9e-8 over 300 ticks with
+  176 wet wood cells shedding heat into water (asserted < 1e-7). Explicit stability number 0.33 (<= 0.5, tested).
 - Conductivity (1/s per edge, hand-compressed scale keeping the real order): air 0.02, steam/smoke 0.02, oil/ash/gunpowder 0.04,
   sand/wood/ember 0.05, water/acid 0.08, glass 0.09, lava 0.1, rock/ice 0.15, stone 0.2, metal 0.5, fire 0.5 (flame convection and
   radiation, not conduction), WALL 0. Air conducts poorly, which is what keeps lava hot.
@@ -98,7 +99,11 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
 - Phase changes on the new temperature (`MATERIALS` thresholds, `HYST_K = 2` hysteresis): ice -> water above melt+2; water -> ice
   below melt-2; water at boil is held at 373.15 K and becomes steam after `ticks(evap_s)` = 120 ticks of boiling; steam -> water
   below condense-2; lava -> rock below `LAVA_FREEZE_K = 700`; stone/rock -> lava at `melt_k`; sand -> glass at `melt_k`.
-- Moisture: a flammable cell with an orthogonal water neighbour is capped at 373.15 K, so wet wood cannot reach `IGNITE_K = 573`.
+- Moisture (ruling): a flammable cell with an orthogonal water neighbour is capped at 373.15 K, and the excess heat `C*(T-373.15)`
+  is MOVED into its water neighbours (split equally), not deleted. Water warms, boils and evaporates; then the wood heats and can
+  ignite. Boiling water held at 373.15 K is the one deliberate heat sink (latent heat of vaporisation, counted by the evap timer).
+  `IGNITE_K = 573` (wood autoignition, Babrauskas 2003); `FIRE_K = 1200` (wood flame, Drysdale); `LAVA_FREEZE_K = 700` is a GAMEPLAY
+  value from v1 (real basalt solidifies near 1250 K).
 - Fire (in place): flammable (finite `burn_s`) at >= 573 K ignites: becomes Fire with `fuel = ticks(burn_s)` of the original
   material (wood: 360 ticks = 6 s) and holds `FIRE_K = 1200` while burning; at 0 it becomes Ash. A placed Fire with `fuel < 1`
   is a bare flame and gets `ticks(1.0)`.
@@ -111,9 +116,11 @@ are generated into the shader header as exact f32 bit patterns, so both sides us
   0..10 000 K, fuel to 0..1e6.
 - Parity: materials, timers and all non-temperature fields bitwise; temperature to 1e-4 of the field max (fma contraction).
   Measured on a mixed 64x64 scene after 300 ticks: 0 / 0 / 0 mismatches, max |dT| 1.2e-4 K of 1974 K (6e-8).
-- Measured: 3x3 lava blob at 1500 K on stone in air stays above 700 K for > 60 s (hottest 939 K at 60 s); a single lava cell
-  holds 16.7 s (not asserted: a 1 cm drop on cold granite crusts in seconds); wood burns 6.000 s then ash; wet wood next to a
-  flame stays at <= 373.1 K for 10 s, the same wood dry ignites after 2.68 s.
+- Measured: 3x3 lava blob at 1500 K on stone in air: all 9 cells above 700 K at 20 s (asserted >= 5), some lava above 700 K
+  for > 60 s (hottest 939 K at 60 s); a single lava cell holds 16.7 s (printed, not asserted); wood burns 6.000 s then ash.
+  Wet wood (two water neighbours, flame above): water boils at 4.55 s, is gone at 6.53 s, wood ignites at 8.55 s (dry: 2.68 s).
+  So with heat conserved, wet wood DOES ignite within 10 s; the test asserts it never exceeds 373.15 K while water touches it,
+  ignites only after the water is gone, and is delayed >= 3x versus dry.
 
 Binding budget (default limit 8 storage buffers per stage): all three passes share one layout from `pass_cells.rs`:
 1 uniform + 3 storage (src cells, dst cells, 4-byte counter). Thermal: 1 dispatch + 1 buffer copy; fire: 1 dispatch; lava: 3
