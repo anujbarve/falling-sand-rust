@@ -1,0 +1,35 @@
+   Compiling sand v0.1.0 (/Users/anujbarve/Documents/rusty/.claude/worktrees/perf-slice/sand)
+warning: variable does not need to be mutable
+   --> src/physics/tests.rs:789:13
+    |
+789 |         let mut at = |m: u32| {
+    |             ----^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sand` (lib test) generated 1 warning (run `cargo fix --lib -p sand --tests` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 33.66s
+     Running unittests src/lib.rs (target/release/deps/sand-97c856fca61e13bd)
+
+running 1 test
+test physics::tests::freeze::gpu_matches_cpu_while_time_slicing ... FAILED
+
+failures:
+
+---- physics::tests::freeze::gpu_matches_cpu_while_time_slicing stdout ----
+
+thread 'physics::tests::freeze::gpu_matches_cpu_while_time_slicing' (559478) panicked at src/physics/tests.rs:1105:13:
+assertion `left == right` failed: 10281 cells differ at frame 60 with slice 2
+  left: 10281
+ right: 0
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    physics::tests::freeze::gpu_matches_cpu_while_time_slicing
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 51 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `--lib`

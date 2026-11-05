@@ -1,0 +1,40 @@
+    Finished `release` profile [optimized] target(s) in 0.24s
+     Running `target/release/bench 3`
+cpu threads: 10
+gpu:         Apple M5 (Metal), timestamp queries supported
+check:       300 steps at 640x360, cpu 1 thread == cpu all cores == gpu, every cell
+
+       grid |     cells |   cpu 1 thr |     cpu all |         gpu | gpu (timestamps) |  gpu + readback | gpu vs 1 thr |  gpu vs all | gpu max speed
+----------------------------------------------------------------------------------------------------------------------------------------------------
+    640x360 |     0.23M |    9.511 ms |    2.995 ms |    0.303 ms |         0.271 ms |        0.546 ms |        31.4x |        9.9x |         2.75x
+   1280x720 |     0.92M |   33.260 ms |    8.194 ms |    1.291 ms |         1.258 ms |        1.658 ms |        25.8x |        6.3x |         0.65x
+  1920x1080 |     2.07M |   67.792 ms |   15.581 ms |    2.634 ms |         2.593 ms |        3.519 ms |        25.7x |        5.9x |         0.32x
+  2560x1440 |     3.69M |  114.594 ms |   25.311 ms |    4.266 ms |         4.210 ms |        5.818 ms |        26.9x |        5.9x |         0.20x
+  3840x2160 |     8.29M |  243.486 ms |   51.801 ms |    8.481 ms |         8.372 ms |       11.252 ms |        28.7x |        6.1x |         0.10x
+
+ms = milliseconds per simulation step (lower is better). 60 fps leaves 16.7 ms per frame.
+One step = 1/1200 s of world time, so real time needs 1200 steps per second.
+gpu max speed = how many times faster than real time the GPU alone could run (busy scene).
+
+Readback at 4K: copy the visible rectangle to the CPU (0 steps, lower is better).
+      view |   rectangle |     readback
+----------------------------------------
+ full view | 3840x2160   |     2.037 ms
+   zoom 2x | 1920x1080   |     0.935 ms
+zoom 2x costs 54% less than the full view.
+
+Zoomed view at 4K, busy scene (GPU timestamps, lower is better).
+    view |    area |     gpu (ts) |   vs full |       awake
+------------------------------------------------------------
+    full |       1 |     8.129 ms |      100% |  8160/8160 
+     1/4 |     1/4 |     3.318 ms |       41% |  2496/8160 
+    1/16 |    1/16 |     1.352 ms |       17% |   748/8160 
+
+GPU chunk sleeping (32x32 chunks). settled = scene 0 after 6000 steps.
+       grid |   busy sleep |  busy no-slp |  settled sleep | settled no-slp |   settled awake
+----------------------------------------------------------------------------------------------
+    640x360 |     0.291 ms |     0.302 ms |       0.098 ms |       0.146 ms |          98/240
+   1280x720 |     1.274 ms |     1.288 ms |       0.459 ms |       0.662 ms |         357/920
+  1920x1080 |     2.609 ms |     2.646 ms |       1.253 ms |       1.719 ms |        798/2040
+  2560x1440 |     4.241 ms |     4.381 ms |       2.388 ms |       3.249 ms |       1400/3600
+  3840x2160 |     8.396 ms |     9.168 ms |       5.665 ms |       7.458 ms |       3182/8160

@@ -1,0 +1,120 @@
+   Compiling sand v0.1.0 (/Users/anujbarve/Documents/rusty/.claude/worktrees/perf-slice/sand)
+warning: variable does not need to be mutable
+   --> src/physics/tests.rs:789:13
+    |
+789 |         let mut at = |m: u32| {
+    |             ----^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sand` (lib test) generated 1 warning (run `cargo fix --lib -p sand --tests` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 34.10s
+     Running unittests src/lib.rs (target/release/deps/sand-97c856fca61e13bd)
+
+running 52 tests
+test audio::analysis::tests::quiet_world_is_silent_and_pouring_sand_is_heard ... ok
+test physics::clock::tests::fast_forward_scales_and_respects_the_budget ... ok
+test physics::clock::tests::slow_motion_carries_fractions_over ... ok
+test physics::clock::tests::pause_and_long_frames ... ok
+test physics::clock::tests::real_time_at_60_fps_is_20_steps_a_frame ... ok
+test physics::tests::boiling_water_reads_at_most_100c ... ok
+test physics::tests::fire_requires_oxygen_and_suffocates_underground ... ok
+test physics::tests::fast_sand_deflects_down_incline ... ok
+test physics::tests::block_can_move_is_never_wrong ... ok
+test physics::tests::freeze::slice_mask_runs_visible_every_step_and_offscreen_every_k ... ok
+test audio::engine::tests::pause_fades_out ... ok
+test physics::tests::freeze::grid_change_rebuilds_visible_mask ... ok
+test audio::engine::tests::banks_are_deterministic ... ok
+test physics::tests::freeze::visible_chunks_grows_the_view_by_the_ring ... ok
+test physics::tests::freeze::unfrozen_chunk_behaves_like_it_never_stopped ... ok
+test audio::engine::tests::silence_in_silence_out_and_busy_scene_stays_bounded ... ok
+test physics::tests::free_fall_takes_the_right_time ... ok
+test physics::tests::conduction_conserves_heat ... ok
+test physics::tests::freeze::gpu_matches_cpu_while_the_mask_changes ... ok
+test physics::tests::freeze::sliced_mode_conserves_mass ... ok
+test physics::tests::freeze::view_matches_full_simulation_inside_ring_for_the_guaranteed_time ... ok
+test physics::tests::freeze::gpu_matches_cpu_while_time_slicing ... ok
+test physics::tests::gpu_gives_identical_world_to_cpu ... ok
+test physics::tests::new_materials::coal_lights_next_to_fire_and_burns ... ok
+test physics::tests::new_materials::freezer_and_jet_hold_their_temperature ... ok
+test physics::tests::ice_melts_in_hot_water ... ok
+test physics::tests::gpu_matches_cpu_on_odd_sizes ... ok
+test physics::tests::new_materials::gpu_matches_cpu_with_jets_freezers_metal_and_coal ... ok
+test physics::tests::new_materials::jet_exhaust_only_goes_where_the_nozzle_points ... ok
+test physics::tests::new_materials::jet_makes_a_dense_continuous_plume ... ok
+test physics::tests::heat_between_different_materials_is_conserved_on_average ... ok
+test physics::tests::new_materials::metal_carries_heat_much_faster_than_stone ... ok
+test physics::tests::per_pass_times_are_reported_when_timestamps_exist ... ok
+test physics::tests::phase_transition_latent_heat ... ok
+test physics::tests::pipelined_readback_and_paint_match_cpu ... ok
+test physics::tests::pipelined_readback_rect_matches_full_readback_inside_rect ... ok
+test audio::analysis::tests::skipping_inert_materials_gives_the_reference_output ... ok
+test physics::tests::new_materials::freezer_freezes_a_sealed_water_pool ... ok
+test physics::tests::oil_floats_on_water ... ok
+test physics::tests::lava_at_bottom_keeps_water_boiling_through_hot_crust ... ok
+test physics::tests::new_materials::jet_runs_forever_and_exhaust_dies_when_it_stops ... ok
+test physics::tests::steam_expansion_burst_and_obstacle_venting ... ok
+test physics::tests::lava_ignites_wood ... ok
+test physics::tests::submerged_lava_boils_surrounding_water ... ok
+test physics::tests::single_thread_and_rayon_give_identical_worlds ... ok
+test physics::tests::sand_sinks_slowly_through_water ... ok
+test physics::tests::water_heated_from_below_turns_over ... ok
+test physics::tests::gpu_gives_identical_world_to_cpu_at_odd_size ... ok
+test physics::tests::lava_in_open_air_crusts_over ... ok
+test physics::tests::sleeping_gives_identical_world_to_no_sleeping ... ok
+test physics::tests::lava_heats_water_and_turns_to_stone ... ok
+test physics::tests::settled_scene_sleeps_on_cpu_and_gpu has been running for over 60 seconds
+test physics::tests::settled_scene_sleeps_on_cpu_and_gpu ... ok
+
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 65.13s
+
+     Running unittests src/bin/bake.rs (target/release/deps/bake-68a2133f931ee22a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/bench.rs (target/release/deps/bench-e56d9e583509e9b4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/physics/main.rs (target/release/deps/physics-65a9cdfe778cad8e)
+
+running 6 tests
+test camera::tests::clamp_keeps_view_inside_grid ... ok
+test camera::tests::fit_matches_the_old_letterboxed_rect ... ok
+test camera::tests::screen_to_cell_is_none_outside_the_grid ... ok
+test camera::tests::zoom_at_keeps_the_cell_under_the_pointer ... ok
+test settings::tests::presets_round_trip_and_custom_is_detected ... ok
+test camera::tests::camera_round_trip ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/profile.rs (target/release/deps/profile-174135fb14046f30)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/release/deps/sand-d744033d49e74ee5)
+
+running 6 tests
+test tests::lava_and_water_make_stone ... ok
+test tests::emitters_run_dry ... ok
+test tests::acid_eats_through_stone ... ok
+test tests::bomb_at_edges_is_safe ... ok
+test tests::gunpowder_chain_reaction_runs_without_crashing ... ok
+test tests::every_scene_runs_without_crashing ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.35s
+
+   Doc-tests sand
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -88,3 +88,47 @@ Readback at 4K, 0 steps, so only the readback is timed. Each readback is: queue 
 Zoom 2x costs 52 percent less than the full view. The acceptance bar was at least 40 percent, so it passes.
 
 Table 1 and table 2 were re-measured in the same run, and they are not the baseline above. They are shown for reference only. The 4K "gpu + readback" column moved from 13.381 ms (baseline) to 12.452 ms here, and the CPU columns moved more (4K cpu 1 thread 438 ms in the baseline, 239 ms here). Treat those as noise from the machine state, not as a result of this change. The GPU step columns did not change in a way this change could cause (4K gpu 9.444 to 9.578 ms).
+
+## Task 9 gate
+
+Checked on 2026-11-05 against the Task 1 heat-off spike (a) above: at 1080p busy, 2.944 ms to 0.871 ms, which is about 70 percent of the step. The gate is 25 percent at 1080p, so Task 9 proceeds.
+
+Result of the Task 9 attempt (branch `worktree-agent-a3b58df5b6dc7df00`, commit `40c938a`): with `HEAT_EVERY = 2`, the first attempt failed four tests because gravity lived inside heat. Gravity now runs every step (`gravity_speed` in motion.rs and motion.wgsl), and the per-step heat rates (conduction, sky radiation, flame flux, gas relaxation, boiling release, fire/smoke ticks) are scaled by `HEAT_EVERY` on heat steps. `cargo test --release`: 45 passed, 0 failed, including the four heat-phase tests and both GPU parity tests (the GPU tests ran; they did not skip). The bench at 1080p busy is recorded under "Task 9 bench" below when it has run.
+
+## Task 9 bench
+
+One run, `cargo run --release --bin bench -- 3`, on an idle machine (no other bench or cargo process active at start). Commit `40c938a`.
+
+| case | baseline | Task 9 | change |
+|---|---|---|---|
+| 1080p busy, GPU timestamps | 2.944 ms | 2.770 ms | 5.9 percent faster |
+| 1080p busy, sleep on | 3.242 ms | 2.852 ms | 12.0 percent faster |
+
+Acceptance was at least 15 percent faster at 1080p busy. Not met, so Task 9 is not merged. The CPU and 4K columns in this run moved a lot from the baseline, so the machine state was noisy. The one run is not enough to rule out a gain near the threshold.
+
+## Task 9 step 2 (skip heat neighbour loads on heat-off steps)
+
+Commit `dfbf60b`. Per-pass profile (`cargo run --release --bin profile`, run after the change): 1080p step 2.312 ms, wake 0.006 ms. It averages heat-on and heat-off steps, so the saving is not split out.
+
+One bench run, `cargo run --release --bin bench -- 3`, idle machine:
+
+| case | baseline | step 2 | change |
+|---|---|---|---|
+| 1080p busy, GPU timestamps | 2.944 ms | 2.372 ms | 19.4 percent faster |
+| 1080p busy, sleep on | 3.242 ms | 2.882 ms | 11.1 percent faster |
+
+Acceptance (1080p busy at or below about 2.50 ms) is met on the main column. The sleep-on column does not reach 15 percent. Not merged.
+
+## Task 9 step 2: same-window A/B (dfbf60b vs parent 40c938a)
+
+Five interleaved pairs (parent, new, parent, new, ...), one bench at a time, idle machine checked before the start. 1080p busy, GPU timestamps, `bench -- 3`.
+
+| run | parent | dfbf60b | new minus parent |
+|---|---|---|---|
+| 1 | 2.554 | 2.370 | -0.184 (parent run 1 had one other bench/cargo process listed at start) |
+| 2 | 2.476 | 2.370 | -0.106 |
+| 3 | 2.371 | 2.371 | 0.000 |
+| 4 | 2.369 | 2.370 | +0.001 |
+| 5 | 2.371 | 2.383 | +0.012 |
+
+Median parent 2.371 ms, median dfbf60b 2.370 ms, median paired difference 0.000 ms. Both are under the 2.50 ms line, but the same-window parent already runs at about 2.37 ms. The 19 percent gain against the 2.944 ms baseline came from machine state, not from dfbf60b. Step 2 gives no measurable gain. Not merged.
