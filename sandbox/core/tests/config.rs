@@ -40,3 +40,21 @@ fn shipped_default_file_parses_cleanly() {
     assert!(w.is_none(), "{:?}", w);
     assert_eq!(c, Config::default());
 }
+
+#[test]
+fn non_finite_wind_falls_back_with_warning() {
+    let p = tmp("inf.toml");
+    std::fs::write(&p, "wind = inf\n").unwrap();
+    let (c, w) = load_config(&p);
+    assert_eq!(c, Config::default());
+    assert!(w.is_some());
+}
+
+#[test]
+fn out_of_range_volume_is_clamped_with_warning() {
+    let p = tmp("vol.toml");
+    std::fs::write(&p, "volume = 3.0\n").unwrap();
+    let (c, w) = load_config(&p);
+    assert_eq!(c.volume, 1.0);
+    assert!(w.is_some());
+}

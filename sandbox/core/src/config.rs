@@ -25,7 +25,7 @@ impl Default for Config {
     }
 }
 
-/// Loads the config at `path`. Never fails: a missing, unreadable or malformed
+/// Loads the config at `path`. Never fails: non-finite floats fall back to defaults and an out-of-range volume is clamped, each with a warning. A missing, unreadable or malformed
 /// file yields `Config::default()` and `Some(warning)`; success yields `None`.
 pub fn load_config(path: &Path) -> (Config, Option<String>) {
     let text = match std::fs::read_to_string(path) {
@@ -36,7 +36,18 @@ pub fn load_config(path: &Path) -> (Config, Option<String>) {
         }
     };
     match toml::from_str::<Config>(&text) {
-        Ok(c) => (c, None),
+        Ok(mut c) => {
+            if !c.wind.is_finite() || !c.volume.is_finite() {
+                let w = format!("config {}: non-finite value; using defaults", path.display());
+                return (Config::default(), Some(w));
+            }
+            if !(0.0..=1.0).contains(&c.volume) {
+                c.volume = c.volume.clamp(0.0, 1.0);
+                let w = format!("config {}: volume out of 0..1; clamped", path.display());
+                return (c, Some(w));
+            }
+            (c, None)
+        }
         Err(e) => {
             let w = format!("config {}: invalid ({e}); using defaults", path.display());
             (Config::default(), Some(w))

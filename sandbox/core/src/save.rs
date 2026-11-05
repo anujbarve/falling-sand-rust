@@ -12,6 +12,8 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 const VERSION: u32 = 1;
+/// Largest accepted width or height, in cells.
+const MAX_DIM: usize = 4096;
 const MAX_CELLS: usize = 1 << 24;
 
 const MATERIALS: [Material; 18] = [
@@ -91,7 +93,16 @@ fn num<T: std::str::FromStr>(tok: Option<&str>, what: &str, line: usize) -> Resu
         .map_err(|_| bad(format!("line {line}: bad {what}")))
 }
 
-/// Reads a world saved by [`save_world`]. Unknown versions give
+fn fnum(tok: Option<&str>, what: &str, line: usize) -> Result<f32, SaveError> {
+    let v: f32 = num(tok, what, line)?;
+    if v.is_finite() {
+        Ok(v)
+    } else {
+        Err(bad(format!("line {line}: non-finite {what}")))
+    }
+}
+
+/// Reads a world saved by [`save_world`]. Width and height must each be 1..=4096 and all floats finite. Unknown versions give
 /// `BadVersion`; truncated or malformed content gives `Corrupt`; never panics.
 pub fn load_world(path: &Path) -> Result<World, SaveError> {
     let text = std::fs::read_to_string(path).map_err(SaveError::Io)?;
@@ -113,7 +124,13 @@ pub fn load_world(path: &Path) -> Result<World, SaveError> {
         return Err(bad("line 2: expected `size W H`"));
     }
     let (w, h): (usize, usize) = (num(t.next(), "width", n)?, num(t.next(), "height", n)?);
-    let cells = w.checked_mul(h).filter(|&c| c <= MAX_CELLS).ok_or_else(|| bad("size too large"))?;
+    if w == 0 || h == 0 || w > MAX_DIM || h > MAX_DIM {
+        return Err(bad(format!("line {n}: size must be 1..={MAX_DIM} per side")));
+    }
+    let cells = w * h;
+    if cells > MAX_CELLS {
+        return Err(bad("size too large"));
+    }
 
     let mut world = World::new(w, h);
     for c in world.cells.as_mut_slice().iter_mut() {
@@ -121,15 +138,15 @@ pub fn load_world(path: &Path) -> Result<World, SaveError> {
         let mut t = l.split_whitespace();
         let m: usize = num(t.next(), "material", n)?;
         c.mat = *MATERIALS.get(m).ok_or_else(|| bad(format!("line {n}: unknown material {m}")))?;
-        c.temp = num(t.next(), "temp", n)?;
+        c.temp = fnum(t.next(), "temp", n)?;
         c.fuel = num(t.next(), "fuel", n)?;
     }
     for i in 0..cells {
         let (n, l) = lines.next().ok_or_else(|| bad("truncated in air data"))?;
         let mut t = l.split_whitespace();
-        world.air.vel[i] = Vec2 { x: num(t.next(), "vx", n)?, y: num(t.next(), "vy", n)? };
-        world.air.pressure[i] = num(t.next(), "pressure", n)?;
-        world.air.vapor[i] = num(t.next(), "vapor", n)?;
+        world.air.vel[i] = Vec2 { x: fnum(t.next(), "vx", n)?, y: fnum(t.next(), "vy", n)? };
+        world.air.pressure[i] = fnum(t.next(), "pressure", n)?;
+        world.air.vapor[i] = fnum(t.next(), "vapor", n)?;
     }
     Ok(world)
 }

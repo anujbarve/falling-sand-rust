@@ -85,3 +85,38 @@ fn failed_save_leaves_existing_file_unchanged() {
     assert_eq!(std::fs::read(&p).unwrap(), before);
     std::fs::remove_dir(&t).unwrap();
 }
+
+#[test]
+fn bad_sizes_are_corrupt() {
+    let p = tmp("sizes.sav");
+    for s in ["1000000000000 0", "0 10", "4097 1", "10 0"] {
+        std::fs::write(&p, format!("version 1\nsize {s}\n")).unwrap();
+        assert!(matches!(load_world(&p), Err(SaveError::Corrupt(_))), "{s}");
+    }
+}
+
+#[test]
+fn non_finite_values_are_corrupt() {
+    let p = tmp("nan.sav");
+    std::fs::write(&p, "version 1\nsize 1 1\n0 NaN 0\n0 0 0 0\n").unwrap();
+    assert!(matches!(load_world(&p), Err(SaveError::Corrupt(_))));
+    std::fs::write(&p, "version 1\nsize 1 1\n0 293 0\n0 inf 0 0\n").unwrap();
+    assert!(matches!(load_world(&p), Err(SaveError::Corrupt(_))));
+}
+
+#[test]
+fn every_material_round_trips() {
+    use Material::*;
+    let all = [Empty, Sand, Water, Oil, Stone, Rock, Wood, Ash, Metal, Glass, Lava, Acid,
+        Gunpowder, Ice, Fire, Steam, Smoke, Ember];
+    let mut w = World::new(all.len(), 1);
+    for (i, m) in all.iter().enumerate() {
+        w.cells.as_mut_slice()[i].mat = *m;
+    }
+    let p = tmp("mats.sav");
+    save_world(&w, &p).unwrap();
+    let r = load_world(&p).unwrap();
+    for (i, m) in all.iter().enumerate() {
+        assert_eq!(r.cells.as_slice()[i].mat, *m);
+    }
+}
