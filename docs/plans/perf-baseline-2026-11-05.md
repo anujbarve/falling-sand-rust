@@ -63,3 +63,12 @@ Reading the spikes:
 - **(a) Heat pass.** About 70 percent of the 1080p step (2.94 to 0.87 ms) and about 42 percent of the 4K step (9.25 to 5.40 ms) is heat. This is the ceiling for Task 9. The world changes when heat is off, so the awake chunk counts are not directly comparable. This is an upper bound, not a prediction.
 - **(b) RNG.** Removes about 0.38 ms at 1080p (13 percent) and about 0.82 ms at 4K (9 percent). This is the ceiling for the RNG part of Task 10.
 - **(c) Workgroup 8.** About 9 percent faster at 1080p and 2 percent at 4K, both within the run-to-run noise from one run. No clear win, so keep 16, as the plan says. The check still passed.
+
+## Audio analysis
+
+Task 11. `Analyzer::analyze` on a 3840x2160 world, every scene in `SCENES`, CPU only (`cargo run --release --bin profile`, first section). Gate: 1 ms. Measured far above it, so the CPU change was made.
+
+- Before (profile, one run, machine load about 15 to 40, so noisy): mean 17.7 ms per call over the six scenes (layers 29.7, lava + water 9.8, fire 6.8, ice 10.7, benchmark 33.4, jet engine 16.0).
+- After the change, the same run was not repeatable under load, so the A/B used one process: each scene timed on the old body (test-only reference) and the new code, interleaved, best of 12 calls. Old mean 13.9 ms, new mean 12.3 ms (layers 28.8 vs 29.9, lava + water 9.5 vs 7.6, fire 6.6 vs 4.9, ice 10.5 vs 7.4, benchmark 23.3 vs 19.1, jet engine 4.6 vs 4.9).
+- Change: cells whose material has no event kind are skipped before any other work, and the cell below is read only for sand and water. Output is identical (test `skipping_inert_materials_gives_the_reference_output`).
+- Still well over 1 ms. The dense scenes are mostly event materials (sand, water, fire), so skipping inert cells gains little. The next step would be a GPU reduction (Task 11 step 2, not done here).
