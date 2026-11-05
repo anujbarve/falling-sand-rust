@@ -63,3 +63,19 @@ Reading the spikes:
 - **(a) Heat pass.** About 70 percent of the 1080p step (2.94 to 0.87 ms) and about 42 percent of the 4K step (9.25 to 5.40 ms) is heat. This is the ceiling for Task 9. The world changes when heat is off, so the awake chunk counts are not directly comparable. This is an upper bound, not a prediction.
 - **(b) RNG.** Removes about 0.38 ms at 1080p (13 percent) and about 0.82 ms at 4K (9 percent). This is the ceiling for the RNG part of Task 10.
 - **(c) Workgroup 8.** About 9 percent faster at 1080p and 2 percent at 4K, both within the run-to-run noise from one run. No clear win, so keep 16, as the plan says. The check still passed.
+
+## Readback rectangle (Task 6)
+
+**Machine and command:** same as above, `cargo run --release --bin bench -- 3`, one run (the brief asked for one run after the tests passed). No other bench or cargo run was active when it started.
+**Code:** this branch, after the readback rectangle change (`GpuSim::step_and_readback_rect`, packing pass `pack_rect` in `wgsl/readback.wgsl`).
+
+Readback at 4K, 0 steps, so only the readback is timed. Each readback is: queue the copy (packed first when the rectangle is not the whole grid), wait for the GPU, then `latest` copies the rectangle into the CPU world.
+
+| view | rectangle | readback (ms) |
+|---|---|---|
+| full view | 3840x2160 | 2.781 |
+| zoom 2x | 1920x1080 | 1.327 |
+
+Zoom 2x costs 52 percent less than the full view. The acceptance bar was at least 40 percent, so it passes.
+
+Table 1 and table 2 were re-measured in the same run, and they are not the baseline above. They are shown for reference only. The 4K "gpu + readback" column moved from 13.381 ms (baseline) to 12.452 ms here, and the CPU columns moved more (4K cpu 1 thread 438 ms in the baseline, 239 ms here). Treat those as noise from the machine state, not as a result of this change. The GPU step columns did not change in a way this change could cause (4K gpu 9.444 to 9.578 ms).
