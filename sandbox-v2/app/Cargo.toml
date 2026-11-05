@@ -1,0 +1,9 @@
+[package]
+name = "sandbox_v2_app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sandbox_v2_gpu = { path = "../gpu" }
+wgpu = "=30.0.1"
+winit = "=0.30.13"
