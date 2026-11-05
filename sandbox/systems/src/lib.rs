@@ -3,6 +3,7 @@
 pub mod air;
 pub mod collisions;
 pub mod engine;
+pub mod explosions;
 pub mod fire;
 pub mod granular;
 pub mod humidity;
