@@ -2,6 +2,8 @@
 //! Each later task replaces one stub with a real module, keeping its name string.
 
 use crate::engine::System;
+use crate::granular::Granular;
+use crate::liquid::Liquid;
 use sandbox_core::rng::Rng;
 use sandbox_core::world::World;
 
@@ -16,8 +18,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Granular, "granular");
-stub!(Liquid, "liquid");
 stub!(Air, "air");
 stub!(Thermal, "thermal");
 stub!(Humidity, "humidity");
