@@ -4,6 +4,7 @@
 use crate::air::AirSystem;
 use crate::collisions::Collisions;
 use crate::engine::System;
+use crate::chemistry::Chemistry;
 use crate::explosions::Explosions;
 use crate::fire::Fire;
 use crate::granular::Granular;
@@ -26,7 +27,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Chemistry, "chemistry");
 stub!(Ocean, "ocean");
 stub!(Lighting, "lighting");
 
