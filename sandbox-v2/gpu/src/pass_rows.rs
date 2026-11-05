@@ -1,21 +1,47 @@
-//! Shared dispatch machinery for the row-parity passes.
+//! Shared persistent dispatch machinery for the row-parity passes.
 
-use wgpu::util::DeviceExt;
+use std::sync::Mutex;
 
+use crate::units::{cps_to_fp, FP_ONE, GRAVITY_FP, MAX_STEP};
 use crate::{Gpu, GridState};
 
-/// A compute pipeline for one row-parity rule (two phases per tick).
+/// Byte stride between the two phase slots in the uniform buffer (the
+/// guaranteed minimum `min_uniform_buffer_offset_alignment`).
+const SLOT: u64 = 256;
+
+/// Bind groups for one grid: `groups[cur][phase]` where `cur` is the index of
+/// the grid's current buffer when the dispatch starts.
+struct Cached {
+    grid_id: u64,
+    groups: [[wgpu::BindGroup; 2]; 2],
+}
+
+/// A compiled compute pipeline for one row-parity rule (two phases per tick),
+/// with its own uniform buffer and bind groups.
 pub(crate) struct RowPass {
     pipeline: wgpu::ComputePipeline,
+    ubo: wgpu::Buffer,
+    cache: Mutex<Option<Cached>>,
 }
 
 impl RowPass {
-    /// Compiles `common + rules + rule_src` into a pipeline.
-    pub(crate) fn new(gpu: &Gpu, label: &str, rule_src: &str) -> RowPass {
+    /// Compiles the shared rule for movers of material id `mover`, with
+    /// `terminal_cps` as the speed limit and `sideways` enabling liquid spreading.
+    pub(crate) fn new(gpu: &Gpu, label: &str, mover: u32, sideways: bool, terminal_cps: f32) -> RowPass {
+        let terminal_fp = cps_to_fp(terminal_cps);
+        assert!(
+            terminal_fp <= MAX_STEP as i32 * FP_ONE,
+            "terminal speed {terminal_cps} cells/s exceeds MAX_STEP per tick"
+        );
+        let header = format!(
+            "const FP_ONE: i32 = {FP_ONE};\nconst MAX_STEP: i32 = {MAX_STEP};\n\
+             const GRAVITY_FP: i32 = {GRAVITY_FP};\nconst TERMINAL_FP: i32 = {terminal_fp};\n\
+             const MOVER: u32 = {mover}u;\nconst SIDEWAYS: bool = {sideways};\n"
+        );
         let src = [
+            header.as_str(),
             include_str!("shaders/common.wgsl"),
             include_str!("shaders/rules.wgsl"),
-            rule_src,
         ]
         .join("\n");
         let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -30,43 +56,67 @@ impl RowPass {
             compilation_options: Default::default(),
             cache: None,
         });
-        RowPass { pipeline }
+        let ubo = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("row_params"),
+            size: 2 * SLOT,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        RowPass { pipeline, ubo, cache: Mutex::new(None) }
     }
 
-    /// Runs phase 0 then phase 1, swapping `grid` after each phase.
-    pub(crate) fn dispatch(&self, gpu: &Gpu, grid: &mut GridState, tick: u32, seed: u32) {
-        let (w, h) = (grid.width(), grid.height());
-        for phase in 0..2u32 {
-            let params: [u32; 8] = [w, h, tick, seed, phase, 0, 0, 0];
-            let ubo = gpu.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("row_params"),
-                contents: bytemuck::cast_slice(&params),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-            let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    fn bind_groups(&self, gpu: &Gpu, grid: &GridState) -> [[wgpu::BindGroup; 2]; 2] {
+        let layout = self.pipeline.get_bind_group_layout(0);
+        let make = |cur: usize, phase: usize| {
+            gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("row_bind"),
-                layout: &self.pipeline.get_bind_group_layout(0),
+                layout: &layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: ubo.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &self.ubo,
+                            offset: phase as u64 * SLOT,
+                            size: wgpu::BufferSize::new(32),
+                        }),
+                    },
+                    // Phase 0 reads the current buffer, phase 1 reads the other.
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: grid.current().as_entire_binding(),
+                        resource: grid.buffer(cur ^ phase).as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: grid.other().as_entire_binding(),
+                        resource: grid.buffer(cur ^ phase ^ 1).as_entire_binding(),
                     },
                 ],
-            });
-            let mut enc = gpu.device.create_command_encoder(&Default::default());
-            {
-                let mut pass = enc.begin_compute_pass(&Default::default());
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &bind, &[]);
+            })
+        };
+        [[make(0, 0), make(0, 1)], [make(1, 0), make(1, 1)]]
+    }
+
+    /// Runs phase 0 (current -> other) then phase 1 (other -> current) in one
+    /// encoder. The result is back in `grid`'s current buffer; no swap needed.
+    pub(crate) fn dispatch(&self, gpu: &Gpu, grid: &GridState, tick: u32, seed: u32) {
+        let (w, h) = (grid.width(), grid.height());
+        let mut cache = self.cache.lock().expect("pass cache poisoned");
+        if cache.as_ref().is_none_or(|c| c.grid_id != grid.id()) {
+            *cache = Some(Cached { grid_id: grid.id(), groups: self.bind_groups(gpu, grid) });
+        }
+        let groups = &cache.as_ref().expect("cache just filled").groups[grid.current_index()];
+        for phase in 0..2u32 {
+            let params: [u32; 8] = [w, h, tick, seed, phase, 0, 0, 0];
+            gpu.queue.write_buffer(&self.ubo, u64::from(phase) * SLOT, bytemuck::cast_slice(&params));
+        }
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = enc.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&self.pipeline);
+            for group in groups {
+                pass.set_bind_group(0, group, &[]);
                 pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
             }
-            gpu.queue.submit(Some(enc.finish()));
-            grid.swap();
         }
+        gpu.queue.submit(Some(enc.finish()));
     }
 }

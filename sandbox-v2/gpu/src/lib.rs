@@ -3,20 +3,23 @@
 //! [`Gpu`] owns the wgpu instance, adapter, device and queue. [`WindowSurface`]
 //! wraps a presentable surface and handles resize and per-frame clearing.
 //! [`GridState`] holds the double-buffered cell grid ([`CellRaw`]).
-//! [`GranularPass`] and [`LiquidPass`] are the compute passes whose behaviour is
-//! defined by [`reference`].
+//! [`GranularPass`] and [`LiquidPass`] are persistent compute passes whose
+//! behaviour is defined by [`mod@reference`]. [`units`] fixes the physical scale and
+//! [`materials`] holds per-material constants.
 
 mod layout;
+pub mod materials;
 mod pass_granular;
 mod pass_liquid;
 mod pass_rows;
 pub mod reference;
 mod state;
 mod surface;
+pub mod units;
 
 pub use layout::{CellRaw, MAX_CELLS};
-pub use pass_granular::{dispatch_granular, GranularPass};
-pub use pass_liquid::{dispatch_liquid, LiquidPass};
+pub use pass_granular::GranularPass;
+pub use pass_liquid::LiquidPass;
 pub use state::{GridError, GridState};
 pub use surface::WindowSurface;
 

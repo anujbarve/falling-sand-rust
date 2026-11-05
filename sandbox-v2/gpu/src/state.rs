@@ -1,6 +1,8 @@
 //! Double-buffered grid state living in GPU storage buffers.
 
 use crate::layout::{CellRaw, MAX_CELLS};
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::Gpu;
 
 const CELL_BYTES: u64 = std::mem::size_of::<CellRaw>() as u64;
@@ -37,8 +39,11 @@ struct Buffers {
     cells: wgpu::Buffer,
 }
 
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
 /// Two GPU cell buffers; `cur` selects the current one.
 pub struct GridState {
+    id: u64,
     w: u32,
     h: u32,
     bufs: [Buffers; 2],
@@ -69,7 +74,27 @@ impl GridState {
                 mapped_at_creation: false,
             }),
         };
-        Ok(GridState { w, h, bufs: [make("cells_a"), make("cells_b")], cur: 0 })
+        Ok(GridState {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            w,
+            h, bufs: [make("cells_a"), make("cells_b")],
+            cur: 0,
+        })
+    }
+
+    /// Process-unique id of this grid (lets passes cache bind groups per grid).
+    pub(crate) fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// 0 or 1: which of the two buffers is current.
+    pub(crate) fn current_index(&self) -> usize {
+        self.cur
+    }
+
+    /// Buffer by index (0 or 1).
+    pub(crate) fn buffer(&self, index: usize) -> &wgpu::Buffer {
+        &self.bufs[index].cells
     }
 
     /// Grid width in cells.

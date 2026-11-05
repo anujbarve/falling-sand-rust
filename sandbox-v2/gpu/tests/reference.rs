@@ -46,8 +46,11 @@ fn water_spreads_sideways() {
     }
     let r = run(r, TICKS);
     assert_eq!(r.count(WATER), 8);
-    let cols = (0..32).filter(|&x| (0..31).any(|y| r.get(x, y) == WATER)).count();
-    assert!(cols >= 8, "water spread over only {cols} columns");
+    let max_height = (0..32)
+        .map(|x| (0..31).filter(|&y| r.get(x, y) == WATER).count())
+        .max()
+        .unwrap();
+    assert!(max_height <= 2, "water not levelled: tallest column holds {max_height} cells");
 }
 
 #[test]

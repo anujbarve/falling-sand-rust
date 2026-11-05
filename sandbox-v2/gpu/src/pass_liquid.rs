@@ -1,25 +1,22 @@
 //! Liquid (water) compute pass. Rule defined by [`crate::reference`].
 
+use crate::materials::{Material, MATERIALS};
 use crate::pass_rows::RowPass;
+use crate::reference::WATER;
 use crate::{Gpu, GridState};
 
-/// Reusable compiled liquid pass.
+/// Persistent liquid pass: the shader is compiled once in [`LiquidPass::new`].
 pub struct LiquidPass(RowPass);
 
 impl LiquidPass {
-    /// Compiles the liquid pipeline.
+    /// Compiles the liquid pipeline with water's terminal speed.
     pub fn new(gpu: &Gpu) -> LiquidPass {
-        LiquidPass(RowPass::new(gpu, "liquid", include_str!("shaders/liquid.wgsl")))
+        let cps = MATERIALS[Material::Water as usize].terminal_cps;
+        LiquidPass(RowPass::new(gpu, "liquid", WATER, true, cps))
     }
 
-    /// Runs both row phases for `tick`; leaves the result in `grid`'s current buffer.
-    pub fn dispatch(&self, gpu: &Gpu, grid: &mut GridState, tick: u32, seed: u32) {
+    /// Runs both row phases for `tick`; the result is in `grid`'s current buffer.
+    pub fn dispatch(&self, gpu: &Gpu, grid: &GridState, tick: u32, seed: u32) {
         self.0.dispatch(gpu, grid, tick, seed);
     }
-}
-
-/// One-shot convenience: compiles a [`LiquidPass`] and runs it. Prefer
-/// reusing a `LiquidPass` in loops (this recompiles the shader every call).
-pub fn dispatch_liquid(gpu: &Gpu, grid: &mut GridState, tick: u32, seed: u32) {
-    LiquidPass::new(gpu).dispatch(gpu, grid, tick, seed);
 }
