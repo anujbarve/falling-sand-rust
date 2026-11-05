@@ -2,11 +2,13 @@
 //! Each later task replaces one stub with a real module, keeping its name string.
 
 use crate::air::AirSystem;
+use crate::collisions::Collisions;
 use crate::engine::System;
 use crate::fire::Fire;
 use crate::granular::Granular;
 use crate::humidity::Humidity;
 use crate::liquid::Liquid;
+use crate::particles::Particles;
 use crate::thermal::Thermal;
 use crate::volcano::Volcano;
 use sandbox_core::rng::Rng;
@@ -23,8 +25,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Particles, "particles");
-stub!(Collisions, "collisions");
 stub!(Explosions, "explosions");
 stub!(Chemistry, "chemistry");
 stub!(Ocean, "ocean");
