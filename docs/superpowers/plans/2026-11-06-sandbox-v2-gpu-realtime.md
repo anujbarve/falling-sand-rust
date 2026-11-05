@@ -35,7 +35,7 @@
 
 ## Tasks
 
-### Task V1: GPU device and window scaffold
+### Task 1: GPU device and window scaffold
 
 **Files:**
 - Create: `sandbox-v2/Cargo.toml` (workspace), `sandbox-v2/gpu/` (crate: device, buffers, pipelines), `sandbox-v2/app/` (winit window + wgpu surface)
@@ -50,7 +50,7 @@
 - [ ] **Step 3:** App opens a 1280×800 window, clears, exits on Escape. Run `cargo run --release -p app`.
 - [ ] **Step 4:** Commit `feat(gpu): device and window scaffold`.
 
-### Task V2: GPU grid state and cell layout
+### Task 2: GPU grid state and cell layout
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/state.rs`, `sandbox-v2/gpu/src/layout.rs`, `sandbox-v2/gpu/src/shaders/common.wgsl`
@@ -64,7 +64,7 @@
 - [ ] **Step 2:** Implement double buffers with `bytemuck` casts; `common.wgsl` defines the `Cell` struct with the same 32-byte layout and a bounds-checked `idx(x, y)`.
 - [ ] **Step 3:** GREEN. Commit `feat(gpu): double-buffered grid state`.
 
-### Task V3: Port the granular and liquid rules to WGSL, with CPU parity
+### Task 3: Port the granular and liquid rules to WGSL, with CPU parity
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/pass_granular.rs`, `sandbox-v2/gpu/src/pass_liquid.rs`, `sandbox-v2/gpu/src/shaders/granular.wgsl`, `sandbox-v2/gpu/src/shaders/liquid.wgsl`
@@ -78,7 +78,7 @@
 - [ ] **Step 2:** Implement the row-parity update in WGSL: even and odd rows alternate so each pass has no write conflicts (replaces the CPU `updated` flags). Hash-based RNG from (tick, x, y, seed) identical to the CPU hash.
 - [ ] **Step 3:** GREEN with exact equality. Commit `feat(gpu): granular and liquid compute passes with CPU parity`.
 
-### Task V4: Real-time units and per-material timers
+### Task 4: Real-time units and per-material timers
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/units.rs`, `sandbox-v2/gpu/src/materials.rs`
@@ -94,7 +94,7 @@
 - [ ] **Step 3:** GREEN; re-run V3 parity with the new rule as a new oracle (update the CPU reference to the same units so the oracle matches).
 - [ ] **Step 4:** Commit `feat(gpu): physical units and per-material timers`.
 
-### Task V5: Gas, advection, pressure and buoyancy on GPU
+### Task 5: Gas, advection, pressure and buoyancy on GPU
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/pass_air.rs`, `sandbox-v2/gpu/src/shaders/air_advect.wgsl`, `air_pressure.wgsl`, `air_buoy.wgsl`
@@ -108,7 +108,7 @@
 - [ ] **Step 2:** Implement semi-Lagrangian advection (Stam), a fixed-count Jacobi pressure solve (20 sweeps, as the CPU Jacobi ruling), and buoyancy `vy += k·(temp − 293)`. Solids block air: air velocity is zeroed on solid cells (this closes the v1 known issue).
 - [ ] **Step 3:** GREEN. Commit `feat(gpu): air advection, pressure and buoyancy; solids block air`.
 
-### Task V6: Thermal, phase changes, fire, lava with physical timers
+### Task 6: Thermal, phase changes, fire, lava with physical timers
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/pass_thermal.rs`, `pass_fire.rs`, `pass_lava.rs`, and shaders `thermal.wgsl`, `fire.wgsl`, `lava.wgsl`
@@ -122,7 +122,7 @@
 - [ ] **Step 2:** Implement heat diffusion with per-material conductivity (air 0.02, stone 0.2, metal 0.5), phase changes with `melt_k`/`boil_k`, fire fuel countdown in seconds via `ticks()`, lava viscosity as a per-cell delay in seconds.
 - [ ] **Step 3:** GREEN. Commit `feat(gpu): thermal, fire and lava with physical timers`.
 
-### Task V7: Particles: 1M-capable GPU particle system
+### Task 7: Particles: 1M-capable GPU particle system
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/particles.rs`, `sandbox-v2/gpu/src/shaders/particles.wgsl`
@@ -136,7 +136,7 @@
 - [ ] **Step 2:** Implement compute integration with gravity from units, life countdown, collision against the grid (solid cell → reflect with restitution 0.6), ring-buffer recycle.
 - [ ] **Step 3:** GREEN. Commit `feat(gpu): million-particle compute system`.
 
-### Task V8: Lighting, shading and bloom
+### Task 8: Lighting, shading and bloom
 
 **Files:**
 - Create: `sandbox-v2/gpu/src/pass_light.rs`, `sandbox-v2/gpu/src/render.rs`, shaders `light.wgsl`, `shade.wgsl`, `bloom.wgsl`, `composite.wgsl`
@@ -150,7 +150,7 @@
 - [ ] **Step 2:** Implement: per-cell shading from neighbour heights (water surface normal from the top-water column), per-cell colour noise (hash), emission from temp above 800 K (blackbody ramp), 2-pass separable bloom at quarter resolution, tone map (ACES-like), alpha-blended smoke and steam by vapor density.
 - [ ] **Step 3:** GREEN. Commit `feat(gpu): lighting, shading and bloom`.
 
-### Task V9: Sim loop, events to audio, app wiring
+### Task 9: Sim loop, events to audio, app wiring
 
 **Files:**
 - Modify: `sandbox-v2/app/src/main.rs`; create `sandbox-v2/app/src/frame.rs`
@@ -165,7 +165,7 @@
 - [ ] **Step 3:** GREEN. Controls and HUD carried over from v1 (keys 1–8, `[ ]`, S/L, Space, Escape; HUD shows FPS, sim ms, particle count).
 - [ ] **Step 4:** Commit `feat(app): gpu sim loop with event readback to audio`.
 
-### Task V10: Scenes at scale, soak and benchmark
+### Task 10: Scenes at scale, soak and benchmark
 
 **Files:**
 - Create: `sandbox-v2/config/scenes/*.toml` (grid size, particle budget, timers); modify `sandbox-v2/app/src/scenes.rs`
