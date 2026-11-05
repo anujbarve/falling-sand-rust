@@ -78,7 +78,7 @@ impl System for Volcano {
     }
 
     fn step(&mut self, w: &mut World, rng: &mut Rng, _dt: f32) {
-        // Tick index recovered from world time keeps the sources stateless.
+        // Tick index recovered from world time (an f32, accurate enough for now) keeps the sources stateless.
         let n = (w.time / DT).round().max(0.0) as u64;
         flow(w, rng, n % VISCOSITY == 0);
         for s in &self.sources {

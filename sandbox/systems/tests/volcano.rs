@@ -54,18 +54,39 @@ fn emitted_lava_is_hot() {
 
 #[test]
 fn lava_spreads_sideways_slowly() {
-    let mut w = World::new(80, 100);
+    // Short grid: the lava piles up on the floor, so it must spread to make room.
+    let mut w = World::new(80, 25);
     let mut s: Vec<Box<dyn System>> = vec![Box::new(volcano(40, 20, 1.0))];
     run(&mut w, &mut s, 40);
     let mut max_dx = 0;
-    for y in 0..100 {
+    for y in 0..25 {
         for x in 0..80 {
             if w.cells.get(x, y).unwrap().mat == Material::Lava {
                 max_dx = max_dx.max((x - 40i32).abs());
             }
         }
     }
+    assert!(max_dx > 0, "lava never spread");
     assert!(max_dx <= 10, "spread {max_dx}");
+}
+
+#[test]
+fn resting_lava_moves_sideways_once_per_four_ticks() {
+    let mut w = World::new(80, 10);
+    w.cells.set(40, 9, Cell { mat: Material::Lava, temp: 1500.0, fuel: 0, updated: false });
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Volcano::default())];
+    let mut rng = Rng::new(5);
+    let pos = |w: &World| (0..80).find(|&x| w.cells.get(x, 9).unwrap().mat == Material::Lava).unwrap();
+    let (mut last, mut moves) = (pos(&w), 0);
+    for _ in 0..40 {
+        run_tick(&mut w, &mut s, &mut rng);
+        let p = pos(&w);
+        if p != last {
+            moves += 1;
+            last = p;
+        }
+    }
+    assert!((1..=10).contains(&moves), "moves {moves}");
 }
 
 #[test]
