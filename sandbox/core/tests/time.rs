@@ -20,3 +20,11 @@ fn caps_ticks_per_frame() {
     assert_eq!(f.push_frame(10.0), 8);
     assert_eq!(f.push_frame(0.0), 0);
 }
+
+#[test]
+fn bad_frame_times_count_as_zero() {
+    let mut f = FixedStep::new();
+    assert_eq!(f.push_frame(f32::NAN), 0);
+    assert_eq!(f.push_frame(-5.0), 0);
+    assert_eq!(f.push_frame(DT), 1);
+}

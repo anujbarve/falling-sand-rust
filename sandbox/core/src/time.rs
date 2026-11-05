@@ -20,15 +20,16 @@ impl FixedStep {
     /// Adds `frame_dt` seconds and returns how many `DT` ticks to run this frame.
     ///
     /// Capped at 8 ticks per frame to avoid a spiral of death; when the cap is hit
-    /// the leftover time is discarded.
+    /// time beyond the cap (a full tick or more) is discarded.
     pub fn push_frame(&mut self, frame_dt: f32) -> u32 {
-        self.acc += frame_dt;
+        // NaN and negative frame times count as zero.
+        self.acc += if frame_dt > 0.0 { frame_dt } else { 0.0 };
         let mut ticks = 0;
         while self.acc >= DT && ticks < MAX_TICKS_PER_FRAME {
             self.acc -= DT;
             ticks += 1;
         }
-        if ticks == MAX_TICKS_PER_FRAME {
+        if self.acc >= DT {
             self.acc = 0.0;
         }
         ticks

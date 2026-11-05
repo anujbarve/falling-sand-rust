@@ -27,7 +27,7 @@ impl Rng {
         (self.next_u32() >> 8) as f32 / (1u32 << 24) as f32
     }
 
-    /// Uniform float in `[lo, hi)`.
+    /// Uniform float from `lo` toward `hi`; float rounding may rarely land on `hi` itself.
     pub fn range_f32(&mut self, lo: f32, hi: f32) -> f32 {
         lo + (hi - lo) * self.next_f32()
     }

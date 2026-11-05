@@ -2,7 +2,20 @@
 
 /// Category of sound a system can request.
 #[derive(Clone, Copy, Debug)]
-pub enum SoundKind { Flow, Wind, Crackle, Boom, Hiss, Splash }
+pub enum SoundKind {
+    /// Liquid flowing.
+    Flow,
+    /// Moving air.
+    Wind,
+    /// Fire or burning crackle.
+    Crackle,
+    /// Explosion blast.
+    Boom,
+    /// Steam or quenching hiss.
+    Hiss,
+    /// Liquid impact.
+    Splash,
+}
 
 /// Something that happened in the world this tick.
 #[derive(Clone, Copy, Debug)]
