@@ -1,6 +1,8 @@
 //! Sandbox application: opens a macroquad window and runs the main loop.
 
 use macroquad::prelude::*;
+use sandbox_core::{rng::Rng, time::FixedStep, world::World};
+use sandbox_systems::{registry, run_tick};
 
 fn window_conf() -> Conf {
     Conf {
@@ -11,9 +13,17 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    let mut world = World::new(160, 120);
+    let mut systems = registry();
+    let mut rng = Rng::new(0x5eed);
+    let mut step = FixedStep::new();
     loop {
         if is_key_pressed(KeyCode::Escape) {
             break;
+        }
+        for _ in 0..step.push_frame(get_frame_time()) {
+            run_tick(&mut world, &mut systems, &mut rng);
+            world.events.clear();
         }
         clear_background(DARKBLUE);
         next_frame().await;
