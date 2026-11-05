@@ -2,9 +2,10 @@
 //!
 //! Values are rounded textbook figures at room conditions. Temperatures are
 //! kelvin, times are seconds (convert with [`crate::units::ticks`]), speeds are
-//! cells per second (1 cell = 1 cm). [`NEVER`] marks "does not apply". Only
-//! `terminal_cps` is consumed so far (granular and liquid passes); the other
-//! fields are stored for the thermal and fire passes.
+//! cells per second (1 cell = 1 cm). [`NEVER`] marks "does not apply".
+//! `terminal_cps` is used by the granular and liquid passes; `burn_s`,
+//! `evap_s`, `melt_k`, `boil_k` and `condense_k` by the thermal and fire
+//! passes ([`crate::reference_thermal`]). `density` is not consumed yet.
 
 /// "Does not apply" for times and temperatures.
 pub const NEVER: f32 = f32::INFINITY;

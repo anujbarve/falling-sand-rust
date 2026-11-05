@@ -18,22 +18,7 @@ struct Params {
 @group(0) @binding(2) var<storage, read_write> dst: array<Cell>;
 
 
-// murmur3 fmix32, u32 wrapping math (WGSL u32 ops wrap).
-fn mix32(v: u32) -> u32 {
-    var h = v;
-    h ^= h >> 16u;
-    h = h * 0x85EBCA6Bu;
-    h ^= h >> 13u;
-    h = h * 0xC2B2AE35u;
-    return h ^ (h >> 16u);
-}
-
-// Per-cell hash of (tick, x, y, seed). Bit 0: diagonal side; bit 1: sideways.
-fn cell_hash(tick: u32, x: u32, y: u32, seed: u32) -> u32 {
-    var h = mix32(seed ^ tick);
-    h = mix32(h ^ x);
-    return mix32(h ^ y);
-}
+// mix32 and cell_hash come from hash.wgsl.
 
 // Material at (x, y); outside the grid reads as WALL.
 fn mat_at(x: i32, y: i32) -> u32 {

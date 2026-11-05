@@ -7,23 +7,34 @@
 //! behaviour is defined by [`mod@reference`]. [`units`] fixes the physical scale and
 //! [`materials`] holds per-material constants. [`AirPass`] advects vapor and air,
 //! solves pressure and applies buoyancy; its rule is in [`air`].
+//! [`ThermalPass`], [`FirePass`] and [`LavaPass`] run heat conduction, phase
+//! changes, burning and viscous lava flow; their rule is in
+//! [`reference_thermal`].
 
 pub mod air;
 mod layout;
 pub mod materials;
 mod pass_air;
+mod pass_cells;
+mod pass_fire;
 mod pass_granular;
+mod pass_lava;
 mod pass_liquid;
 mod pass_rows;
+mod pass_thermal;
 pub mod reference;
+pub mod reference_thermal;
 mod state;
 mod surface;
 pub mod units;
 
 pub use layout::{CellRaw, MAX_CELLS};
 pub use pass_air::AirPass;
+pub use pass_fire::FirePass;
 pub use pass_granular::GranularPass;
+pub use pass_lava::LavaPass;
 pub use pass_liquid::LiquidPass;
+pub use pass_thermal::ThermalPass;
 pub use state::{GridError, GridState};
 pub use surface::WindowSurface;
 

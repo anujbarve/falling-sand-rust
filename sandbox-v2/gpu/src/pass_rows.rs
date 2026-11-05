@@ -48,6 +48,7 @@ impl RowPass {
         let src = [
             header.as_str(),
             include_str!("shaders/common.wgsl"),
+            include_str!("shaders/hash.wgsl"),
             include_str!("shaders/rules.wgsl"),
         ]
         .join("\n");
