@@ -5,6 +5,7 @@ use crate::air::AirSystem;
 use crate::engine::System;
 use crate::granular::Granular;
 use crate::liquid::Liquid;
+use crate::thermal::Thermal;
 use sandbox_core::rng::Rng;
 use sandbox_core::world::World;
 
@@ -19,7 +20,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Thermal, "thermal");
 stub!(Humidity, "humidity");
 stub!(Fire, "fire");
 stub!(Volcano, "volcano");
