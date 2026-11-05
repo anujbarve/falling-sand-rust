@@ -1460,6 +1460,7 @@ dependencies = [
 name = "sandbox_v2_gpu"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "pollster",
  "wgpu",
 ]

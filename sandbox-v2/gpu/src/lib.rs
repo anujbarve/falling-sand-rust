@@ -2,9 +2,14 @@
 //!
 //! [`Gpu`] owns the wgpu instance, adapter, device and queue. [`WindowSurface`]
 //! wraps a presentable surface and handles resize and per-frame clearing.
+//! [`GridState`] holds the double-buffered cell grid ([`CellRaw`]).
 
+mod layout;
+mod state;
 mod surface;
 
+pub use layout::{CellRaw, MAX_CELLS};
+pub use state::{GridError, GridState};
 pub use surface::WindowSurface;
 
 /// Core wgpu handles shared by every GPU feature.
