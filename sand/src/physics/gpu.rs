@@ -10,7 +10,7 @@
 use super::{chunk_dims, World};
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Steps that can be recorded into one submission. Each step needs its own
 /// copy of the parameters (its frame number) in the uniform buffer.
@@ -305,7 +305,17 @@ impl GpuSim {
     /// Queue `steps` simulation steps. Returns straight away: the GPU works
     /// in the background. Call `wait` or `download` to wait for it.
     pub fn step(&mut self, mut steps: u32) {
-        let (total, timing) = (steps, self.timer_begin(steps));
+        let total = steps;
+        // Every step is one step pass, plus one wake pass when sleeping.
+        let passes = total * if self.sleeping { 2 } else { 1 };
+        let timing = self.timer_begin(total).map(|slot| TimedCall {
+            slot,
+            steps: total,
+            passes,
+            per_pass: passes <= MAX_TIMED_PASSES,
+            sleeping: self.sleeping,
+        });
+        let mut pass_index = 0u32;
         while steps > 0 {
             let batch = steps.min(MAX_BATCH);
             steps -= batch;
@@ -320,38 +330,46 @@ impl GpuSim {
             self.queue.write_buffer(&self.params, 0, &bytes);
 
             let mut encoder = self.device.create_command_encoder(&Default::default());
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: None,
-                    timestamp_writes: self.timestamp_writes(timing, steps + batch == total, steps == 0),
-                });
-                for s in 0..batch {
-                    let offset = [(s as u64 * PARAMS_STRIDE) as u32];
-                    let group = &self.groups[self.current];
-                    // wgpu puts a barrier between dispatches that touch the same
-                    // buffers, so each dispatch sees the previous one's writes.
+            for s in 0..batch {
+                let offset = [(s as u64 * PARAMS_STRIDE) as u32];
+                let group = &self.groups[self.current];
+                // When the block offset o is 1, threads start one cell before
+                // the grid (see sim.wgsl), so one more cell must be covered.
+                let o = self.frame.wrapping_add(s) & 1;
+                let groups = ((self.width + o).div_ceil(self.tile.0), (self.height + o).div_ceil(self.tile.1));
+                // Each dispatch gets its own compute pass, so each one can carry
+                // its own timestamps (Apple GPUs cannot time inside a pass). Passes
+                // in one encoder are ordered, so each sees the previous one's writes.
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("step"),
+                        timestamp_writes: self.timestamp_writes(timing, pass_index),
+                    });
                     pass.set_bind_group(0, group, &offset);
-                    // When the block offset o is 1, threads start one cell before
-                    // the grid (see sim.wgsl), so one more cell must be covered.
-                    let o = self.frame.wrapping_add(s) & 1;
-                    let groups = ((self.width + o).div_ceil(self.tile.0), (self.height + o).div_ceil(self.tile.1));
                     pass.set_pipeline(&self.step);
                     pass.dispatch_workgroups(groups.0, groups.1, 1);
-                    if self.sleeping {
-                        pass.set_pipeline(&self.wake);
-                        pass.dispatch_workgroups(
-                            self.chunks.0.div_ceil(WAKE_WORKGROUP),
-                            self.chunks.1.div_ceil(WAKE_WORKGROUP),
-                            1,
-                        );
-                    }
-                    self.current = 1 - self.current; // the output is now the input
                 }
+                pass_index += 1;
+                if self.sleeping {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("wake"),
+                        timestamp_writes: self.timestamp_writes(timing, pass_index),
+                    });
+                    pass.set_bind_group(0, group, &offset);
+                    pass.set_pipeline(&self.wake);
+                    pass.dispatch_workgroups(
+                        self.chunks.0.div_ceil(WAKE_WORKGROUP),
+                        self.chunks.1.div_ceil(WAKE_WORKGROUP),
+                        1,
+                    );
+                    pass_index += 1;
+                }
+                self.current = 1 - self.current; // the output is now the input
             }
             self.queue.submit([encoder.finish()]);
             self.frame = self.frame.wrapping_add(batch);
         }
-        self.timer_end(timing, total);
+        self.timer_end(timing);
     }
 
     /// Block until the GPU has finished all queued work.
@@ -396,6 +414,8 @@ const READBACK_SLOTS: usize = 3;
 const FREE: u8 = 0; // unmapped, not used by any queued command
 const PENDING: u8 = 1; // copy queued, map requested, not ready yet
 const READY: u8 = 2; // mapped: the CPU may read it
+// Timestamps written and submitted; the work is not known to be finished yet.
+const WRITTEN: u8 = 3;
 
 fn map_read(buffer: &wgpu::Buffer, state: &Arc<AtomicU8>) {
     state.store(PENDING, Ordering::Release);
@@ -563,51 +583,95 @@ impl GpuSim {
 //
 // Wall-clock time around `step` + `wait` also counts the CPU recording and
 // submitting commands and the round trip to wake us up. With
-// `Features::TIMESTAMP_QUERY` the GPU writes a tick count when the first
-// compute pass of a `step` call begins and when the last one ends. We resolve
-// the two ticks into a buffer, read it back without waiting (like the
-// readback above) and turn ticks into ms with `queue.get_timestamp_period()`.
-// (Timestamps between dispatches inside one pass would need
-// TIMESTAMP_QUERY_INSIDE_PASSES, which Apple GPUs do not have.)
+// `Features::TIMESTAMP_QUERY` the GPU writes a tick count when a compute pass
+// begins and when it ends. Each dispatch of a `step` call is its own pass, so
+// the step and wake passes can be timed separately. We resolve the ticks into
+// a buffer, read it back without waiting (like the readback above) and turn
+// ticks into ms with `queue.get_timestamp_period()`.
+//
+// Query layout for one timed call with n passes:
+// - query 0: the start of the first pass;
+// - queries 2+2i and 3+2i: begin and end of pass i (see `pass_queries`).
+//   Without per-pass timing (too many passes), query 1 holds the end of the
+//   last pass instead. Either way the call's end is the last pass's end, so
+//   `gpu_time_ms` reports the whole call (see `harvest`).
 // ---------------------------------------------------------------------------
 
 const TIMER_SLOTS: usize = 4;
+/// wgpu allows at most 4096 queries in a set.
+const TIMER_QUERIES: u32 = 4096;
+/// Passes per timed call that get their own timestamps. A call with more
+/// passes still reports the whole-call time, but no per-pass times.
+const MAX_TIMED_PASSES: u32 = (TIMER_QUERIES - 2) / 2;
+
+/// The query indices pass `i` of `n` writes: (begin, end), each optional.
+/// The first pass begins at query 0, which is the call's own start.
+fn pass_queries(i: u32, n: u32, per_pass: bool) -> (Option<u32>, Option<u32>) {
+    let begin = if i == 0 { Some(0) } else if per_pass { Some(2 + 2 * i) } else { None };
+    let end = if per_pass { Some(3 + 2 * i) } else if i + 1 == n { Some(1) } else { None };
+    (begin, end)
+}
+
+/// A `step` call that is being timed.
+#[derive(Clone, Copy)]
+struct TimedCall {
+    slot: usize,
+    steps: u32,
+    passes: u32,
+    per_pass: bool,
+    sleeping: bool,
+}
+
+/// Per-step GPU time of each kind of pass, in ms. Latest timed call that
+/// has come back. Returned by `GpuSim::pass_times_ms`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PassTimes {
+    pub step_ms: f64,
+    pub wake_ms: f64,
+}
 
 struct TimerSlot {
+    // Each slot has its own query set. A shared one could be overwritten by a
+    // later call before this call's timestamps are resolved.
+    queries: wgpu::QuerySet,
+    resolve: wgpu::Buffer,
     buffer: wgpu::Buffer,
     state: Arc<AtomicU8>,
-    steps: u32,
+    // Set by the queue when all work submitted before `timer_end` has finished.
+    done: Arc<AtomicBool>,
+    call: Option<TimedCall>,
     seq: u64,
 }
 
 struct GpuTimer {
-    queries: wgpu::QuerySet,
-    resolve: wgpu::Buffer,
     slots: Vec<TimerSlot>,
     ns_per_tick: f64,
     seq: u64,
     last_seq: u64,
     last_ms_per_step: Option<f64>,
+    last_pass_seq: u64,
+    last_pass: Option<PassTimes>,
 }
 
 impl GpuTimer {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let size = 2 * wgpu::QUERY_SIZE as u64;
+        let size = TIMER_QUERIES as u64 * wgpu::QUERY_SIZE as u64;
         let buffer = |label: &str, usage: wgpu::BufferUsages| {
             device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
         };
         GpuTimer {
-            queries: device.create_query_set(&wgpu::QuerySetDescriptor {
-                label: Some("step timestamps"),
-                ty: wgpu::QueryType::Timestamp,
-                count: 2,
-            }),
-            resolve: buffer("timestamps resolve", wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC),
             slots: (0..TIMER_SLOTS)
                 .map(|_| TimerSlot {
+                    queries: device.create_query_set(&wgpu::QuerySetDescriptor {
+                        label: Some("step timestamps"),
+                        ty: wgpu::QueryType::Timestamp,
+                        count: TIMER_QUERIES,
+                    }),
+                    resolve: buffer("timestamps resolve", wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC),
                     buffer: buffer("timestamps readback", wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
                     state: Arc::new(AtomicU8::new(FREE)),
-                    steps: 0,
+                    done: Arc::new(AtomicBool::new(false)),
+                    call: None,
                     seq: 0,
                 })
                 .collect(),
@@ -615,25 +679,71 @@ impl GpuTimer {
             seq: 0,
             last_seq: 0,
             last_ms_per_step: None,
+            last_pass_seq: 0,
+            last_pass: None,
         }
     }
 
-    /// Read every timestamp pair that has arrived; keep the newest.
+    /// Resolve the timestamps of every call whose work has finished, and
+    /// start reading them back. Resolving before the work has finished can
+    /// read queries the GPU has not written yet (seen as missing or stale
+    /// values for the last passes of a call), so this waits for the queue's
+    /// "work done" signal. The copy itself is queued, never waited on.
+    fn resolve_ready(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        for slot in &mut self.slots {
+            if slot.state.load(Ordering::Acquire) != WRITTEN || !slot.done.load(Ordering::Acquire) {
+                continue;
+            }
+            let Some(call) = slot.call else { continue };
+            let count = if call.per_pass { 2 + 2 * call.passes } else { 2 };
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.resolve_query_set(&slot.queries, 0..count, &slot.resolve, 0);
+            encoder.copy_buffer_to_buffer(&slot.resolve, 0, &slot.buffer, 0, count as u64 * wgpu::QUERY_SIZE as u64);
+            queue.submit([encoder.finish()]);
+            map_read(&slot.buffer, &slot.state);
+        }
+    }
+
+    /// Read every timestamp that has arrived; keep the newest of each kind.
     fn harvest(&mut self) {
         for slot in &mut self.slots {
             if slot.state.load(Ordering::Acquire) != READY {
                 continue;
             }
-            let ticks: [u64; 2] = {
+            let Some(call) = slot.call else { continue };
+            // (whole-call span, per-kind tick sums or None when not timed per pass)
+            let (span, sums): ((u64, u64), Option<[u64; 2]>) = {
                 let view = slot.buffer.get_mapped_range(..).expect("mapped");
-                bytemuck::pod_read_unaligned(&view[..16])
+                let q = |i: u32| -> u64 { bytemuck::pod_read_unaligned(&view[i as usize * 8..][..8]) };
+                // The call ends with its last pass.
+                let last_end = if call.per_pass { 3 + 2 * (call.passes - 1) } else { 1 };
+                let span = (q(0), q(last_end));
+                let sums = call.per_pass.then(|| {
+                    let mut sums = [0u64; 2]; // [step, wake]
+                    for i in 0..call.passes {
+                        let (Some(b), Some(e)) = pass_queries(i, call.passes, true) else { return None };
+                        let ticks = q(e).checked_sub(q(b))?;
+                        // Passes alternate step, wake when sleeping.
+                        let kind = if call.sleeping { (i % 2) as usize } else { 0 };
+                        sums[kind] += ticks;
+                    }
+                    Some(sums)
+                });
+                (span, sums.flatten())
             };
             slot.buffer.unmap();
             slot.state.store(FREE, Ordering::Release);
-            if slot.seq > self.last_seq && ticks[1] > ticks[0] && slot.steps > 0 {
-                let ms = (ticks[1] - ticks[0]) as f64 * self.ns_per_tick / 1e6;
-                self.last_ms_per_step = Some(ms / slot.steps as f64);
+            if slot.seq > self.last_seq && span.1 > span.0 && call.steps > 0 {
+                let ms = (span.1 - span.0) as f64 * self.ns_per_tick / 1e6;
+                self.last_ms_per_step = Some(ms / call.steps as f64);
                 self.last_seq = slot.seq;
+            }
+            if slot.seq > self.last_pass_seq && call.steps > 0 {
+                if let Some(sums) = sums {
+                    let per_step = |ticks: u64| ticks as f64 * self.ns_per_tick / 1e6 / call.steps as f64;
+                    self.last_pass = Some(PassTimes { step_ms: per_step(sums[0]), wake_ms: per_step(sums[1]) });
+                    self.last_pass_seq = slot.seq;
+                }
             }
         }
     }
@@ -651,8 +761,21 @@ impl GpuSim {
     pub fn gpu_time_ms(&mut self) -> Option<f64> {
         let _ = self.device.poll(wgpu::PollType::Poll);
         let timer = self.timer.as_mut()?;
+        timer.resolve_ready(&self.device, &self.queue);
         timer.harvest();
         timer.last_ms_per_step
+    }
+
+    /// GPU time per step of the step pass and of the wake pass, in ms, from
+    /// the most recent `step` call whose per-pass timestamps have come back.
+    /// None without timestamp support, or for a call with too many passes
+    /// (see `MAX_TIMED_PASSES`). Never blocks, like `gpu_time_ms`.
+    pub fn pass_times_ms(&mut self) -> Option<PassTimes> {
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        let timer = self.timer.as_mut()?;
+        timer.resolve_ready(&self.device, &self.queue);
+        timer.harvest();
+        timer.last_pass
     }
 
     /// Start of `step`: pick a free timer slot, or None to not time this call
@@ -662,33 +785,36 @@ impl GpuSim {
         if steps == 0 {
             return None;
         }
+        timer.resolve_ready(&self.device, &self.queue);
         timer.harvest();
         timer.slots.iter().position(|s| s.state.load(Ordering::Acquire) == FREE)
     }
 
-    /// Timestamp writes for one compute pass of a timed `step` call: the
-    /// first pass records the start, the last pass the end.
-    fn timestamp_writes(&self, timing: Option<usize>, first: bool, last: bool) -> Option<wgpu::ComputePassTimestampWrites<'_>> {
-        timing?;
+    /// Timestamp writes for pass `pass` (0-based, counted over the whole
+    /// timed call), or None when this pass is not timed.
+    fn timestamp_writes(&self, timing: Option<TimedCall>, pass: u32) -> Option<wgpu::ComputePassTimestampWrites<'_>> {
+        let call = timing?;
         let timer = self.timer.as_ref()?;
-        (first || last).then(|| wgpu::ComputePassTimestampWrites {
-            query_set: &timer.queries,
-            beginning_of_pass_write_index: first.then_some(0),
-            end_of_pass_write_index: last.then_some(1),
+        let (begin, end) = pass_queries(pass, call.passes, call.per_pass);
+        (begin.is_some() || end.is_some()).then(|| wgpu::ComputePassTimestampWrites {
+            query_set: &timer.slots[call.slot].queries,
+            beginning_of_pass_write_index: begin,
+            end_of_pass_write_index: end,
         })
     }
 
-    /// End of `step`: resolve the two timestamps and start reading them back.
-    fn timer_end(&mut self, timing: Option<usize>, steps: u32) {
-        let (Some(i), Some(timer)) = (timing, self.timer.as_mut()) else { return };
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        encoder.resolve_query_set(&timer.queries, 0..2, &timer.resolve, 0);
-        encoder.copy_buffer_to_buffer(&timer.resolve, 0, &timer.slots[i].buffer, 0, timer.resolve.size());
-        self.queue.submit([encoder.finish()]);
+    /// End of `step`: mark the call's timestamps as written. They are
+    /// resolved once the queue reports that the work has finished.
+    fn timer_end(&mut self, timing: Option<TimedCall>) {
+        let (Some(call), Some(timer)) = (timing, self.timer.as_mut()) else { return };
         timer.seq += 1;
-        let slot = &mut timer.slots[i];
-        slot.steps = steps;
+        let slot = &mut timer.slots[call.slot];
+        slot.call = Some(call);
         slot.seq = timer.seq;
-        map_read(&slot.buffer, &slot.state);
+        slot.done.store(false, Ordering::Release);
+        slot.state.store(WRITTEN, Ordering::Release);
+        let done = slot.done.clone();
+        // Runs after all work submitted so far (the passes of this call).
+        self.queue.on_submitted_work_done(move || done.store(true, Ordering::Release));
     }
 }
