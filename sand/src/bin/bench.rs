@@ -150,6 +150,29 @@ fn main() {
          gpu max speed = how many times faster than real time the GPU alone could run (busy scene)."
     );
 
+    // Partial readback at 4K: what a zoomed-in viewer pays per frame. The full
+    // view copies the whole grid; zoom 2x copies a quarter of the cells (the
+    // centre half in each direction). Zero steps, so only the readback is timed.
+    if let Ok(mut g) = GpuSim::new(&scene(BENCH_SCENE, 3840, 2160)) {
+        let (w, h) = (3840u32, 2160u32);
+        println!("\nReadback at 4K: copy the visible rectangle to the CPU (0 steps, lower is better).");
+        println!("{:>10} | {:>11} | {:>12}", "view", "rectangle", "readback");
+        println!("{}", "-".repeat(40));
+        let mut results = Vec::new();
+        for (name, rect) in [("full view", (0, 0, w, h)), ("zoom 2x", (w / 4, h / 4, w / 2, h / 2))] {
+            let mut world = World::new(w as usize, h as usize);
+            let ms = time_it(budget, || {
+                g.step_and_readback_rect(0, rect);
+                g.wait();
+                assert!(g.latest(&mut world).is_some(), "readback did not arrive");
+                1
+            });
+            println!("{name:>10} | {:>4}x{:<6} | {:>9.3} ms", rect.2, rect.3, ms);
+            results.push(ms);
+        }
+        println!("zoom 2x costs {:.0}% less than the full view.", 100.0 * (1.0 - results[1] / results[0]));
+    }
+
     if GpuSim::new(&World::new(8, 8)).is_err() {
         return;
     }

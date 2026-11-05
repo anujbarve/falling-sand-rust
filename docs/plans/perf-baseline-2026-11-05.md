@@ -72,3 +72,19 @@ Task 11. `Analyzer::analyze` on a 3840x2160 world, every scene in `SCENES`, CPU 
 - After the change, the same run was not repeatable under load, so the A/B used one process: each scene timed on the old body (test-only reference) and the new code, interleaved, best of 12 calls. Old mean 13.9 ms, new mean 12.3 ms (layers 28.8 vs 29.9, lava + water 9.5 vs 7.6, fire 6.6 vs 4.9, ice 10.5 vs 7.4, benchmark 23.3 vs 19.1, jet engine 4.6 vs 4.9).
 - Change: cells whose material has no event kind are skipped before any other work, and the cell below is read only for sand and water. Output is identical (test `skipping_inert_materials_gives_the_reference_output`).
 - Still well over 1 ms. The dense scenes are mostly event materials (sand, water, fire), so skipping inert cells gains little. The next step would be a GPU reduction (Task 11 step 2, not done here).
+
+## Readback rectangle (Task 6)
+
+**Machine and command:** same as above, `cargo run --release --bin bench -- 3`, one run (the brief asked for one run after the tests passed). No other bench or cargo run was active when it started.
+**Code:** this branch, after the readback rectangle change (`GpuSim::step_and_readback_rect`, packing pass `pack_rect` in `wgsl/readback.wgsl`).
+
+Readback at 4K, 0 steps, so only the readback is timed. Each readback is: queue the copy (packed first when the rectangle is not the whole grid), wait for the GPU, then `latest` copies the rectangle into the CPU world.
+
+| view | rectangle | readback (ms) |
+|---|---|---|
+| full view | 3840x2160 | 2.781 |
+| zoom 2x | 1920x1080 | 1.327 |
+
+Zoom 2x costs 52 percent less than the full view. The acceptance bar was at least 40 percent, so it passes.
+
+Table 1 and table 2 were re-measured in the same run, and they are not the baseline above. They are shown for reference only. The 4K "gpu + readback" column moved from 13.381 ms (baseline) to 12.452 ms here, and the CPU columns moved more (4K cpu 1 thread 438 ms in the baseline, 239 ms here). Treat those as noise from the machine state, not as a result of this change. The GPU step columns did not change in a way this change could cause (4K gpu 9.444 to 9.578 ms).

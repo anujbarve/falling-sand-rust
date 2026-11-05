@@ -347,6 +347,25 @@ impl Renderer {
         self.cells.update_from_bytes(self.grid.0 as u32, self.grid.1 as u32, bytemuck::cast_slice(cells));
     }
 
+    /// Upload only `rect` (`(x0, y0, w, h)` in cells) of the full-size `cells`.
+    /// Used after a partial readback: cells outside the rectangle are not
+    /// fresh and are left as they are in the texture.
+    pub fn upload_rect(&mut self, cells: &[u32], rect: (u32, u32, u32, u32)) {
+        debug_assert_eq!(cells.len(), self.grid.0 * self.grid.1);
+        let (x0, y0, w, h) = rect;
+        if (x0, y0, w, h) == (0, 0, self.grid.0 as u32, self.grid.1 as u32) {
+            return self.upload(cells);
+        }
+        // Texture upload wants the rectangle's rows packed back to back.
+        let mut bytes = Vec::with_capacity((w * h * 4) as usize);
+        for row in 0..h as usize {
+            let at = (y0 as usize + row) * self.grid.0 + x0 as usize;
+            bytes.extend_from_slice(bytemuck::cast_slice(&cells[at..at + w as usize]));
+        }
+        let image = Image { bytes, width: w as u16, height: h as u16 };
+        self.cells.update_part(&image, x0 as i32, y0 as i32, w as i32, h as i32);
+    }
+
     /// Draw the world into `dest` (screen pixels).
     pub fn draw(&mut self, dest: Rect, g: &Graphics, heat_view: bool, time: f32) {
         if g.bloom_divisor != self.bloom_divisor {

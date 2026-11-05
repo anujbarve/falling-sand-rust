@@ -25,6 +25,7 @@ const SHADER: &str = concat!(
     include_str!("wgsl/motion.wgsl"),
     include_str!("wgsl/step.wgsl"),
     include_str!("wgsl/wake.wgsl"),
+    include_str!("wgsl/readback.wgsl"),
 );
 const WAKE_WORKGROUP: u32 = 8; // must match @workgroup_size of `wake`
 
@@ -76,6 +77,8 @@ pub struct GpuSim {
     pub adapter_name: String,
     // --- pipelined readback (see `step_and_readback` / `latest`) ---
     readbacks: Vec<Readback>,
+    /// Packs a rectangle of cells into a staging buffer (partial readbacks).
+    packer: Packer,
     /// Bumped by `upload`: readbacks from an older epoch are thrown away.
     epoch: u64,
     readback_seq: u64,
@@ -221,6 +224,7 @@ impl GpuSim {
             })
         };
         let groups = [group(0), group(1)];
+        let packer = Packer::new(&device, &shader, &cells, cell_count);
         let readbacks = (0..READBACK_SLOTS).map(|_| Readback::new(&device, cell_count * 4)).collect();
         let timer = timestamps.then(|| GpuTimer::new(&device, &queue));
 
@@ -245,6 +249,7 @@ impl GpuSim {
             frame: world.frame,
             adapter_name,
             readbacks,
+            packer,
             epoch: 0,
             readback_seq: 0,
             delivered_any: false,
@@ -425,10 +430,115 @@ fn map_read(buffer: &wgpu::Buffer, state: &Arc<AtomicU8>) {
     });
 }
 
+/// A rectangle of cells in grid coordinates: `(x0, y0, w, h)`.
+pub type Rect = (u32, u32, u32, u32);
+
+/// Uniform for `pack_rect` (wgsl/readback.wgsl). Eight u32s, 32 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PackRect {
+    x0: u32,
+    y0: u32,
+    w: u32,
+    h: u32,
+    stride: u32,
+    _pad: [u32; 3],
+}
+
+/// The rectangle packing pass and its buffers: the rectangle is packed into
+/// `out` (linear, row by row) and then copied into a readback slot.
+struct Packer {
+    pipeline: wgpu::ComputePipeline,
+    threads: u32, // threads per workgroup of `pack_rect`, read from the WGSL
+    params: wgpu::Buffer,
+    groups: [wgpu::BindGroup; 2], // groups[i] reads cells[i]
+    out: wgpu::Buffer,
+}
+
+impl Packer {
+    fn new(device: &wgpu::Device, shader: &wgpu::ShaderModule, cells: &[wgpu::Buffer; 2], cell_count: u64) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pack rect"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(size_of::<PackRect>() as u64),
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        // Group 0 belongs to the sim; the packing pass uses group 1 only.
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pack rect"),
+            bind_group_layouts: &[None, Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("pack_rect"),
+            layout: Some(&pipeline_layout),
+            module: shader,
+            entry_point: Some("pack_rect"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pack params"),
+            size: size_of::<PackRect>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let out = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("packed"),
+            size: cell_count * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let group = |src: &wgpu::Buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("pack rect"),
+                layout: &layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: src.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: out.as_entire_binding() },
+                ],
+            })
+        };
+        let groups = [group(&cells[0]), group(&cells[1])];
+        Packer { pipeline, threads: shader_const("PACK_WORKGROUP"), params, groups, out }
+    }
+}
+
 struct Readback {
     buffer: wgpu::Buffer,
     state: Arc<AtomicU8>,
     frame: u32,                                // world.frame of the copied grid
+    rect: Rect,                                // which cells the buffer holds, row by row
     epoch: u64,                                // GpuSim::epoch when it was queued
     seq: u64,                                  // queue order, to find the newest
     submission: Option<wgpu::SubmissionIndex>, // to wait for it if we must
@@ -445,6 +555,7 @@ impl Readback {
             }),
             state: Arc::new(AtomicU8::new(FREE)),
             frame: 0,
+            rect: (0, 0, 0, 0),
             epoch: 0,
             seq: 0,
             submission: None,
@@ -467,17 +578,48 @@ impl GpuSim {
     /// `READBACK_SLOTS` frames behind, to stop work piling up). Pick the
     /// result up later with `latest`. `steps` may be 0 (just show paint).
     pub fn step_and_readback(&mut self, steps: u32) {
+        self.step_and_readback_rect(steps, (0, 0, self.width, self.height));
+    }
+
+    /// Like `step_and_readback`, but copies only `rect` (`(x0, y0, w, h)` in
+    /// cells). The world that `latest` fills in is still full size: only
+    /// the cells inside `rect` are updated. A rectangle smaller than the
+    /// grid is packed into a linear buffer on the GPU first (one compute
+    /// pass, no per-row copies), so the copy is `w * h` cells, not the grid.
+    pub fn step_and_readback_rect(&mut self, steps: u32, rect: Rect) {
+        let (x0, y0, w, h) = rect;
+        assert!(w > 0 && h > 0 && x0 + w <= self.width && y0 + h <= self.height, "readback rectangle outside the grid");
         self.step(steps);
         let slot = self.claim_readback_slot();
+        let full = rect == (0, 0, self.width, self.height);
+        let bytes = (w * h) as u64 * 4;
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let rb = &self.readbacks[slot];
-        encoder.copy_buffer_to_buffer(&self.cells[self.current], 0, &rb.buffer, 0, rb.buffer.size());
+        if full {
+            encoder.copy_buffer_to_buffer(&self.cells[self.current], 0, &rb.buffer, 0, bytes);
+        } else {
+            let p = PackRect { x0, y0, w, h, stride: self.width, _pad: [0; 3] };
+            self.queue.write_buffer(&self.packer.params, 0, bytemuck::bytes_of(&p));
+            let n = (w * h).div_ceil(self.packer.threads);
+            let (gx, gy) = (n.min(65_535), n.div_ceil(n.min(65_535)));
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("pack rect"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.packer.pipeline);
+                pass.set_bind_group(1, &self.packer.groups[self.current], &[]);
+                pass.dispatch_workgroups(gx, gy, 1);
+            }
+            encoder.copy_buffer_to_buffer(&self.packer.out, 0, &rb.buffer, 0, bytes);
+        }
         let submission = self.queue.submit([encoder.finish()]);
 
         self.readback_seq += 1;
         let rb = &mut self.readbacks[slot];
         rb.frame = self.frame;
+        rb.rect = rect;
         rb.epoch = self.epoch;
         rb.seq = self.readback_seq;
         rb.submission = Some(submission);
@@ -508,12 +650,13 @@ impl GpuSim {
         i
     }
 
-    /// Copy the newest readback that has arrived into `world` and return
-    /// true. Returns false (and leaves `world` alone) if nothing new has
-    /// arrived. Never waits, except when no readback has ever arrived yet.
-    /// Readbacks queued before the last `upload` are dropped, so they can
-    /// never undo what was uploaded.
-    pub fn latest(&mut self, world: &mut World) -> bool {
+    /// Copy the newest readback that has arrived into `world` and return the
+    /// rectangle it covers. Only that rectangle of `world` is written; the
+    /// rest of `world` keeps whatever it had. Returns `None` (and leaves
+    /// `world` alone) if nothing new has arrived. Never waits, except when
+    /// no readback has ever arrived yet. Readbacks queued before the last
+    /// `upload` are dropped, so they can never undo what was uploaded.
+    pub fn latest(&mut self, world: &mut World) -> Option<Rect> {
         let _ = self.device.poll(wgpu::PollType::Poll);
         let epoch = self.epoch;
         let usable = |r: &Readback| r.epoch == epoch && r.state() == READY;
@@ -528,11 +671,23 @@ impl GpuSim {
         }
 
         let best = (0..self.readbacks.len()).filter(|&i| usable(&self.readbacks[i])).max_by_key(|&i| self.readbacks[i].seq);
+        let shown = best.map(|i| self.readbacks[i].rect);
         if let Some(i) = best {
             let rb = &self.readbacks[i];
+            let (x0, y0, w, h) = rb.rect;
+            let full = (x0, y0, w, h) == (0, 0, self.width, self.height);
             {
-                let view = rb.buffer.get_mapped_range(..).expect("mapped");
-                world.cells.copy_from_slice(bytemuck::cast_slice(&view));
+                let view = rb.buffer.get_mapped_range(..(w * h) as u64 * 4).expect("mapped");
+                let packed: &[u32] = bytemuck::cast_slice(&view);
+                if full {
+                    world.cells.copy_from_slice(packed);
+                } else {
+                    // Packed rows go back to their place in the full-size world.
+                    for (row, src) in packed.chunks_exact(w as usize).enumerate() {
+                        let at = (y0 as usize + row) * self.width as usize + x0 as usize;
+                        world.cells[at..at + w as usize].copy_from_slice(src);
+                    }
+                }
             } // the view must be dropped before unmapping
             world.frame = rb.frame;
             self.delivered_any = true;
@@ -544,7 +699,7 @@ impl GpuSim {
                 rb.release();
             }
         }
-        best.is_some()
+        shown
     }
 
     /// Overwrite single cells on the GPU, e.g. paint: `(index, packed cell)`.

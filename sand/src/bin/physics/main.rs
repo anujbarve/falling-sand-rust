@@ -289,11 +289,17 @@ async fn main() {
             clock.add_steps(steps);
         }
         let start = std::time::Instant::now();
-        if steps > 0 || !edits.is_empty() {
-            sim.gpu.step_and_readback(steps); // returns at once; the GPU works in the background
+        // Read back only the cells on screen (the whole grid when zoomed out).
+        let (x0, y0, x1, y1) = camera.visible_cells(grid, view);
+        let mut visible = (x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32);
+        if visible.2 == 0 || visible.3 == 0 {
+            visible = (0, 0, grid.0 as u32, grid.1 as u32);
         }
-        if sim.gpu.latest(&mut sim.world) {
-            renderer.upload(&sim.world.cells); // drawn next frame
+        if steps > 0 || !edits.is_empty() {
+            sim.gpu.step_and_readback_rect(steps, visible); // returns at once; the GPU works in the background
+        }
+        if let Some(shown) = sim.gpu.latest(&mut sim.world) {
+            renderer.upload_rect(&sim.world.cells, shown); // drawn next frame
             if let Some(out) = audio.as_mut() {
                 // World time since the last measured frame (for event rates).
                 let dt = (clock.world_seconds - audio_world_seconds).max(0.0) as f32;

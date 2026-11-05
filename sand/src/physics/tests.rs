@@ -230,7 +230,7 @@ use cpu::CpuSim;
             assert!(shown.frame <= cpu_world.frame);
         }
         gpu.wait();
-        assert!(gpu.latest(&mut shown), "the last readback should have arrived");
+        assert!(gpu.latest(&mut shown).is_some(), "the last readback should have arrived");
         assert_eq!(shown.frame, cpu_world.frame);
         assert_eq!(shown, cpu_world);
 
@@ -240,11 +240,11 @@ use cpu::CpuSim;
         gpu.upload(&fresh);
         gpu.wait();
         let before = shown.clone();
-        assert!(!gpu.latest(&mut shown), "a readback from before the upload was shown");
+        assert!(gpu.latest(&mut shown).is_none(), "a readback from before the upload was shown");
         assert_eq!(shown, before);
         gpu.step_and_readback(0);
         gpu.wait();
-        assert!(gpu.latest(&mut shown));
+        assert!(gpu.latest(&mut shown).is_some());
         assert_eq!(shown, fresh);
 
         if gpu.has_timestamps() {
@@ -252,6 +252,39 @@ use cpu::CpuSim;
             gpu.wait();
             let ms = wait_for(|| gpu.gpu_time_ms()).expect("timestamps should come back after a wait");
             assert!(ms > 0.0 && ms < 1000.0, "implausible GPU time {ms} ms/step");
+        }
+    }
+
+    #[test]
+    fn pipelined_readback_rect_matches_full_readback_inside_rect() {
+        let start = scene(4, 300, 200);
+        let mut gpu = match gpu::GpuSim::new(&start) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU adapter, skipping: {e}");
+                return;
+            }
+        };
+        gpu.step(100);
+        let mut full = World::new(300, 200);
+        gpu.download(&mut full);
+
+        // An interior rectangle, a rectangle that is the whole grid (direct copy
+        // path), and one that touches the bottom-right corner.
+        for rect in [(37u32, 20u32, 120u32, 90u32), (0, 0, 300, 200), (299, 199, 1, 1)] {
+            let (x0, y0, w, h) = rect;
+            let mut shown = World::new(300, 200);
+            gpu.step_and_readback_rect(0, rect);
+            gpu.wait();
+            let got = gpu.latest(&mut shown).expect("the rectangle readback should have arrived");
+            assert_eq!(got, rect, "latest should return the rectangle it copied");
+            assert_eq!(shown.frame, full.frame);
+            for y in y0..y0 + h {
+                for x in x0..x0 + w {
+                    let i = (y * 300 + x) as usize;
+                    assert_eq!(shown.cells[i], full.cells[i], "cell ({x},{y}) differs in rect {rect:?}");
+                }
+            }
         }
     }
 
