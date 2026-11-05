@@ -8,6 +8,7 @@ pub mod explosions;
 pub mod fire;
 pub mod granular;
 pub mod humidity;
+pub mod lighting;
 pub mod liquid;
 pub mod ocean;
 pub mod particles;

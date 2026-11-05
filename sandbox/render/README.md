@@ -11,6 +11,10 @@ Rendering helpers built on `sandbox_core` data: colours and a CPU pixel buffer.
   - `FrameBuffer { w, h, pixels }` - `new(w, h)` allocates once.
   - `draw_world(&mut self, world: &World, seed: u32)` - writes RGBA for every cell, no per-frame allocation.
 
+- `smooth` - motion smoothing.
+  - `lerp(a, b, t) -> f32` - linear blend.
+  - `interp_world_alpha(prev, cur, alpha, out)` - per-element blend of two snapshots, `alpha = accumulator / DT`.
+
 ## Tests
 
 ```bash

@@ -2,3 +2,4 @@
 
 pub mod buffer;
 pub mod palette;
+pub mod smooth;
