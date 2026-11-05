@@ -46,16 +46,21 @@ CI (`.github/workflows/ci.yml`) builds and tests on macOS, Linux and Windows and
 
 - Solid-mass soak counts Stone, Metal and Glass (structural solids). Rock is excluded because Lava cools into it, and Wood because it burns; all non-Explosion-Lab scenes show 0 drift. Explosion Lab is excluded from the assertion as the brief allows; its loss is printed by the soak (gunpowder 720 -> 231 over 10 000 ticks, 33 blasts, structural solids unchanged).
 - No system in the registry emits `Event::Explosion` or `Event::Sound`, and `Explosions` consumes explosion events before the app sees them. The Explosion Lab therefore adds a scene-local `lab_fuse` system just before `explosions`; it emits an `Explosion` plus a `Boom` sound (the sound survives to the audio layer). Other scenes make no explosion sound.
-- The volcano theme test checks the freshly built world (a lava pool sits in the crater), because emitted lava cools to Rock within about 2 ticks (Known issues).
+- The volcano theme test checks the freshly built world (a lava pool sits in the crater), as a stable check of the scene's theme material.
 - `systems_for(scene)` takes no config, so each scene's wind and sea level are constants in `scenes.rs`; a test asserts the TOML files agree. `main` uses `systems_with` and the loaded config.
 - Keys 1 to 8 are Sand, Water, Oil, Stone, Wood, Gunpowder, Fire, Lava (the brief did not name them). Mouse painting was added because the material keys are pointless without it. Audio volume from the config is not applied (the audio API has no volume control).
 - `main` now gates config loading and S/L on `file_io_available()`.
 - Explosion Lab loss is attributed to blasts by a control run (same world, `lab_fuse` removed): the fused run has booms, debris particles, more Ash and destroyed Metal, and loses more gunpowder. Net non-empty cell count is not asserted to rise, because blasts on the metal plate destroy cells (2249 -> 2216 fused, 2249 -> 2276 control).
 
+## Rulings (final fix round)
+
+- F1, vent clogging: option (b). Edges touching an Empty (air) cell conduct at `AIR_CONDUCT = 0.02` instead of `CONDUCT = 0.2`, because air is a poor conductor, so a lone emitted lava cell stays above 700 for many ticks. The volcano vent also acts as a magma conduit: lava resting above it is kept at 1500 and new lava wells up on top of that column (at most 8 cells), because the scene's starting pool otherwise sat on the vent and blocked it. The Lava to Rock threshold (700) is unchanged. The vent now keeps producing lava (68 cells in 300 ticks on Volcano Island).
+- F3: `Explosion` events with a non-finite position, radius or energy, or radius or energy <= 0, are discarded.
+
 ## Known issues
 
 1. Air ignores solid cells.
-2. Lava emitted at 1500 cools to Rock in about 2 ticks (Thermal tuning needed), so the vent builds rock instead of flowing lava.
+2. Lava is still a thin, fast-cooling material: much emitted lava freezes against the crater walls (about 68 cells made in 300 ticks at rate 0.5, of 150 attempted).
 3. Lighting cost grows with emitter count and may exceed 8 ms in large fire or lava scenes.
 4. Audio has no voice cap.
 5. The GPU presenter is offscreen-only under `--features gpu`.

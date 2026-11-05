@@ -13,7 +13,7 @@ pub trait Presenter {
 /// Largest rectangle `(x, y, w, h)` with the buffer's aspect ratio that fits a
 /// `screen_w` by `screen_h` target, centred. Returns all zeros for any empty size.
 pub fn fit_rect(fb_w: usize, fb_h: usize, screen_w: f32, screen_h: f32) -> (f32, f32, f32, f32) {
-    if fb_w == 0 || fb_h == 0 || !(screen_w > 0.0) || !(screen_h > 0.0) {
+    if fb_w == 0 || fb_h == 0 || screen_w.is_nan() || screen_w <= 0.0 || screen_h.is_nan() || screen_h <= 0.0 {
         return (0.0, 0.0, 0.0, 0.0);
     }
     let scale = (screen_w / fb_w as f32).min(screen_h / fb_h as f32);

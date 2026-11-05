@@ -148,3 +148,18 @@ fn paint_fills_disc_only_into_empty_cells_and_clips_at_edges() {
 fn hud_line_format() {
     assert_eq!(format_line(60.0, 3.2), "FPS 60  tick 3.2 ms");
 }
+
+#[test]
+fn volcano_vent_keeps_producing_lava() {
+    let mut w = build(Scene::VolcanoIsland, 1);
+    let (lava0, rock0) = (count(&w, Material::Lava), count(&w, Material::Rock));
+    let mut systems = systems_for(Scene::VolcanoIsland);
+    let mut rng = Rng::new(1);
+    for _ in 0..300 {
+        run_tick(&mut w, &mut systems, &mut rng);
+    }
+    // Lava only ever becomes Rock by cooling, so lava + new rock counts every cell the vent made.
+    let made = count(&w, Material::Lava) + count(&w, Material::Rock) - lava0 - rock0;
+    println!("vent produced {made} lava cells in 300 ticks; {} still molten", count(&w, Material::Lava));
+    assert!(made >= 60, "vent produced only {made} lava cells in 300 ticks; clogged");
+}

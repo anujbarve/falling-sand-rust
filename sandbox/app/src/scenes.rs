@@ -183,7 +183,7 @@ impl System for LabFuse {
 
     fn step(&mut self, w: &mut World, _rng: &mut Rng, _dt: f32) {
         self.tick += 1;
-        if self.tick < Self::FIRST || (self.tick - Self::FIRST) % Self::PERIOD != 0 {
+        if self.tick < Self::FIRST || !(self.tick - Self::FIRST).is_multiple_of(Self::PERIOD) {
             return;
         }
         let x = [45.0, 80.0, 115.0][(((self.tick - Self::FIRST) / Self::PERIOD) % 3) as usize];

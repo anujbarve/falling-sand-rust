@@ -8,6 +8,10 @@ use sandbox_core::world::World;
 /// Fraction of the neighbour temperature difference exchanged per tick.
 pub const CONDUCT: f32 = 0.2;
 
+/// Conduction rate across any edge touching an Empty (air) cell: air is a poor conductor,
+/// so a lone hot cell (freshly emitted lava) keeps its heat long enough to flow.
+pub const AIR_CONDUCT: f32 = 0.02;
+
 // Explicit 4-neighbour diffusion is only stable for CONDUCT <= 0.25.
 const _: () = assert!(CONDUCT <= 0.25);
 
@@ -56,13 +60,15 @@ impl System for Thermal {
         for y in 0..height {
             for x in 0..width {
                 let i = w.cells.index(x, y).unwrap();
-                let mut delta = 0.0;
+                let mut flux = 0.0;
                 for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                     if let Some(j) = w.cells.index(x + dx, y + dy) {
-                        delta += old[j] - old[i];
+                        // Symmetric per-edge rate, so total heat stays conserved.
+                        let air = w.cells.as_slice()[i].mat == Material::Empty || w.cells.as_slice()[j].mat == Material::Empty;
+                        flux += (if air { AIR_CONDUCT } else { CONDUCT }) * (old[j] - old[i]);
                     }
                 }
-                w.cells.as_mut_slice()[i].temp = old[i] + CONDUCT * delta;
+                w.cells.as_mut_slice()[i].temp = old[i] + flux;
             }
         }
     }

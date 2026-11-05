@@ -143,3 +143,21 @@ fn shock_ring_expands_then_expires_and_other_events_stay() {
     }
     assert!(e.shocks.is_empty());
 }
+
+#[test]
+fn non_finite_or_non_positive_blasts_are_ignored() {
+    for (r, en) in [(f32::NAN, 100.0), (10.0, f32::INFINITY), (10.0, f32::NAN), (f32::INFINITY, 50.0), (0.0, 50.0), (10.0, 0.0), (10.0, -5.0)] {
+        let mut w = World::new(30, 30);
+        put(&mut w, 15, 15, Material::Stone);
+        let key = |w: &World| w.cells.as_slice().iter().map(|c| (c.mat, c.temp.to_bits(), c.fuel)).collect::<Vec<_>>();
+        let (cells, pressure) = (key(&w), w.air.pressure.clone());
+        boom(&mut w, 15.0, 15.0, r, en);
+        let mut e = Explosions::default();
+        for _ in 0..3 {
+            step(&mut e, &mut w);
+        }
+        assert_eq!(key(&w), cells, "cells changed for r={r} energy={en}");
+        assert_eq!(w.air.pressure, pressure, "pressure changed for r={r} energy={en}");
+        assert!(w.particles.is_empty() && e.shocks.is_empty() && w.events.is_empty());
+    }
+}

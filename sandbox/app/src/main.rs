@@ -153,7 +153,7 @@ async fn main() {
         if let Some(g) = gpu.as_mut() {
             g.present(&fb);
         }
-        draw_text(&format_line(get_fps() as f32, tick_ms), 10.0, 20.0, 22.0, WHITE);
+        draw_text(format_line(get_fps() as f32, tick_ms), 10.0, 20.0, 22.0, WHITE);
         let status = format!(
             "{}  brush {}  {:?}{}",
             scene.name(),

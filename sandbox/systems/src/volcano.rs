@@ -16,6 +16,9 @@ pub const LAVA_TEMP: f32 = 1500.0;
 /// Lava moves diagonally or sideways only on every this-many-th tick.
 pub const VISCOSITY: u64 = 4;
 
+/// Tallest lava column a vent will push new lava up through.
+const MAX_COLUMN: i32 = 8;
+
 /// A point that emits lava into the cell directly above it.
 #[derive(Clone, Copy, Debug)]
 pub struct VolcanoSource {
@@ -80,19 +83,30 @@ impl System for Volcano {
     fn step(&mut self, w: &mut World, rng: &mut Rng, _dt: f32) {
         // Tick index recovered from world time (an f32, accurate enough for now) keeps the sources stateless.
         let n = (w.time / DT).round().max(0.0) as u64;
-        flow(w, rng, n % VISCOSITY == 0);
+        flow(w, rng, n.is_multiple_of(VISCOSITY));
         for s in &self.sources {
             // Whole units of accumulated rate crossed this tick.
             let emit = (n as f64 * s.rate as f64).floor() - (n.saturating_sub(1) as f64 * s.rate as f64).floor();
             if emit < 1.0 {
                 continue;
             }
-            if let Some(c) = w.cells.get_mut(s.x, s.y - 1) {
-                if c.mat == Material::Empty {
-                    c.mat = Material::Lava;
-                    c.temp = LAVA_TEMP;
-                    c.fuel = 0;
-                    c.updated = true;
+            // The vent is a magma conduit: lava sitting on it stays molten, and new lava
+            // wells up on top of that column instead of being blocked by it.
+            let mut y = s.y - 1;
+            while let Some(c) = w.cells.get_mut(s.x, y) {
+                match c.mat {
+                    Material::Lava if s.y - y <= MAX_COLUMN => {
+                        c.temp = LAVA_TEMP;
+                        y -= 1;
+                    }
+                    Material::Empty => {
+                        c.mat = Material::Lava;
+                        c.temp = LAVA_TEMP;
+                        c.fuel = 0;
+                        c.updated = true;
+                        break;
+                    }
+                    _ => break,
                 }
             }
         }

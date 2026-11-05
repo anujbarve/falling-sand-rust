@@ -44,7 +44,7 @@ fn feed(w: &mut World, t: u32) {
     for x in 0..width {
         w.cells.set(x, height - 1, Cell { mat: Material::Empty, temp: 293.0, fuel: 0, updated: false });
     }
-    let m = if t % 2 == 0 { Material::Sand } else { Material::Water };
+    let m = if t.is_multiple_of(2) { Material::Sand } else { Material::Water };
     for x in (t as i32 % 5..width).step_by(5) {
         w.cells.set(x, 0, Cell { mat: m, temp: 293.0, fuel: 0, updated: false });
     }

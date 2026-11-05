@@ -80,7 +80,8 @@ fn apply_ring(w: &mut World, s: &Shock) {
 
 /// Applies the instant effects of one blast and queues its ring.
 fn detonate(w: &mut World, rng: &mut Rng, x: f32, y: f32, r: f32, energy: f32) -> Option<Shock> {
-    if r <= 0.0 {
+    // Reject NaN/infinite or non-positive inputs: they would otherwise scribble over the grid.
+    if !(x.is_finite() && y.is_finite() && r.is_finite() && energy.is_finite()) || r <= 0.0 || energy <= 0.0 {
         return None;
     }
     let reach = r.ceil() as i32;
