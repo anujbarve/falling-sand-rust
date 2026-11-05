@@ -6,6 +6,7 @@ Core simulation data types shared by every other sandbox crate.
 
 - `vec2`: `Vec2` with add, sub, scale, `length`, `normalized`.
 - `rng`: `Rng`, a seeded xorshift32 (`next_u32`, `next_f32`, `range_f32`, `chance`).
+- `chunk`: `Chunks` (`size` 16, `active`, `w`, `h` in chunks) with `new(width, height)`, `mark(x, y)` (that chunk only), `is_active(cx, cy)`, `clear()`, `mark_all()` and `spread_from(&src)` (src grown by one chunk in all 8 directions).
 - `grid`: `Grid<T>`, row-major with signed bounds-checked access.
 - `material`: `Material` enum of all cell kinds.
 - `cell`: `Cell` (material, temperature, fuel, updated marker).

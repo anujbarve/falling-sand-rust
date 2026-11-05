@@ -1,6 +1,7 @@
 //! Granular solids (currently sand): fall, slide diagonally, sink through lighter liquids.
 
 use crate::engine::System;
+use crate::movers::{self, Kind, Tracker};
 use sandbox_core::material::Material;
 use sandbox_core::rng::Rng;
 use sandbox_core::world::World;
@@ -19,15 +20,6 @@ pub(crate) fn density(m: Material) -> Option<u8> {
     }
 }
 
-/// True if a mover of `mover` may enter cell `(x, y)`: it is in bounds, not yet
-/// updated this tick, and holds empty space or a strictly lighter material.
-pub(crate) fn can_enter(w: &World, mover: Material, x: i32, y: i32) -> bool {
-    match (w.cells.get(x, y), density(mover)) {
-        (Some(c), Some(dm)) => !c.updated && density(c.mat).is_some_and(|dt| dt < dm),
-        _ => false,
-    }
-}
-
 /// Swaps two in-bounds cells wholesale and marks both as updated this tick.
 pub(crate) fn swap(w: &mut World, a: (i32, i32), b: (i32, i32)) {
     let (ia, ib) = (w.cells.index(a.0, a.1).unwrap(), w.cells.index(b.0, b.1).unwrap());
@@ -37,8 +29,32 @@ pub(crate) fn swap(w: &mut World, a: (i32, i32), b: (i32, i32)) {
     cells[ib].updated = true;
 }
 
-/// Falling-sand rules for granular materials.
-pub struct Granular;
+/// Falling-sand rules for granular materials, run as banded sweeps (see `movers`).
+pub struct Granular {
+    /// Skip chunks where nothing changed nearby. Output is identical either way; `false` is the reference path.
+    pub use_chunks: bool,
+    tracker: Tracker,
+}
+
+impl Default for Granular {
+    /// Chunk skipping on.
+    fn default() -> Granular {
+        Granular { use_chunks: true, tracker: Tracker::new() }
+    }
+}
+
+impl Granular {
+    /// Creates the system with chunk skipping on or off.
+    pub fn with_chunks(use_chunks: bool) -> Granular {
+        Granular { use_chunks, tracker: Tracker::new() }
+    }
+
+    /// Draws the tick seed from `rng` and sweeps the world, in parallel bands when `parallel`.
+    pub(crate) fn step_with(&mut self, w: &mut World, rng: &mut Rng, parallel: bool) {
+        let seed = rng.next_u32();
+        movers::run(w, Kind::Granular, seed, &mut self.tracker, self.use_chunks, parallel);
+    }
+}
 
 impl System for Granular {
     fn name(&self) -> &'static str {
@@ -46,27 +62,6 @@ impl System for Granular {
     }
 
     fn step(&mut self, w: &mut World, rng: &mut Rng, _dt: f32) {
-        let (width, height) = (w.cells.width() as i32, w.cells.height() as i32);
-        for y in (0..height).rev() {
-            let left_first = rng.chance(0.5);
-            for i in 0..width {
-                let x = if left_first { i } else { width - 1 - i };
-                let c = *w.cells.get(x, y).unwrap();
-                if c.updated || c.mat != Material::Sand {
-                    continue;
-                }
-                if can_enter(w, c.mat, x, y + 1) {
-                    swap(w, (x, y), (x, y + 1));
-                    continue;
-                }
-                let dir = if rng.chance(0.5) { -1 } else { 1 };
-                for dx in [dir, -dir] {
-                    if can_enter(w, c.mat, x + dx, y + 1) {
-                        swap(w, (x, y), (x + dx, y + 1));
-                        break;
-                    }
-                }
-            }
-        }
+        self.step_with(w, rng, false);
     }
 }

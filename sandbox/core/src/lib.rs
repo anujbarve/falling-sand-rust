@@ -1,6 +1,7 @@
 //! Core simulation data types for the sandbox: grid, RNG, world layers and fixed timestep.
 
 pub mod cell;
+pub mod chunk;
 pub mod config;
 pub mod event;
 pub mod field;

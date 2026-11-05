@@ -95,6 +95,15 @@ impl System for AirSystem {
             w.air.vel[i] = v;
         }
 
+        // A field of exact zeros stays exactly zero under diffusion, rescaling and the
+        // gradient force, so the 20-sweep solve is skipped (identical result, no work).
+        if w.air.pressure.iter().all(|&p| p == 0.0) {
+            for v in &mut w.air.vel {
+                *v = clamp_vel(*v);
+            }
+            return;
+        }
+
         // Pressure: diffuse with Gauss-Seidel (walls reflect), then rescale so the
         // total is exactly conserved.
         let before: f32 = w.air.pressure.iter().sum();

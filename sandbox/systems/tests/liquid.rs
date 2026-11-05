@@ -18,7 +18,7 @@ fn mat(w: &World, x: i32, y: i32) -> Material {
 }
 
 fn systems() -> Vec<Box<dyn System>> {
-    vec![Box::new(Granular), Box::new(Liquid)]
+    vec![Box::new(Granular::default()), Box::new(Liquid::default())]
 }
 
 fn count(w: &World, m: Material) -> usize {

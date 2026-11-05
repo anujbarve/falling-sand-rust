@@ -19,7 +19,7 @@ fn mat(w: &World, x: i32, y: i32) -> Material {
 }
 
 fn systems() -> Vec<Box<dyn System>> {
-    vec![Box::new(Granular), Box::new(Liquid)]
+    vec![Box::new(Granular::default()), Box::new(Liquid::default())]
 }
 
 fn count(w: &World, m: Material) -> usize {
@@ -122,6 +122,6 @@ fn sand_does_not_move_after_updated() {
     let mut rng = Rng::new(1);
     put(&mut w, 1, 0, Material::Sand);
     w.cells.get_mut(1, 0).unwrap().updated = true;
-    Granular.step(&mut w, &mut rng, 0.0);
+    Granular::default().step(&mut w, &mut rng, 0.0);
     assert_eq!(mat(&w, 1, 0), Material::Sand);
 }

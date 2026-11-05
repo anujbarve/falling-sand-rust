@@ -102,7 +102,7 @@ fn rain_falls_one_row_per_tick_without_new_mass() {
     let mut w = World::new(9, 9);
     put(&mut w, 4, 2, Material::Water, 280.0);
     let mut rng = Rng::new(1);
-    let mut s: Vec<Box<dyn System>> = vec![Box::new(Liquid), Box::new(Humidity)];
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Liquid::default()), Box::new(Humidity)];
     for t in 1..=4 {
         run_tick(&mut w, &mut s, &mut rng);
         assert_eq!(w.cells.get(4, 2 + t).unwrap().mat, Material::Water);
@@ -125,7 +125,7 @@ fn vapor_stays_within_zero_and_one() {
             c.mat = Material::Water;
         }
     }
-    let mut s: Vec<Box<dyn System>> = vec![Box::new(Liquid), Box::new(Humidity)];
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Liquid::default()), Box::new(Humidity)];
     for _ in 0..500 {
         run_tick(&mut w, &mut s, &mut rng);
         assert!(w.air.vapor.iter().all(|&v| (0.0..=1.0).contains(&v)));
@@ -148,7 +148,7 @@ fn closed_system_conserves_mass_over_time() {
         }
     }
     let before = mass(&w);
-    let mut s: Vec<Box<dyn System>> = vec![Box::new(Liquid), Box::new(Humidity)];
+    let mut s: Vec<Box<dyn System>> = vec![Box::new(Liquid::default()), Box::new(Humidity)];
     for _ in 0..300 {
         run_tick(&mut w, &mut s, &mut rng);
     }
