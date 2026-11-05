@@ -1,5 +1,6 @@
 //! Simulation systems that operate on `sandbox_core` data.
 
+pub mod air;
 pub mod engine;
 pub mod granular;
 pub mod liquid;

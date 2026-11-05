@@ -1,6 +1,7 @@
 //! No-op placeholder systems and the fixed-order `registry`.
 //! Each later task replaces one stub with a real module, keeping its name string.
 
+use crate::air::AirSystem;
 use crate::engine::System;
 use crate::granular::Granular;
 use crate::liquid::Liquid;
@@ -18,7 +19,6 @@ macro_rules! stub {
     };
 }
 
-stub!(Air, "air");
 stub!(Thermal, "thermal");
 stub!(Humidity, "humidity");
 stub!(Fire, "fire");
@@ -33,7 +33,7 @@ stub!(Lighting, "lighting");
 /// Returns every system in the binding execution order.
 pub fn registry() -> Vec<Box<dyn System>> {
     vec![
-        Box::new(Granular), Box::new(Liquid), Box::new(Air), Box::new(Thermal),
+        Box::new(Granular), Box::new(Liquid), Box::new(AirSystem::default()), Box::new(Thermal),
         Box::new(Humidity), Box::new(Fire), Box::new(Volcano), Box::new(Particles),
         Box::new(Collisions), Box::new(Explosions), Box::new(Chemistry),
         Box::new(Ocean), Box::new(Lighting),
