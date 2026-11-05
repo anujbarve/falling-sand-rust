@@ -30,6 +30,16 @@ impl AudioHandle {
         AudioHandle { tx }
     }
 
+    /// Builds a handle whose channel is already dead, as when no device exists.
+    ///
+    /// Intended for tests of the no-device path.
+    #[doc(hidden)]
+    pub fn dead() -> AudioHandle {
+        let (tx, rx) = sync_channel(QUEUE_CAP);
+        drop(rx);
+        AudioHandle { tx }
+    }
+
     /// Maps and queues events for playback. Never blocks and never panics;
     /// commands are dropped when the queue is full or audio is unavailable.
     pub fn send_events(&self, events: &[Event]) {
@@ -44,16 +54,20 @@ impl AudioHandle {
 
 /// Audio thread body: owns the output stream; exits (dropping `rx`) if the device fails.
 fn run(rx: Receiver<AudioCmd>) {
-    let Ok(mut sink) = rodio::DeviceSinkBuilder::open_default_sink() else {
-        return;
+    let mut sink = match rodio::DeviceSinkBuilder::open_default_sink() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("sandbox_audio: no output device, sound disabled: {err}");
+            return;
+        }
     };
     sink.log_on_drop(false);
+    let (Some(ch), Some(rate)) = (NonZero::new(1u16), NonZero::new(RATE)) else {
+        return;
+    };
     let mut seed = 0x9E37_79B9u32;
     while let Ok(AudioCmd::Play { kind, gain }) = rx.recv() {
         let samples = synth(kind, gain, &mut seed);
-        let (Some(ch), Some(rate)) = (NonZero::new(1u16), NonZero::new(RATE)) else {
-            return;
-        };
         sink.mixer().add(SamplesBuffer::new(ch, rate, samples));
     }
 }
