@@ -9,11 +9,14 @@
 //! solves pressure and applies buoyancy; its rule is in [`air`].
 //! [`ThermalPass`], [`FirePass`] and [`LavaPass`] run heat conduction, phase
 //! changes, burning and viscous lava flow; their rule is in
-//! [`reference_thermal`].
+//! [`reference_thermal`]. [`Particles`] is a ring buffer of up to one
+//! million [`ParticleRaw`] stepped on the GPU; its rule is in
+//! [`reference_particles`].
 
 pub mod air;
 mod layout;
 pub mod materials;
+mod particles;
 mod pass_air;
 mod pass_cells;
 mod pass_fire;
@@ -23,12 +26,14 @@ mod pass_liquid;
 mod pass_rows;
 mod pass_thermal;
 pub mod reference;
+pub mod reference_particles;
 pub mod reference_thermal;
 mod state;
 mod surface;
 pub mod units;
 
-pub use layout::{CellRaw, MAX_CELLS};
+pub use layout::{CellRaw, ParticleRaw, MAX_CELLS};
+pub use particles::Particles;
 pub use pass_air::AirPass;
 pub use pass_fire::FirePass;
 pub use pass_granular::GranularPass;

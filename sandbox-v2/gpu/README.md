@@ -20,7 +20,7 @@ Test: `cargo test -p sandbox_v2_gpu` (prints SKIPPED when no GPU adapter).
 - Timers are written in SECONDS and converted once with `ticks(seconds) = ceil(seconds * 60)` (`ticks(0.5) == 30`).
 - `materials::MATERIALS[Material as usize]` holds `MaterialDef { density, terminal_cps, burn_s, evap_s, melt_k, boil_k }`
   (`NEVER = INFINITY` means "does not apply"). `condense_k` is the temperature below which a gas condenses (Steam 373.15 K, else `NEVER`).
-  `terminal_cps` drives sand/water; `burn_s`, `evap_s`, `melt_k`, `boil_k`, `condense_k` drive thermal/fire (`density` unused).
+  `terminal_cps` drives sand/water; `burn_s`, `melt_k`, `boil_k`, `condense_k` drive thermal/fire (`density` and `evap_s` unused; water boils by latent heat).
 - Material ids (0..=17) mirror v1 `sandbox_core::Material` variant for variant; `tests/units.rs::material_ids_match_v1` is the drift test.
 - `materials::WALL = 18` is the boundary-solid id. It is a non-material const (not in `MATERIALS`, not a `Material` variant) shared by the reference and shaders.
 
@@ -134,3 +134,40 @@ Known limits: granular/liquid moves leave a zeroed (0 K) cell behind (Task 3/4 b
 spot; fix when the passes are combined in the sim loop. Fire leaves Ash for every fuel (no smoke yet); oil/acid do not boil.
 
 Tests: `cargo test -p sandbox_v2_gpu --test thermal_fire_lava -- --nocapture`.
+
+## Particles (1M-capable GPU particle system)
+
+`src/reference_particles.rs` is the CPU reference (`ParticleReference`, `step_particle`, `Ring`) and DEFINES the rule;
+`src/shaders/particles.wgsl` (header generated in `particles.rs`) must match it bit for bit. `Particles::new(&gpu, cap)`
+allocates `cap <= Particles::MAX = 1_000_000` slots (32 MB at the max) and compiles the step pipeline once;
+`spawn(&gpu, &batch)` uploads at the ring head; `step(&gpu, &grid, dt)` is one dispatch (256 threads per workgroup) against
+the grid's current buffer, bind groups cached per grid; `readback`, `count`, `cap`, `buffer`, `sanitized_count`.
+
+- Layout: `ParticleRaw` (32 bytes, `#[repr(C)]`, Pod): `pos [f32;2]` @0, `vel [f32;2]` @8, `mat u32` @16, `temp f32` @20,
+  `life f32` @24, `_pad f32` @28. Units cells, cells/s (+y down), K, seconds. `mat`/`temp` are carried, not simulated.
+- Cap: a ring buffer. Spawning writes at `head` and wraps; beyond `cap` the OLDEST slots are overwritten and `count` stays
+  at `cap` (a batch larger than `cap` keeps its newest `cap` entries). Head and count live on the CPU (spawning is a CPU
+  upload); the count reaches the GPU in the params uniform. Dead particles keep their slot until recycled.
+- Motion: semi-implicit Euler at `dt = 1/n` s (`n >= 60`, asserted; normally `DT = 1/60`), integer fixed point with
+  `FP_ONE = 1024` units per cell: quantize `floor(x*1024)`, kick `vy += round(981*1024/n)`, drift `d = v / n` (truncating),
+  speed clamped to +-1800 cells/s per axis (<= 30 cells per tick). Stored back as `fp/1024`, exact in f32, so parity is
+  BITWISE (no float tolerance). Grid sides up to `MAX_SIDE = 16384` keep positions exact (asserted in `step`).
+- Launch: `ParticleRaw::launched(pos, vel, ..)` stores `vy - g*DT/2` (leapfrog start). With it, a 45 degree launch at
+  300 cells/s lands 91.731 cells away (v^2/g = 91.743, error 0.013%); a plain `vel` start is 3.87% short, matching the
+  semi-implicit Euler bias `g*DT/(sqrt(2) v)` = 3.85%.
+- Collision: the move is walked cell by cell (integer grid DDA, x first on an exact tie). Entering a solid cell (Stone,
+  Rock, Wood, Ash, Metal, Glass, Ice, `air::is_solid`) or leaving the grid (outside = WALL) reflects the crossed component as
+  `-(v*3)/5` (restitution 0.6), places the particle at the crossing point clamped inside the previous cell and drops the rest
+  of the move. No live particle ends a step inside a solid; a 1800 cells/s particle cannot tunnel through a one-cell wall.
+  A live particle found outside the grid or inside a solid at the start of a step (e.g. a cell became solid under it) is
+  killed. No friction: a particle on a floor keeps its horizontal speed and micro-bounces in place vertically.
+- Life: seconds directly, `life -= dt` in f32 each step after motion; `<= 0` becomes exactly 0 (dead, skipped). `+inf`
+  never expires.
+- Sanitizing (Review Focus 8): non-finite `pos`, `vel` or `temp`, or NaN `life`, zeroes the particle (dead, `mat` kept) and
+  increments a debug counter (`sanitized_count`).
+- Bindings: 1 uniform + 3 storage (particles rw, grid cells read-only, counter). Max storage bindings for this pass: 3 of 8.
+- Measured: 1 000 000 particles spawn, one step + 32 MB readback 30 ms (debug test build), bitwise equal to the reference;
+  parity over 300 ticks (40 000 slots, mid-run spawn wraps the ring, NaN and expiring particles): 0 mismatches; 20 000
+  particles at random speeds through an obstacle course for 300 ticks: 0 in-solid endings (CPU every tick, GPU every 10).
+
+Tests: `cargo test -p sandbox_v2_gpu --test particles -- --nocapture`.
