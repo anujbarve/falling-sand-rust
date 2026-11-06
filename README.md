@@ -5,6 +5,8 @@ Learning Rust by building 2D falling-sand simulations.
 - `sand/`: falling-sand sim with macroquad. Sand, water, stone, wood, fire, smoke, gunpowder, explosions.
 - `learn/`: the AI teaching system ([anujbarve/learn](https://github.com/anujbarve/learn)), as a git submodule. It's wired up for Claude Code, Antigravity and Codex via `AGENTS.md`, `.claude/` and `.agents/`.
 
+Built with [macroquad](https://macroquad.rs). Needs Rust 1.85 or later, because the crate uses the 2024 edition.
+
 ```bash
 git clone --recursive https://github.com/anujbarve/rusty
 cd rusty/sand && cargo run
