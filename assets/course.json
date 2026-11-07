@@ -1493,7 +1493,7 @@
     "work": [
       "Run all M0–M7 gates and list unresolved failures",
       "Create a release checklist with tag, changelog, licence notices, hashes and packaged artifacts",
-      "Prepare a fresh-install smoke test and the next episode's reproducible starting revision"
+      "Prepare a fresh-install smoke test and the next build's reproducible starting revision"
     ],
     "proof": "The game is release-ready on the claimed platforms, or the remaining blockers are named. Publish/tag/push only when explicitly requested.",
     "question": "What evidence separates release-ready from merely builds on my machine?",

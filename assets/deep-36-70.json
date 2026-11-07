@@ -71,18 +71,6 @@
         "fix": "Derive movement from current material and reset transition-specific flags."
       }
     ],
-    "episode": {
-      "hook": "Freeze a pond into a solid surface, then warm it back into flowing water.",
-      "beats": [
-        "Show the same pond before and after the conversion",
-        "Separate stored temperature from material identity",
-        "Trace all four threshold cases",
-        "Connect the helper to surface exposure",
-        "Demonstrate the round trip"
-      ],
-      "demo": "Capture a split-screen cold/warm fixture and the combined Water+Ice count.",
-      "recap": "A phase transition changes the material; heat rules decide when it becomes eligible."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -166,18 +154,6 @@
         "fix": "Recompute kind from material and document timing of its next move."
       }
     ],
-    "episode": {
-      "hook": "A snow-covered roof becomes a source of flowing water.",
-      "beats": [
-        "Show snow settling before warming",
-        "Explain identity versus appearance",
-        "Trace the temperature guard",
-        "Test painted and weather-created snow",
-        "Run the 200-tick visibility fixture"
-      ],
-      "demo": "Show the roof, the first water cell, and the eventual puddle with a tick counter.",
-      "recap": "Melting is one state conversion; settling and runoff come from reusable movement rules."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -261,18 +237,6 @@
         "fix": "Measure full fixture time rather than only calling the eligible helper."
       }
     ],
-    "episode": {
-      "hook": "A spoonful of water hits lava: steam rises and basalt remains.",
-      "beats": [
-        "Show the required one-second reaction",
-        "Trace heat and transition passes separately",
-        "Explain the explicit contact policy",
-        "Reverse neighbour orientation",
-        "Compare with the slower hot-sand fixture"
-      ],
-      "demo": "Keep a tick counter and material counts beside the smallest visible contact scene.",
-      "recap": "Local rules need a chosen order, conserved occupancy and a visible deadline."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -302,7 +266,7 @@
       },
       {
         "title": "Use a controlled trace before the full scene",
-        "html": "<p>Start one steam parcel at a known temperature and altitude. Each tick record temperature and altitude; stop on conversion. This gives a table that can be narrated on video: state before, cooling, rise, state after. Repeat with the source translated upward by 100 cells while keeping ambient fixed. The number of updates should stay the same. Then restore ambient altitude dependence and explain any changed result as climate, not camera behavior.</p>"
+        "html": "<p>Start one steam parcel at a known temperature and altitude. Each tick record temperature and altitude; stop on conversion. Repeat with the source translated upward by 100 cells while keeping ambient fixed. The number of updates should stay the same. Then restore ambient altitude dependence and explain any changed result as climate, not camera behavior.</p>"
       }
     ],
     "worked": {
@@ -356,18 +320,6 @@
         "fix": "Assert a positive cooling rate and bound test duration."
       }
     ],
-    "episode": {
-      "hook": "Move the camera without moving the place where steam becomes droplets.",
-      "beats": [
-        "Reproduce the camera-relative failure",
-        "Move complete state with the gas",
-        "Trace temperature against rise distance",
-        "Test a translated source",
-        "Contrast condensation with margin absorption"
-      ],
-      "demo": "Show an open-air trace and an otherwise identical trace trapped under a roof.",
-      "recap": "Condensation follows carried state and local cooling, not a screen-space line."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -451,18 +403,6 @@
         "fix": "Validate boundaries and test zero/length edge cases."
       }
     ],
-    "episode": {
-      "hook": "Change two parts of one buffer without copying it or fighting the borrow checker.",
-      "beats": [
-        "Reproduce an overlapping ownership claim",
-        "Draw the four-element split",
-        "Mutate left and right through slices",
-        "Read the original after last use",
-        "Explain why neighbour writes need another proof"
-      ],
-      "demo": "Use [0,10,20,30] so the mapping stays visible at every step.",
-      "recap": "An interface should lend exactly the region a helper may access."
-    },
     "sources": [
       {
         "label": "Rust slice splitting",
@@ -546,18 +486,6 @@
         "fix": "Keep the sequential path and enable parallel work only when measured beneficial."
       }
     ],
-    "episode": {
-      "hook": "Make the same simulation faster without changing its answer.",
-      "beats": [
-        "Show the sequential benchmark",
-        "Draw phase footprints before spawning",
-        "Demonstrate a safe disjoint-slice worker",
-        "Compare complete outputs",
-        "Measure the serial tail"
-      ],
-      "demo": "Run 1/2/4 workers on the same owned buffer, then explain the extra proof needed for neighbour writes.",
-      "recap": "Concurrency is an access proof plus a schedule, followed by a measurement."
-    },
     "sources": [
       {
         "label": "Scoped threads and lifetime guarantees",
@@ -645,18 +573,6 @@
         "fix": "Use coordinate/tick context or a fixed recorded sequence."
       }
     ],
-    "episode": {
-      "hook": "Force a grain to choose left, then right, without editing its movement rule.",
-      "beats": [
-        "Reproduce a branch hard to hit randomly",
-        "Name the single varying operation",
-        "Implement Fixed and a simple tick source",
-        "Read the generic bound in plain language",
-        "Integrate the seam into one movement test"
-      ],
-      "demo": "Use two identical blocked-grain fixtures with different injected choices.",
-      "recap": "A useful trait hides one real variation; it does not replace every enum."
-    },
     "sources": [
       {
         "label": "Rust traits and generic bounds",
@@ -740,18 +656,6 @@
         "fix": "Scope the fixture to the promised shared interior and a bounded horizon."
       }
     ],
-    "episode": {
-      "hook": "Replay the same water-and-heat scene and make the computer prove the answer matches.",
-      "beats": [
-        "Define all replay inputs",
-        "Show a canonical field order",
-        "Deliberately omit one field",
-        "Compare after every tick",
-        "Run the multi-thread gate with fixed multipliers"
-      ],
-      "demo": "Show a first-divergence report rather than only a green final hash.",
-      "recap": "Determinism is a contract over complete inputs and state, not a seed alone."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -781,7 +685,7 @@
       },
       {
         "title": "Observe a beam rather than a whole forest first",
-        "html": "<p>Build a short beam supporting one small roof group. Ignite the centre beam cell and track material, burning flag, timer and support outcome. It should remain rigid during positive fuel and become an ordinary conversion result when consumed. Then run the same fixture wet. This scene is small enough to explain every event on video and strong enough to catch the original instant-collapse bug. Only after it passes should the rule be tested in a hillside fire front.</p>"
+        "html": "<p>Build a short beam supporting one small roof group. Ignite the centre beam cell and track material, burning flag, timer and support outcome. It should remain rigid during positive fuel and become an ordinary conversion result when consumed. Then run the same fixture wet. Only after it passes should the rule be tested in a hillside fire front.</p>"
       }
     ],
     "worked": {
@@ -835,18 +739,6 @@
         "fix": "Clear source state explicitly when fuel is exhausted."
       }
     ],
-    "episode": {
-      "hook": "Burn a beam slowly enough to see the roof lose support at the right moment.",
-      "beats": [
-        "Reproduce instant collapse",
-        "Separate fuel state from flame gas",
-        "Trace a two-unit fuel counter",
-        "Add a wet control",
-        "Show support reevaluation at consumption"
-      ],
-      "demo": "Use one supported roof and one beam rather than a forest-scale fire.",
-      "recap": "Ignition changes state; consumed material changes structure."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -930,18 +822,6 @@
         "fix": "Derive coherent tint from the current documented state."
       }
     ],
-    "episode": {
-      "hook": "Make a metal sheet wet without pretending it is a sponge.",
-      "beats": [
-        "Show the rust prerequisite contradiction",
-        "Separate pores from surface film",
-        "Trace a hit on metal and soil",
-        "Connect the rust input",
-        "Review the packed-state decision"
-      ],
-      "demo": "Compare dry metal, wet metal and saturated soil in one table and three fixtures.",
-      "recap": "A compact field needs a precise meaning before multiple rules can share it."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1025,18 +905,6 @@
         "fix": "Use the paused integer world clock as its input."
       }
     ],
-    "episode": {
-      "hook": "Pan across a storm front without inventing a climate seam.",
-      "beats": [
-        "Show a hard column boundary",
-        "Derive midpoint blending",
-        "Separate baseline and player delta",
-        "Evaluate a fixed coordinate twice",
-        "Inspect tool-driven humidity"
-      ],
-      "demo": "Use a line of columns with baseline/delta/final values shown numerically.",
-      "recap": "World weather is an evaluable baseline plus explicitly stored history."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1120,18 +988,6 @@
         "fix": "Use surface ambient temperature instead."
       }
     ],
-    "episode": {
-      "hook": "Build a roof that actually keeps its contents dry.",
-      "beats": [
-        "Show identical rain over exposed and sheltered cells",
-        "Resolve the world receiver",
-        "Trace absorption and runoff",
-        "Choose snow from surface temperature",
-        "Clip the decorative pass using shelter"
-      ],
-      "demo": "Display roof and interior moisture values alongside the still rain scene.",
-      "recap": "Precipitation mutates one resolved world receiver; streaks only communicate the weather."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1215,18 +1071,6 @@
         "fix": "Make the boundary operation idempotent or atomic in the serial event application."
       }
     ],
-    "episode": {
-      "hook": "Watch smoke drift away while the sand stays in your world.",
-      "beats": [
-        "Compare gas and powder at one margin",
-        "Trace candidate selection under wind",
-        "Move the full cell record",
-        "Apply steam accounting once",
-        "Pan across the boundary fixture"
-      ],
-      "demo": "Use a tagged smoke, steam and ash parcel side by side.",
-      "recap": "Wind changes movement choices; material kind still owns conservation behavior."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1310,18 +1154,6 @@
         "fix": "Deduplicate/group changes and measure aggregate queue work."
       }
     ],
-    "episode": {
-      "hook": "Remove a wall and ask the whole roof whether anything holds it up.",
-      "beats": [
-        "Reproduce two cells supporting each other",
-        "Trace queue and visited cells",
-        "Identify external anchors",
-        "Show the cap as an explicit exception",
-        "Measure a burst of dirty support checks"
-      ],
-      "demo": "Use a tiny floating roof, then a deliberately over-limit roof.",
-      "recap": "Support is a group property, and bounded searches must reveal their approximation."
-    },
     "sources": [
       {
         "label": "Queue operations with VecDeque",
@@ -1405,18 +1237,6 @@
         "fix": "Apply the approved material/group-density flotation rule with dense controls."
       }
     ],
-    "episode": {
-      "hook": "Let a roof fall as a roof, then float a wooden raft.",
-      "beats": [
-        "Show cellwise deformation",
-        "Validate a shared candidate",
-        "Sweep the three-row path",
-        "Demonstrate weak-impact boundaries",
-        "Compare buoyant and dense fixtures"
-      ],
-      "demo": "Record a fixed-offset beam drop and raft/stone controls in water.",
-      "recap": "Rigid movement is an all-member transaction, not many independent falls."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1500,18 +1320,6 @@
         "fix": "Inventory ownership before/after launch, save and landing."
       }
     ],
-    "episode": {
-      "hook": "Throw one tagged cell into the air and get the same cell back.",
-      "beats": [
-        "Move state out of the grid",
-        "Explain velocity units",
-        "Integrate a fixed tick",
-        "Sweep a thin wall",
-        "Bound landing and discuss saving"
-      ],
-      "demo": "Track grid+particle ownership counts beside one projectile.",
-      "recap": "Particles temporarily own material and must return it through a defined bounded operation."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1595,18 +1403,6 @@
         "fix": "Cap radius/event count and inspect total selected cells per tick."
       }
     ],
-    "episode": {
-      "hook": "One charge, one blast: heat, debris and a real crater.",
-      "beats": [
-        "Consume a single ignition event",
-        "Draw the bounded selection square/circle",
-        "Classify hardness outcomes",
-        "Transfer thrown material",
-        "Demonstrate cap overflow accounting"
-      ],
-      "demo": "Use a small stone/soil box with one charge and visible selected-cell counts.",
-      "recap": "An explosion is a bounded consumed event whose material outcomes are mutually exclusive."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1690,18 +1486,6 @@
         "fix": "Apply the strike in the simulation event phase; schedule sound as an output."
       }
     ],
-    "episode": {
-      "hook": "Strike a roof and show exactly which material receives the energy.",
-      "beats": [
-        "Resolve one column from above",
-        "Contrast bolt drawing and heat",
-        "Trace a connected metal strip",
-        "Test a nonconductive gap",
-        "Move the camera without changing the receiver"
-      ],
-      "demo": "Show roof/interior temperatures and the selected hit index before displaying the bolt.",
-      "recap": "Resolve the world target first; render the bolt and play thunder afterward."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1785,18 +1569,6 @@
         "fix": "Include cooldown state in the snapshot inventory."
       }
     ],
-    "episode": {
-      "hook": "Trigger the same storm from a button, a test and a replay command.",
-      "beats": [
-        "Distinguish tools from materials",
-        "Map UI input to a command",
-        "Name cooldown and fuse clocks",
-        "Test one-before/exact-ready boundaries",
-        "Show rejection feedback"
-      ],
-      "demo": "Display a deadline counter, pause, and confirm it does not advance.",
-      "recap": "Commands separate input from rules; named clocks make durations unambiguous."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1814,7 +1586,7 @@
     "sections": [
       {
         "title": "Build one repeatable scene, not a random showcase",
-        "html": "<p>Use a fixed hand-built hillside with a small house, dry grass, wet wood and a water basin. The M4 generator does not exist yet, so do not make this gate depend on generated lakes or biomes. Store fixture construction in code with a seed and initial climate context. The same scene can be used in tests, a manual play check and the episode recording. That shared fixture makes an observed problem easier to reproduce outside the video.</p>"
+        "html": "<p>Use a fixed hand-built hillside with a small house, dry grass, wet wood and a water basin. The M4 generator does not exist yet, so do not make this gate depend on generated lakes or biomes. Store fixture construction in code with a seed and initial climate context. That shared fixture makes an observed problem easier to reproduce outside the video.</p>"
       },
       {
         "title": "Assert the sequence of causes and effects",
@@ -1880,18 +1652,6 @@
         "fix": "Measure the complete tick including event-driven tails."
       }
     ],
-    "episode": {
-      "hook": "One hillside proves fire, shelter, rain and collapse can cooperate.",
-      "beats": [
-        "Show the target story first",
-        "Build fixed scene inputs",
-        "Timestamp each required reaction",
-        "Pan the active margin",
-        "Record whole-frame evidence"
-      ],
-      "demo": "Capture the same fixture under dry fire, rain suppression and removed support.",
-      "recap": "An integration gate needs reproducible observations, not a checklist of implemented functions."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -1975,18 +1735,6 @@
         "fix": "Name and test the intended physics/calendar clock."
       }
     ],
-    "episode": {
-      "hook": "Give the world a calendar without letting frame rate define the date.",
-      "beats": [
-        "Explain the two counters",
-        "Derive day/season/year by division",
-        "Test exact boundaries",
-        "Show display numbering separately",
-        "Advance one high-multiplier update"
-      ],
-      "demo": "Display step_tick and world_tick side by side at 1x and accelerated calendar speed.",
-      "recap": "Count completed updates and simulated calendar time separately."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2070,18 +1818,6 @@
         "fix": "Inject synthetic elapsed durations and tick costs."
       }
     ],
-    "episode": {
-      "hook": "Drag the window, pause, change speed—and stop old work from bursting back.",
-      "beats": [
-        "Replay the simple teaching clock",
-        "Trace accepted elapsed time",
-        "Plan bounded due work",
-        "Explain non-preemptible overshoot",
-        "Test pause and speed resets"
-      ],
-      "demo": "Show a table of synthetic frame deltas, due counts, executed counts and retained debt.",
-      "recap": "A scheduler needs explicit ownership of elapsed time, work budgets and both kinds of debt."
-    },
     "sources": [
       {
         "label": "Monotonic elapsed measurement with Instant",
@@ -2165,18 +1901,6 @@
         "fix": "Validate shared scheduler inputs and keep one authoritative debt calculation."
       }
     ],
-    "episode": {
-      "hook": "Fit ten units of world time into three updates without losing a unit.",
-      "beats": [
-        "Show the wrong all-rounded schedules",
-        "Derive 4,3,3 from remaining budget",
-        "Implement safe ceiling division",
-        "Stop the plan early",
-        "Distinguish calendar debt from physics debt"
-      ],
-      "demo": "Animate the numbers on a small table rather than hiding them in a frame loop.",
-      "recap": "Exact scheduling is a sum invariant plus a precise commit point."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2260,18 +1984,6 @@
         "fix": "Follow the chosen clipping-rate contract explicitly."
       }
     ],
-    "episode": {
-      "hook": "Visit just a few cells per tick without losing reproducibility.",
-      "beats": [
-        "Derive a modular permutation",
-        "Show distinct picks on one chunk",
-        "Calculate expected visits per day",
-        "Clip a partial active chunk",
-        "Expose the stale-parity counterexample"
-      ],
-      "demo": "Colour selected indices in a 64×64 teaching grid and repeat a fixed seed.",
-      "recap": "Bounded sampling needs distinctness, documented rates and a correct notion of already updated."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2355,18 +2067,6 @@
         "fix": "Check declared acceptance outcomes and record the approximation."
       }
     ],
-    "episode": {
-      "hook": "Fast-forward a season without turning decay into an invisible instant jump.",
-      "beats": [
-        "Compare too-few large visits with more unit picks",
-        "Derive survival probability",
-        "Catch fractional-progress loss",
-        "Guard same-tick neighbour chains",
-        "Run forced high-M fixtures"
-      ],
-      "demo": "Show P, m, a progress bar and stage changes for M=1,16,32.",
-      "recap": "Bounded fast-forward preserves some rates and bounds, but it remains an explicitly tested approximation."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2450,18 +2150,6 @@
         "fix": "Measure a full-year water budget across fixed seeds before tuning."
       }
     ],
-    "episode": {
-      "hook": "Make a puddle dry, keep a lake alive, and explain where the water went.",
-      "beats": [
-        "Separate liquid from stored moisture",
-        "Trace a capacity-limited pair transfer",
-        "Apply sheltered versus exposed drying",
-        "Count surface evaporation",
-        "Run the regional balance fixture"
-      ],
-      "demo": "Show upper/lower moisture totals beside a puddle and a deeper basin.",
-      "recap": "Local transfers and approximate weather sources need different accounting tests."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2545,18 +2233,6 @@
         "fix": "Connect the earlier nonporous surface-wetting rule."
       }
     ],
-    "episode": {
-      "hook": "Watch a hut grow old through visible stages instead of disappearing on a timer.",
-      "beats": [
-        "Initialize matched wet/dry beams",
-        "Trace conditional progress",
-        "Cross Wood→RottenWood once",
-        "Show weakened structural response",
-        "Inspect rust as whole-cell loss"
-      ],
-      "demo": "Display moisture and progress bars while the material transitions remain visible.",
-      "recap": "Decay combines qualifying exposure history with one explicit state change at a time."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2640,18 +2316,6 @@
         "fix": "Separate gravity stability from weather erosion before tuning rates."
       }
     ],
-    "episode": {
-      "hook": "Carve a visible rain channel without deleting the hillside.",
-      "beats": [
-        "Show dry and rainy controls",
-        "Resolve downhill eligibility",
-        "Move one conserved parcel",
-        "Handle destination conflicts",
-        "Compare one day with many years"
-      ],
-      "demo": "Overlay before/after surface profiles and material counts on the same fixture.",
-      "recap": "Erosion is bounded transfer tuned against both immediate readability and long-term shape."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2735,18 +2399,6 @@
         "fix": "Stage edits or use correct full-tick eligibility metadata."
       }
     ],
-    "episode": {
-      "hook": "Burn every blade of grass, then explain where the next blade comes from.",
-      "beats": [
-        "Demonstrate neighbour-only failure",
-        "Name the absent source",
-        "Compare root and seed proposals",
-        "Test lit/wet versus buried/dry controls",
-        "Record the milestone decision"
-      ],
-      "demo": "Show the isolated fixture first so the mechanism is discovered rather than assumed.",
-      "recap": "Recovery requires a source; no amount of repeated sampling can replace an absent prerequisite."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2830,18 +2482,6 @@
         "fix": "Limit work per executed tick and test blocked/dense cases."
       }
     ],
-    "episode": {
-      "hook": "Grow a tree around a changing world, then let autumn return its leaves to soil.",
-      "beats": [
-        "Start with a three-cell template",
-        "Add one checked target at a time",
-        "Place an obstacle mid-growth",
-        "Trace attached versus litter states",
-        "Compare evergreen and deciduous cycles"
-      ],
-      "demo": "Record the same sapling before and after the player builds a roof in its future path.",
-      "recap": "A living template proposes edits; the current world decides whether each edit is valid."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2871,7 +2511,7 @@
       },
       {
         "title": "Name the high-speed mismatch",
-        "html": "<p>At a large multiplier, the sky and ambient target can advance many calendar units while only one physical heat/movement update occurs. A winter may arrive before a deep lake has had normal-speed-equivalent cooling. That is an accepted fast-forward approximation if its visual outcome meets the milestone requirements. Record multiplier sequences and compare visible results at 1x,16x,64x. Exact calendar arithmetic does not establish identical physical states at the same date; avoid promising that in the episode narration.</p>"
+        "html": "<p>At a large multiplier, the sky and ambient target can advance many calendar units while only one physical heat/movement update occurs. A winter may arrive before a deep lake has had normal-speed-equivalent cooling. That is an accepted fast-forward approximation if its visual outcome meets the milestone requirements. Record multiplier sequences and compare visible results at 1x,16x,64x.</p>"
       }
     ],
     "worked": {
@@ -2925,18 +2565,6 @@
         "fix": "Test multiplier cases and tune/limit the accepted approximation."
       }
     ],
-    "episode": {
-      "hook": "Let winter arrive through the world rather than a global recolour switch.",
-      "beats": [
-        "Show a season boundary",
-        "Derive sky and ambient from one clock",
-        "Compare exposed and sheltered cells",
-        "Let heat create ice locally",
-        "Inspect the high-multiplier approximation"
-      ],
-      "demo": "Track calendar date, executed steps and pond surface/deep temperature together.",
-      "recap": "Calendar controls conditions; local material rules produce their consequences."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -2958,7 +2586,7 @@
       },
       {
         "title": "Use crafted terrain before the generator exists",
-        "html": "<p>M3 comes before M4 procedural generation. Build the plains-and-lake fixture directly with a known bowl, saturated underlying soil, stable slopes, grass/tree sources and climate inputs. Store the fixture parameters in code and reuse them in the episode scene. This prevents a later generator dependency from blocking ecological work and makes any water-level change easier to attribute. A handcrafted scene is valid evidence for the scoped M3 gate, not proof that every future generated lake is stable.</p>"
+        "html": "<p>M3 comes before M4 procedural generation. Build the plains-and-lake fixture directly with a known bowl, saturated underlying soil, stable slopes, grass/tree sources and climate inputs. This prevents a later generator dependency from blocking ecological work and makes any water-level change easier to attribute. A handcrafted scene is valid evidence for the scoped M3 gate, not proof that every future generated lake is stable.</p>"
       },
       {
         "title": "Measure multiple outputs at the end",
@@ -3020,18 +2648,6 @@
         "fix": "Retain vegetation, silhouette and long-run material observations too."
       }
     ],
-    "episode": {
-      "hook": "Run a whole year and ask whether the world is still alive.",
-      "beats": [
-        "Build the crafted plains/lake fixture",
-        "Run one fixed regression seed",
-        "Explain the 32-seed reliability suite",
-        "Measure the 20-percent boundary",
-        "Diagnose one deliberate failed seed"
-      ],
-      "demo": "Show start/end lake and vegetation counts alongside the same fixed camera.",
-      "recap": "Long-run health requires several measured outcomes and reproducible failures, not one lucky clip."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -3115,18 +2731,6 @@
         "fix": "Subtract the actual view rectangle origin before cell conversion."
       }
     ],
-    "episode": {
-      "hook": "Pan across zero without flipping gravity or losing the clicked cell.",
-      "beats": [
-        "Name world/view/chunk spaces",
-        "Derive top-y visually",
-        "Round-trip a world cell",
-        "Test negative chunk boundaries",
-        "Pick the same cell after panning"
-      ],
-      "demo": "Use a labelled coordinate grid with one cell and a moving camera rectangle.",
-      "recap": "Coordinate conversions are interfaces between spaces; physics should not inherit screen conventions."
-    },
     "sources": [
       {
         "label": "Euclidean integer division",
@@ -3210,18 +2814,6 @@
         "fix": "Use wrapping operations explicitly and test both build modes."
       }
     ],
-    "episode": {
-      "hook": "Generate the same hill even when you explore it from the other direction.",
-      "beats": [
-        "Compare visit-order RNG with coordinate addressing",
-        "Blend coarse samples into a hill",
-        "Handle negative intervals",
-        "Evaluate chunks in reverse order",
-        "Record the generator algorithm/version"
-      ],
-      "demo": "Show the same terrain generated left-to-right and right-to-left with equal sampled heights.",
-      "recap": "Seeded worlds need coordinate-addressed deterministic generation, not just a random seed."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",
@@ -3305,18 +2897,6 @@
         "fix": "Measure moves over time and inspect water/soil initialization."
       }
     ],
-    "episode": {
-      "hook": "Generate a mountain that stays a mountain when physics starts.",
-      "beats": [
-        "Show a collapsing generated slope",
-        "Compare slope and repose conditions",
-        "Choose soil versus exposed stone",
-        "Inspect layered cross-sections",
-        "Run the 600-tick rest fixture"
-      ],
-      "demo": "Display the same height profile with naive soil and stable material placement.",
-      "recap": "Generation must produce states the simulation already considers stable."
-    },
     "sources": [
       {
         "label": "Project rules and visibility deadlines",

@@ -9,14 +9,14 @@
       },
       {
         "title": "What exactly are we installing?",
-        "html": "<p>The installer is <code>rustup</code>, which downloads and selects Rust toolchains. <code>rustc</code> is the Rust compiler: it translates source instructions into compiled output. <code>cargo</code> manages a package, builds dependencies, invokes the compiler, and runs development tasks. These tools work together, but they are not interchangeable.</p><p>Building a native executable also needs a linker and system development files. On macOS, check <code>xcode-select -p</code>. If the developer tools are missing, run <code>xcode-select --install</code> and complete the Apple dialog. This is separate from installing the full Xcode application. Keep this step visible in the recording: viewers often have Rust installed but cannot link their first executable.</p>"
+        "html": "<p>The installer is <code>rustup</code>, which downloads and selects Rust toolchains. <code>rustc</code> is the Rust compiler: it translates source instructions into compiled output. <code>cargo</code> manages a package, builds dependencies, invokes the compiler, and runs development tasks. These tools work together, but they are not interchangeable.</p><p>Building a native executable also needs a linker and system development files. On macOS, check <code>xcode-select -p</code>. If the developer tools are missing, run <code>xcode-select --install</code> and complete the Apple dialog. This is separate from installing the full Xcode application.</p>"
       },
       {
         "title": "Install on macOS, then start a fresh shell",
         "html": "<p>Use the official rustup command shown below. It downloads the installer over HTTPS and executes it in a shell. Read the installer prompts and choose the default stable installation unless you already have a deliberate toolchain setup. The installed files normally live under your user account, with command shims in <code>$HOME/.cargo/bin</code>.</p><p>After installation, close and reopen Terminal. Alternatively, for the current POSIX-style shell, run <code>source \"$HOME/.cargo/env\"</code>. Then repeat all three version checks. The version strings and hashes will change over time; the important observation is that each command is found and reports its own version. <code>command -v cargo</code> tells you which executable the shell is resolving. If it points somewhere unexpected, inspect that before editing shell configuration blindly.</p>"
       },
       {
-        "title": "Windows and Linux viewers: same tools, different native prerequisites",
+        "title": "Windows and Linux: same tools, different native prerequisites",
         "html": "<p>On Windows, use the installer linked from the official Rust installation page. Choose the documented MSVC setup and complete its Visual Studio C++ build tools requirements. Open a fresh PowerShell window and run the same version commands. Do not paste the macOS <code>source</code> command into PowerShell; its shell syntax is different.</p><p>On Linux, the rustup installation command is the same as macOS, but native development packages come from the distribution. Ubuntu commonly uses <code>sudo apt update</code> followed by <code>sudo apt install build-essential</code>; other distributions use their own package names and managers. Install only the prerequisites relevant to your system. The goal across platforms is identical: a compiler, Cargo, toolchain management, and a working native linker. The next lesson proves them together by compiling a real program.</p>"
       },
       {
@@ -51,7 +51,7 @@
         "proof": "The fresh terminal finds Rust, or you can name the remaining PATH issue precisely."
       },
       {
-        "title": "Explain the chain for your episode",
+        "title": "Explain the toolchain",
         "prompt": "Without reading, explain what rustup, Cargo, rustc and the linker contribute.",
         "hint": "Installation, orchestration, compilation, and final executable assembly are separate jobs.",
         "solution": "<p>A concise explanation is: rustup manages toolchains; Cargo coordinates package builds; rustc compiles Rust; the native linker combines compiled pieces and system libraries into a runnable executable. We installed the tools needed for that chain, but have not yet built our game.</p>",
@@ -75,17 +75,6 @@
         "fix": "Check that the stable toolchain is active and continue unless a dependency documents a specific minimum."
       }
     ],
-    "episode": {
-      "hook": "Before our world can contain a falling grain, the computer must be able to turn Rust source into a runnable program. Today we install that toolchain and prove it works. A successful download alone is not the finish line: a new terminal must find the commands and the native linker must be available.",
-      "beats": [
-        "Begin with the terminal, not the installer",
-        "What exactly are we installing?",
-        "Install on macOS, then start a fresh shell",
-        "Windows and Linux viewers: same tools, different native prerequisites"
-      ],
-      "demo": "Run rustc, Cargo and rustup successfully in a fresh terminal, and identify the job of each tool.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: install",
@@ -95,11 +84,11 @@
   },
   "2": {
     "outcome": "Create game/, edit its source, and compile and run your own first Rust executable.",
-    "why": "We now have tools, but tools are not a game. This lesson connects one text file to a running executable. That edit–save–build–run cycle is the foundation of every episode, so we will inspect the folders and output rather than treating cargo run as a magic incantation.",
+    "why": "We now have tools, but tools are not a game. This lesson connects one text file to a running executable. That edit–save–build–run cycle is the foundation of every build, so we will inspect the folders and output rather than treating cargo run as a magic incantation.",
     "sections": [
       {
         "title": "Create a package in the correct place",
-        "html": "<p>Start in Terminal at the <code>rusty</code> repository root. Check <code>pwd</code> and <code>ls</code>; you should recognize the course and docs folders. If you are elsewhere, use <code>cd /Users/anujbarve/Documents/rusty</code> on this Mac. Viewers must substitute their own checkout path. Then run <code>cargo new game --vcs none</code>. This creates a package called game without creating a nested Git repository.</p><p>If <code>game/</code> already exists, stop and inspect it; do not delete or overwrite existing work. Enter the package with <code>cd game</code>. From now on, Cargo commands in these early lessons run here. The distinction matters: the repository root contains learning documents, while <code>game/Cargo.toml</code> identifies the executable package Cargo should build.</p>"
+        "html": "<p>Start in Terminal at the <code>rusty</code> repository root. Check <code>pwd</code> and <code>ls</code>; you should recognize the course and docs folders. If you are elsewhere, use <code>cd /Users/anujbarve/Documents/rusty</code> on this Mac. Use your own checkout path. Then run <code>cargo new game --vcs none</code>. This creates a package called game without creating a nested Git repository.</p><p>If <code>game/</code> already exists, stop and inspect it; do not delete or overwrite existing work. Enter the package with <code>cd game</code>. From now on, Cargo commands in these early lessons run here. The distinction matters: the repository root contains learning documents, while <code>game/Cargo.toml</code> identifies the executable package Cargo should build.</p>"
       },
       {
         "title": "Read the package before running it",
@@ -115,7 +104,7 @@
       },
       {
         "title": "The complete first-run terminal sequence",
-        "html": "<p>On your Mac, start at this repository path. Viewers should substitute their own checkout path. First check whether a <code>game</code> folder already exists; if so, inspect it rather than recreating it.</p><pre><code>cd /Users/anujbarve/Documents/rusty\npwd\nls</code></pre><p>For a new project, create and enter the package, then run the generated program:</p><pre><code>cargo new game --vcs none\ncd game\ncargo run</code></pre><p>The first program prints <code>Hello, world!</code>. Open <code>src/main.rs</code>, replace its contents with the worked source below and save it. Then run these commands from the same <code>game/</code> folder:</p><pre><code>cargo fmt\ncargo check\ncargo run</code></pre><p>The final output now contains <code>Our ecological sandbox begins here.</code>. If it still prints the old greeting, confirm the edited file is saved and that the terminal is in the package containing that file. If Cargo says it cannot find <code>Cargo.toml</code>, check <code>pwd</code> and enter <code>game/</code>; do not reinstall Rust.</p>"
+        "html": "<p>On your Mac, start at this repository path. Use your own checkout path. First check whether a <code>game</code> folder already exists; if so, inspect it rather than recreating it.</p><pre><code>cd /Users/anujbarve/Documents/rusty\npwd\nls</code></pre><p>For a new project, create and enter the package, then run the generated program:</p><pre><code>cargo new game --vcs none\ncd game\ncargo run</code></pre><p>The first program prints <code>Hello, world!</code>. Open <code>src/main.rs</code>, replace its contents with the worked source below and save it. Then run these commands from the same <code>game/</code> folder:</p><pre><code>cargo fmt\ncargo check\ncargo run</code></pre><p>The final output now contains <code>Our ecological sandbox begins here.</code>. If it still prints the old greeting, confirm the edited file is saved and that the terminal is in the package containing that file. If Cargo says it cannot find <code>Cargo.toml</code>, check <code>pwd</code> and enter <code>game/</code>; do not reinstall Rust.</p>"
       }
     ],
     "worked": {
@@ -169,17 +158,6 @@
         "fix": "Use ordinary double quotes around the text and read the first indicated source location."
       }
     ],
-    "episode": {
-      "hook": "We now have tools, but tools are not a game. This lesson connects one text file to a running executable. That edit–save–build–run cycle is the foundation of every episode, so we will inspect the folders and output rather than treating cargo run as a magic incantation.",
-      "beats": [
-        "Create a package in the correct place",
-        "Read the package before running it",
-        "Build, launch, and separate the kinds of output",
-        "Use the three everyday checks"
-      ],
-      "demo": "Create game/, edit its source, and compile and run your own first Rust executable.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: cargo",
@@ -259,17 +237,6 @@
         "fix": "Inspect the dependency of each expression instead of expecting all outputs to change."
       }
     ],
-    "episode": {
-      "hook": "A cell needs a remembered position before it can move. Hardcoding numbers everywhere would make a grain’s identity disappear into arithmetic. Bindings let us name the quantities first, then derive drawing coordinates from them.",
-      "beats": [
-        "Begin with the quantity, not the keyword",
-        "Follow the program in order",
-        "Derive pixels from cells",
-        "Make one controlled change at a time"
-      ],
-      "demo": "Store a cell’s column and row in named values and calculate its drawing position.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: variables",
@@ -349,17 +316,6 @@
         "fix": "Use the current downward-row convention until the conversion lesson; do not compensate with unrelated camera changes."
       }
     ],
-    "episode": {
-      "hook": "Yesterday’s position was fixed for one run. Falling means the same piece of state must take a new value during that run. Rust makes that permission explicit with mut, which helps us distinguish fixed configuration from changing simulation state.",
-      "beats": [
-        "Reassignment is different from choosing an initial value",
-        "Read the update as a state transition",
-        "Use the compiler as an experiment",
-        "Contrast reassignment with shadowing"
-      ],
-      "demo": "Use mutable state for a falling row and explain the compiler error when reassignment is forbidden.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: variables",
@@ -439,17 +395,6 @@
         "fix": "Keep simulation coordinates integer and draw relative to the nearby camera origin."
       }
     ],
-    "episode": {
-      "hook": "A number alone does not explain what it measures. Column 12 is a cell count; drawing x 48.0 is a position in drawing units; 0.05 is a duration in seconds. Types and names help us keep those meanings separate before movement bugs become visually confusing.",
-      "beats": [
-        "Whole positions belong to an integer grid",
-        "Drawing asks for a different representation",
-        "Type correctness is necessary, not sufficient",
-        "Use conversions deliberately and test their limits"
-      ],
-      "demo": "Distinguish integer grid coordinates, floating-point drawing units and elapsed seconds without accidental type or unit mixing.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: types",
@@ -529,17 +474,6 @@
         "fix": "Update each caller to satisfy the new parameter list."
       }
     ],
-    "episode": {
-      "hook": "Once we calculate drawing positions in several places, repeated arithmetic becomes a maintenance risk. A function gives one calculation a name and a contract: what input it accepts and what output it returns. We can discover the function by first noticing the duplication it removes.",
-      "beats": [
-        "Find the repeated operation",
-        "Read the signature as an interface",
-        "Expressions can be returned directly",
-        "Call it from more than one context"
-      ],
-      "demo": "Write and call a small typed function that converts a cell coordinate into a drawing coordinate.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: functions",
@@ -565,7 +499,7 @@
       },
       {
         "title": "Use a terminal decision before graphical motion",
-        "html": "<p>A printed word is enough to verify the condition today. We will later turn the branch into a mutation and add destination clamping or path inspection. Separating decision from movement keeps the source of an error visible: first establish what counts as blocked, then implement what happens when free.</p><p>For the episode, draw three simple cell rows or use the verified diagram: a grain above the landing row, a grain touching the floor, and an invalid grain overlapping it. Ask viewers to predict the condition result before running. This is a small piece of simulation reasoning they can reuse for walls, liquids and brush bounds.</p>"
+        "html": "<p>A printed word is enough to verify the condition today. We will later turn the branch into a mutation and add destination clamping or path inspection. This is a small piece of simulation reasoning they can reuse for walls, liquids and brush bounds.</p>"
       }
     ],
     "worked": {
@@ -619,17 +553,6 @@
         "fix": "Use an explicit comparison that evaluates to true or false."
       }
     ],
-    "episode": {
-      "hook": "Movement is not merely adding to a coordinate. A grain must first decide whether the proposed region is available. An if condition gives us the first explicit rule in the simulation: above the landing row it may move; at the landing row it must rest.",
-      "beats": [
-        "Define the boundary in cell units",
-        "A comparison produces a boolean",
-        "Trace both branches, including equality",
-        "Use a terminal decision before graphical motion"
-      ],
-      "demo": "Use a boolean condition to distinguish a falling grain from a grain already resting above a floor.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: control",
@@ -709,17 +632,6 @@
         "fix": "Do not confuse a loop-entry condition with destination clamping."
       }
     ],
-    "episode": {
-      "hook": "A frame loop will repeat while the game window exists. Before that, we need a repeatable experiment small enough to trace completely. A finite while loop lets us see how a condition and a state update cooperate to produce several steps rather than one.",
-      "beats": [
-        "Replace repeated typing with a rule",
-        "Keep a state table beside the code",
-        "Remove the progress and observe the consequence",
-        "Separate an update loop from elapsed time"
-      ],
-      "demo": "Trace a finite loop and identify exactly what makes it terminate.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: control",
@@ -772,7 +684,7 @@
         "prompt": "Why call clear_background inside the loop instead of only once before it?",
         "hint": "Each presented frame is built again through the frame API.",
         "solution": "<p>The frame loop explicitly redraws the current scene. Clearing establishes that frame’s background before objects are drawn. Relying on old frame contents is not the rendering contract we are using.</p>",
-        "proof": "You can narrate clear, draw, yield as separate operations."
+        "proof": "You can explain clear, draw, and yield as separate operations."
       },
       {
         "title": "Inspect dependency setup",
@@ -799,17 +711,6 @@
         "fix": "Keep the low-DPI teaching restriction now; production art-buffer/DPI handling is a later lesson."
       }
     ],
-    "episode": {
-      "hook": "Our program can already hold and update state, but it only speaks through terminal lines. macroquad provides a window and drawing API so the same Rust code can begin showing the world. We will inspect the minimal frame loop instead of pasting an unexplained game engine.",
-      "beats": [
-        "Add the dependency in the manifest",
-        "Read the configuration as data",
-        "Follow one complete frame",
-        "Run and observe the boundary between code and operating system"
-      ],
-      "demo": "Launch a responsive 1280×720 window with the game’s dark-sky base colour.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: macroquad",
@@ -889,17 +790,6 @@
         "fix": "Use column for x and row for y."
       }
     ],
-    "episode": {
-      "hook": "An empty window proves the graphics setup, but the first visible piece of our game is a cell. We will connect the named state from earlier lessons to rectangle arguments, keeping position, size and colour separate so none becomes an unexplained magic value.",
-      "beats": [
-        "Place drawing between clear and present",
-        "Derive the location from a cell coordinate",
-        "Use one flat material colour",
-        "Keep state stable across redraws"
-      ],
-      "demo": "Draw a crisp four-by-four pixel sand cell at a position derived from grid coordinates.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: macroquad",
@@ -925,7 +815,7 @@
       },
       {
         "title": "Keep the model small enough to explain",
-        "html": "<p>This Cell has only coordinates; it is a teaching representation of one visible grain, not the final eight-byte simulation cell. The production design stores coordinates implicitly in grid/chunk location and stores material state in each slot. We will change the representation when a grid exists.</p><p>That change is normal. We introduce a struct because it solves the present problem of coherent state, not because every later engine must store a position in every cell. End the episode by changing only row and confirming column remains unchanged. The viewer should see a named, inspectable value rather than an unexplained architecture diagram.</p>"
+        "html": "<p>This Cell has only coordinates; it is a teaching representation of one visible grain, not the final eight-byte simulation cell. The production design stores coordinates implicitly in grid/chunk location and stores material state in each slot. We will change the representation when a grid exists.</p><p>That change is normal. We introduce a struct because it solves the present problem of coherent state, not because every later engine must store a position in every cell.</p>"
       }
     ],
     "worked": {
@@ -979,17 +869,6 @@
         "fix": "Move construction before the loop so the same state survives redraws."
       }
     ],
-    "episode": {
-      "hook": "A single grain can survive as two loose variables. Multiple grains, reset functions and simulation updates will make that fragile. A struct lets us express “these coordinates belong to one cell” as a type rather than relying on matching variable names by convention.",
-      "beats": [
-        "Find the relationship we want to preserve",
-        "Type definition and value construction are different steps",
-        "Decide where the value should live",
-        "Keep the model small enough to explain"
-      ],
-      "demo": "Define a Cell struct and keep its named coordinate fields together across frames.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: structs",
@@ -1015,7 +894,7 @@
       },
       {
         "title": "Choose the interface from the job",
-        "html": "<p>Drawing needs temporary read access while main keeps ownership. Reset needs temporary write access to that same original. Neither task requires consuming the Cell. A future channel message or particle list, by contrast, may deliberately transfer ownership to another subsystem. Ownership is useful control, not simply an obstacle to bypass.</p><p>For this episode, show the failing program first, narrate the two relevant source locations, and compare a small i32 function. Stop at explaining why the API is wrong for drawing. The next lesson introduces references as the motivated repair; keeping the lessons separate prevents several unexplained changes from landing at once.</p>"
+        "html": "<p>Drawing needs temporary read access while main keeps ownership. Reset needs temporary write access to that same original. Neither task requires consuming the Cell. A future channel message or particle list, by contrast, may deliberately transfer ownership to another subsystem. Stop at explaining why the API is wrong for drawing. The next lesson introduces references as the motivated repair; keeping the lessons separate prevents several unexplained changes from landing at once.</p>"
       }
     ],
     "worked": {
@@ -1070,17 +949,6 @@
         "fix": "Use the next lesson’s borrow when ownership should stay with the caller."
       }
     ],
-    "episode": {
-      "hook": "We want to pass a cell into a drawing helper, then use it again next frame. Passing the whole value by ownership would prevent that for our custom non-Copy type. Rather than introducing borrowing as arbitrary punctuation, we first build the precise problem it solves.",
-      "beats": [
-        "Ask who owns the value after the call",
-        "Make the failure small and intentional",
-        "Why did integers appear to work differently?",
-        "Choose the interface from the job"
-      ],
-      "demo": "Recognize a moved-value diagnostic and distinguish a non-Copy struct from copied numeric values.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: ownership",
@@ -1160,17 +1028,6 @@
         "fix": "Shorten the shared usage sequence or reorder operations so access does not conflict."
       }
     ],
-    "episode": {
-      "hook": "The drawing helper should be allowed to read the cell, while reset should change it. In both cases main must keep ownership for the next frame. References express those access contracts directly, solving the moved-value problem we just observed.",
-      "beats": [
-        "Borrow instead of transfer",
-        "Mutation needs a different permission",
-        "Reason about when access overlaps",
-        "Connect the contracts back to the window"
-      ],
-      "demo": "Use shared and mutable references so helpers inspect or update a cell without taking ownership.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: borrowing",
@@ -1251,17 +1108,6 @@
         "fix": "Use the teaching cap/discard policy now and the later production budget policy when implementing fast-forward."
       }
     ],
-    "episode": {
-      "hook": "If we add one row every rendered frame, a 120 FPS display runs movement four times as fast as a 30 FPS display. A simulation tick must therefore be scheduled from elapsed time, not counted redraws. We can derive the accumulator from the need to remember incomplete time between frames.",
-      "beats": [
-        "Separate showing the state from changing it",
-        "Remember the unspent fraction",
-        "Handle more than one due update",
-        "Verify with synthetic time before a live window"
-      ],
-      "demo": "Schedule a simple 1x simulation update every 0.05 seconds independently of drawing frequency.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: time",
@@ -1287,7 +1133,7 @@
       },
       {
         "title": "Know what this collision rule does not cover",
-        "html": "<p>Clamping against one horizontal floor works because we know the nearest relevant obstacle analytically. It does not prove safe movement through a general material world. If a stone occupies row157 and a grain starts at155, a three-row move must inspect the traversed path rather than only the floor or endpoint. The grid lesson will introduce those occupancy checks.</p><p>For the episode, show the failure by first allowing an unclamped step and placing the grain two rows above the floor. Then derive the fix from the last legal row. The visual is useful because it exposes the exact off-by-one boundary; the code should follow the picture, not appear as an unexplained min call.</p>"
+        "html": "<p>Clamping against one horizontal floor works because we know the nearest relevant obstacle analytically. It does not prove safe movement through a general material world. If a stone occupies row157 and a grain starts at155, a three-row move must inspect the traversed path rather than only the floor or endpoint. Then derive the fix from the last legal row. The visual is useful because it exposes the exact off-by-one boundary; the code should follow the picture, not appear as an unexplained min call.</p>"
       }
     ],
     "worked": {
@@ -1341,17 +1187,6 @@
         "fix": "Inspect the full movement path once arbitrary grid obstacles exist."
       }
     ],
-    "episode": {
-      "hook": "We have a timed update and a visible cell, but movement must respect geometry. A flat floor is the smallest collision fixture that reveals why checking the starting position is not enough: a three-row step can begin legally and end inside the obstacle.",
-      "beats": [
-        "Derive the legal destination",
-        "Make one function own the update rule",
-        "Test boundaries before looking at motion",
-        "Know what this collision rule does not cover"
-      ],
-      "demo": "Land one falling cell exactly above a floor without crossing it, even on a larger final step.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: control",
@@ -1431,17 +1266,6 @@
         "fix": "Keep collection ownership and material identity conceptually separate."
       }
     ],
-    "episode": {
-      "hook": "The world is about to contain air, sand and stone rather than one special grain. Raw numbers could label them, but numbers permit meaningless states and hide intent. An enum gives the domain a vocabulary the compiler can check.",
-      "beats": [
-        "Replace implicit numeric meaning with named alternatives",
-        "Use match as a complete decision table",
-        "Keep identity separate from state",
-        "Grow the table by observing a missing case"
-      ],
-      "demo": "Represent every valid prototype material with an enum and handle each case explicitly.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: enums",
@@ -1521,17 +1345,6 @@
         "fix": "Construct once and borrow it for drawing."
       }
     ],
-    "episode": {
-      "hook": "A pile needs many occupied and empty slots. A Vec owns a runtime-sized sequence of same-type elements, which gives us a compact first grid. We will separate allocation, initialization and drawing so the world is not silently recreated every frame.",
-      "beats": [
-        "Allocate slots, not separate loose variables",
-        "Store dimensions with the collection",
-        "Initialize a visible floor",
-        "Return to pixels only after storage is correct"
-      ],
-      "demo": "Store a small world in a persistent vector and initialize it with air plus a stone floor.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: vec",
@@ -1611,17 +1424,6 @@
         "fix": "Validate allocation and dimension invariants in the constructor."
       }
     ],
-    "episode": {
-      "hook": "Brushes and camera motion can produce coordinates outside the stored rectangle. A direct index formula is valid only inside its domain. We will derive both the row-major mapping and the validation order, so an edge click becomes an ordinary missing cell instead of a panic or unintended edit.",
-      "beats": [
-        "Flatten one row at a time",
-        "Validate the signed inputs first",
-        "Keep arithmetic assumptions in the contract",
-        "Test corners and the first invalid positions"
-      ],
-      "demo": "Convert signed cell coordinates into an Option index, rejecting invalid positions before casting.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: match",
@@ -1701,17 +1503,6 @@
         "fix": "Handle None as the chosen no-op or feedback case."
       }
     ],
-    "episode": {
-      "hook": "Our index helper now tells the truth: some positions do not name a stored cell. That result is only useful if the caller respects it. Matching Option turns a potential panic into an explicit choice at the boundary between user input and world mutation.",
-      "beats": [
-        "A possible index is not an index yet",
-        "Match binds the carried value",
-        "Why index zero is not a fallback",
-        "Exercise both branches, not only the happy path"
-      ],
-      "demo": "Handle Some and None explicitly so an invalid brush coordinate becomes a safe no-op.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: match",
@@ -1791,17 +1582,6 @@
         "fix": "Check the full eligibility condition before applying the transfer."
       }
     ],
-    "episode": {
-      "hook": "Changing a destination cell to Sand looks like movement only if the source stops being sand. A swap expresses the full occupancy transfer and avoids holding two simultaneous mutable element references while the vector is owned by one world.",
-      "beats": [
-        "State the conservation promise first",
-        "Use values for inspection, then one mutation",
-        "Validate both indices before moving",
-        "Test state before and after the complete operation"
-      ],
-      "demo": "Transfer a grain into empty space without creating or destroying a copy.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: vec",
@@ -1881,17 +1661,6 @@
         "fix": "Inspect the argument type and dereference deliberately rather than guessing."
       }
     ],
-    "episode": {
-      "hook": "A renderer and a statistics pass need to read all cells repeatedly. Rust offers several ways to iterate, and choosing the wrong ownership mode can consume the collection. We will compare those modes by their access contract, not by memorizing three similar names.",
-      "beats": [
-        "Read elements without consuming storage",
-        "Mutable iteration grants field access, not resizing permission",
-        "Consuming iteration is a different operation",
-        "Derive counts as observations, not additional state"
-      ],
-      "demo": "Inspect and count world contents through borrowed iteration while preserving the world for later frames.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: vec",
@@ -1971,17 +1740,6 @@
         "fix": "Add a reactivation fixture and choose a marker policy that cannot confuse stale state with a current update."
       }
     ],
-    "episode": {
-      "hook": "An in-place scan changes the collection it is still traversing. A moved grain may land in a slot the scan has not visited yet and move again immediately. The bug is about update order, so we will make that order visible in a tiny column before adding chunks.",
-      "beats": [
-        "Construct the counterexample",
-        "Reverse the falling scan",
-        "Define marker ownership and reset",
-        "Extend the assertion across boundaries"
-      ],
-      "demo": "Guarantee a grain receives at most one movement update per simulation tick.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: testing",
@@ -2061,17 +1819,6 @@
         "fix": "Add the bounded liquid fallback explicitly and test a blocked-downward pool."
       }
     ],
-    "episode": {
-      "hook": "Falling straight down cannot build a sloped pile or spread a pool. We need alternative destinations when the cell below is blocked. Powder and liquid movement share occupancy queries but have different fallback rules, so material kind must guide the candidate search.",
-      "beats": [
-        "Start from the blocked downward case",
-        "Distinguish powder slopes from liquid leveling",
-        "Remove a permanent left-first preference",
-        "Judge the complete pile and pool contracts"
-      ],
-      "demo": "Create sand piles and a bounded water-leveling rule while preventing directional bias.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: control",
@@ -2151,17 +1898,6 @@
         "fix": "Rasterize the segment between input samples using a bounded stroke operation."
       }
     ],
-    "episode": {
-      "hook": "The sandbox begins when the player can place matter. Mouse input lives in drawing coordinates, while world storage uses cell coordinates. A careful conversion and input ownership rule keep a click from painting the wrong slot or leaking through UI panels.",
-      "beats": [
-        "Read input as a request, not direct world mutation",
-        "Invert the drawing transform",
-        "Use one paint command for input and tests",
-        "Check continuity and boundaries"
-      ],
-      "demo": "Convert cursor positions into cell edits and prevent painting outside the world view.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: input",
@@ -2187,7 +1923,7 @@
       },
       {
         "title": "Protect the headless path",
-        "html": "<p>Keep window initialization in main and graphical drawing in render. A test of World or tick should not invoke macroquad’s main attribute or create a native context. This reduces setup cost and lets CI exercise behavior without a display.</p><p>Do not introduce traits or generics at every boundary just because modules exist. A small concrete function can be a strong interface. We will add a trait later where interchangeable deterministic choice sources create a real testing need. End the episode with one headless test importing the simulation path and one working window using the same state model.</p>"
+        "html": "<p>Keep window initialization in main and graphical drawing in render. A test of World or tick should not invoke macroquad’s main attribute or create a native context. This reduces setup cost and lets CI exercise behavior without a display.</p><p>Do not introduce traits or generics at every boundary just because modules exist. A small concrete function can be a strong interface. We will add a trait later where interchangeable deterministic choice sources create a real testing need.</p>"
       }
     ],
     "worked": {
@@ -2241,17 +1977,6 @@
         "fix": "Keep context creation in the executable orchestration path."
       }
     ],
-    "episode": {
-      "hook": "Our main file now contains unrelated reasons to change: storage layout, falling rules, mouse handling and drawing. Modules let us separate those responsibilities so a physics test can run without opening a window and a visual change cannot casually rewrite state.",
-      "beats": [
-        "Begin with dependencies, not folder decoration",
-        "Expose operations rather than every field",
-        "Move one responsibility and compile",
-        "Protect the headless path"
-      ],
-      "demo": "Separate world storage, simulation and rendering into modules with narrow interfaces.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: modules",
@@ -2273,7 +1998,7 @@
       },
       {
         "title": "Prove the test can catch the bug",
-        "html": "<p>Temporarily remove the destination clamp or change the floor offset, then run the relevant test by name. The expected failure demonstrates that the test is connected to the promise. Restore the implementation and rerun. A test suite that never fails under a known broken rule may be asserting the wrong observation.</p><p>Keep the deliberate failure out of the final working state. For a YouTube episode, the red-to-green moment makes the reason for testing concrete: the test protects an actual visible bug rather than satisfying a code-style ritual.</p>"
+        "html": "<p>Temporarily remove the destination clamp or change the floor offset, then run the relevant test by name. The expected failure demonstrates that the test is connected to the promise. Restore the implementation and rerun. A test suite that never fails under a known broken rule may be asserting the wrong observation.</p><p>Keep the deliberate failure out of the final working state.</p>"
       },
       {
         "title": "Separate headless, visual and performance evidence",
@@ -2331,17 +2056,6 @@
         "fix": "Extract the rule into a headless module and keep rendering separate."
       }
     ],
-    "episode": {
-      "hook": "cargo check tells us that code satisfies Rust’s static rules, not that sand stops at the right place. A tiny deterministic fixture can express the game behavior we want and catch a later regression automatically without opening a window.",
-      "beats": [
-        "Specify a visible promise as an assertion",
-        "Use Rust’s test harness",
-        "Prove the test can catch the bug",
-        "Separate headless, visual and performance evidence"
-      ],
-      "demo": "Write headless tests that detect a movement regression and distinguish compilation from behavioral proof.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: testing",
@@ -2421,17 +2135,6 @@
         "fix": "Finish the entry operation, then mutate the map structure in a separate phase."
       }
     ],
-    "episode": {
-      "hook": "An explored world may contain far-apart regions. A giant vector spanning every coordinate between them would allocate empty space unnecessarily. A map stores only resident chunk keys, but its container iteration order must not accidentally become the simulation’s update order.",
-      "beats": [
-        "Choose a key that names the storage unit",
-        "Understand ownership of entries",
-        "Separate lookup structure from deterministic traversal",
-        "Check sparse behavior and eviction readiness"
-      ],
-      "demo": "Use a coordinate-keyed map for sparse chunk storage while keeping update order explicit.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: map",
@@ -2511,17 +2214,6 @@
         "fix": "Retain the marker across all chunk phases in the same tick."
       }
     ],
-    "episode": {
-      "hook": "Chunks let us bound allocation and reuse a fixed-size cell buffer. The subtle part is not allocating4096 slots; it is agreeing which chunk contains a negative coordinate. Euclidean quotient and remainder give a consistent answer that ordinary truncating division does not.",
-      "beats": [
-        "Derive chunk and local coordinates",
-        "Use Euclidean operations for signed world positions",
-        "Allocate one owned buffer per chunk",
-        "Preserve movement across the storage seam"
-      ],
-      "demo": "Map global cell positions into64×64 chunks correctly, including positions left of the origin.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: integers",
@@ -2601,17 +2293,6 @@
         "fix": "Use one half-open rectangle convention everywhere."
       }
     ],
-    "episode": {
-      "hook": "A camera changes which part of the world is visible, not the stored size of a grain. The active simulation region is the visible rectangle plus a small margin. Selecting overlapping chunks alone is too broad, so we will compute exact per-cell intersections.",
-      "beats": [
-        "Write the camera transform in units",
-        "Define half-open rectangles",
-        "Clip inside every overlapping chunk",
-        "Test what remains frozen"
-      ],
-      "demo": "Pan the visible world while simulating only the cell-clipped view plus its16-cell margin.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: control",
@@ -2691,17 +2372,6 @@
         "fix": "Sort or compare explicit recency/key tuples."
       }
     ],
-    "episode": {
-      "hook": "Chunking prevents one giant allocation, but keeping every visited chunk forever still grows memory. A resident cache needs a discard policy that respects which data can be regenerated and which data contains the player’s work.",
-      "beats": [
-        "Classify what can be recovered",
-        "Track recency separately from activity",
-        "Budget bytes rather than guessing from count",
-        "Verify regeneration and preserve changed chunks"
-      ],
-      "demo": "Evict unchanged resident chunks under a memory budget without losing edited world state.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: map",
@@ -2727,7 +2397,7 @@
       },
       {
         "title": "Turn the measurement into a gate",
-        "html": "<p>The M0 report should answer: does sand meet the target, what do water timings show, is memory bounded under the current policy, and are threads needed next? Keep failing evidence and the selected response in the report. Dirty regions, a smaller capped view or later threading are options to evaluate, not invisible changes to acceptance conditions.</p><p>The worked timing fixture below demonstrates measurement mechanics only; its tiny synthetic loop is not a substitute for the real sand/water benchmark. End the episode with a reproducible command and a table of actual results, including any unresolved hardware access. Completion means making the decision honestly, not forcing every number green.</p>"
+        "html": "<p>The M0 report should answer: does sand meet the target, what do water timings show, is memory bounded under the current policy, and are threads needed next? Keep failing evidence and the selected response in the report. Dirty regions, a smaller capped view or later threading are options to evaluate, not invisible changes to acceptance conditions.</p><p>The worked timing fixture below demonstrates measurement mechanics only; its tiny synthetic loop is not a substitute for the real sand/water benchmark. Completion means making the decision honestly, not forcing every number green.</p>"
       }
     ],
     "worked": {
@@ -2781,17 +2451,6 @@
         "fix": "Mark floor support unverified until measured on the claimed target."
       }
     ],
-    "episode": {
-      "hook": "A simulation that looks smooth on a modern laptop may fail on the target i3. We need a repeatable workload and separate measurements for a tick and the whole rendered frame. This module closes the foundation only when its claims have actual evidence.",
-      "beats": [
-        "Freeze the workload before measuring",
-        "Measure tick time and frame time separately",
-        "Use optimized builds and real hardware",
-        "Turn the measurement into a gate"
-      ],
-      "demo": "Record repeatable tick, frame and memory measurements and make an evidence-based M0 decision.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: instant",
@@ -2871,17 +2530,6 @@
         "fix": "Validate/clamp updates through the chosen moisture operation."
       }
     ],
-    "episode": {
-      "hook": "Two sand cells have the same material conductivity but can have different temperatures and moisture. Mixing those concepts wastes storage and obscures rules. We will put stable properties in a lookup and changing state in each cell, then check the real size rather than trusting a field-size sum.",
-      "beats": [
-        "Ask what varies between cells of one material",
-        "Use signed temperature and bounded moisture",
-        "Measure layout rather than summing field widths",
-        "Give the rule table a small tested interface"
-      ],
-      "demo": "Separate shared material properties from per-cell state and measure the actual proposed cell layout.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: layout",
@@ -2961,17 +2609,6 @@
         "fix": "Check the pair fixture before altering global flow rates."
       }
     ],
-    "episode": {
-      "hook": "The air-only prototype cannot show sand sinking in water or oil floating above it. Density exchange extends movement while preserving both materials. But a numeric density comparison alone is insufficient: it must also respect material kind and structural rules.",
-      "beats": [
-        "Describe the intended exchange",
-        "Constrain which kinds may exchange",
-        "Preserve the paired state transfer",
-        "Test both motion and stability"
-      ],
-      "demo": "Exchange sand, water and oil according to approved kind/density rules without passing through rigid solids.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: control",
@@ -2997,7 +2634,7 @@
       },
       {
         "title": "Separate closed accounting from sources and ambient",
-        "html": "<p>A closed pair test excludes lava source maintenance, burning fuel, ambient exchange and phase-change policies. Those may intentionally add, remove or transform heat under the game’s approximations. Keep source/sink terms explicit so a conservation assertion is applied only where its assumptions hold.</p><p>Test the pair in both orientations, at equality and near the integer rounding threshold. Then integrate a small row fixture with a fixed update scheme. End the episode by showing that reversing storage order does not reverse the physical direction of transfer or create heat under the closed-fixture rules.</p>"
+        "html": "<p>A closed pair test excludes lava source maintenance, burning fuel, ambient exchange and phase-change policies. Those may intentionally add, remove or transform heat under the game’s approximations. Keep source/sink terms explicit so a conservation assertion is applied only where its assumptions hold.</p><p>Test the pair in both orientations, at equality and near the integer rounding threshold. Then integrate a small row fixture with a fixed update scheme.</p>"
       }
     ],
     "worked": {
@@ -3051,17 +2688,6 @@
         "fix": "Document the resolution and choose a tested rounding policy if required by visible reactions."
       }
     ],
-    "episode": {
-      "hook": "A lava reaction depends on heat moving between cells, but a full landscape makes a faulty transfer hard to diagnose. Start with two cells. If the pair has no external source or sink, one cell’s gain should correspond to the other’s loss under the selected model.",
-      "beats": [
-        "Name the model before the formula",
-        "Read the old pair, then apply both changes",
-        "Make rounding a documented policy",
-        "Separate closed accounting from sources and ambient"
-      ],
-      "demo": "Exchange heat across one closed edge with stable direction and paired accounting.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: testing",
@@ -3087,7 +2713,7 @@
       },
       {
         "title": "Verify with counterexamples, not only open ground",
-        "html": "<p>Test an open surface, a roofed interior, a cave wall, a falling drop and a canopy. Confirm that drops do not rewrite the terrain surface and that shelter prevents direct precipitation without disabling all air contact. Include a roof edit so the cached surface map updates when geometry changes.</p><p>M1 can use fixed ambient inputs and handcrafted geometry; the live seasonal clock and procedural generator arrive later. That sequencing lets us prove the exposure contract before adding weather fields or large terrain. End the episode by tracing the same cell through a roof removal and explaining which predicate changes and why.</p>"
+        "html": "<p>Test an open surface, a roofed interior, a cave wall, a falling drop and a canopy. Confirm that drops do not rewrite the terrain surface and that shelter prevents direct precipitation without disabling all air contact. Include a roof edit so the cached surface map updates when geometry changes.</p><p>M1 can use fixed ambient inputs and handcrafted geometry; the live seasonal clock and procedural generator arrive later. That sequencing lets us prove the exposure contract before adding weather fields or large terrain.</p>"
       }
     ],
     "worked": {
@@ -3141,17 +2767,6 @@
         "fix": "Recompute the affected column under a bounded storage query and test edit invalidation."
       }
     ],
-    "episode": {
-      "hook": "A roof should block rain while the room beneath it can still contain air. A cave wall should exchange heat with nearby air without being directly exposed to the sky. One generic exposed flag cannot answer both questions, so we will separate their geometry and test the difference.",
-      "beats": [
-        "Ask two different questions",
-        "Define what the surface map includes",
-        "Implement local contact independently",
-        "Verify with counterexamples, not only open ground"
-      ],
-      "demo": "Implement separate sky-exposure and air-contact queries so shelter and cooling do not contradict each other.",
-      "recap": "Explain the result without reading the code, make one predicted change, then show the observed result."
-    },
     "sources": [
       {
         "label": "Official reference: testing",

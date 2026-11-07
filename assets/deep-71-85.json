@@ -71,18 +71,6 @@
         "fix": "Check cave placement against the generated surface/sea and bounded feature geometry."
       }
     ],
-    "episode": {
-      "hook": "Show a lake draining through one missing cell, then make the generator guarantee containment.",
-      "beats": [
-        "Reveal the one-cell leak",
-        "Derive a bounded bowl from centre and rim",
-        "Trace three sample coordinates",
-        "Generate opposite chunk orders",
-        "Activate and run the rest fixture"
-      ],
-      "demo": "Record a zoomed teaching cross-section, then a native-size contained lake after 600 ticks.",
-      "recap": "A lake is a generated occupancy guarantee, not a painted blue region."
-    },
     "sources": [
       {
         "label": "Game generation/rest rules",
@@ -162,18 +150,6 @@
         "fix": "Drop request senders deliberately and join workers once their loop can terminate."
       }
     ],
-    "episode": {
-      "hook": "Pan away before generation finishes: should the old result still enter the world?",
-      "beats": [
-        "Make the ownership transfer visible",
-        "Send one small payload",
-        "Force a stale epoch",
-        "Bound a queue",
-        "Replace waiting with nonblocking draining"
-      ],
-      "demo": "Show a debug counter accepting current replies and rejecting an old-world reply.",
-      "recap": "Channels transfer ownership; identities decide whether a completed result is still relevant."
-    },
     "sources": [
       {
         "label": "Rust message passing",
@@ -253,18 +229,6 @@
         "fix": "Run from game/ or print the resolved path in the teaching experiment."
       }
     ],
-    "episode": {
-      "hook": "Delete the save input on purpose and keep the application alive.",
-      "beats": [
-        "Show a deliberate missing file",
-        "Trace Ok and Err",
-        "Expand then compress ?",
-        "Reject invalid input",
-        "Keep the previous state intact"
-      ],
-      "demo": "Film missing, valid and malformed inputs side by side with their messages.",
-      "recap": "Reading succeeded is not the same as validation succeeded; installing state comes last."
-    },
     "sources": [
       {
         "label": "Rust Result and propagation",
@@ -344,18 +308,6 @@
         "fix": "Map explicit accepted byte values to Material and reject other values."
       }
     ],
-    "episode": {
-      "hook": "Turn a Rust struct into a deliberately specified 14-byte contract.",
-      "beats": [
-        "Draw byte offsets",
-        "Encode one seed",
-        "Decode after validation",
-        "Truncate every boundary",
-        "Explain format versus generator version"
-      ],
-      "demo": "Show a byte table and a corrupted fixture being rejected without a crash.",
-      "recap": "A save format is a byte contract, not a dump of Rust memory."
-    },
     "sources": [
       {
         "label": "Integer byte conversion",
@@ -439,18 +391,6 @@
         "fix": "Measure per-chunk indexed payloads versus whole-region compression and choose deliberately."
       }
     ],
-    "episode": {
-      "hook": "Compress a whole uniform chunk to 34 bytes—then show the workload that doubles in size.",
-      "beats": [
-        "Trace six input bytes",
-        "Derive count/value encoding",
-        "Reject invalid runs",
-        "Bound decompression",
-        "Compare compression granularities"
-      ],
-      "demo": "Display uniform and alternating payload sizes and a rejected oversized decode.",
-      "recap": "Compression is measured optimization behind a validated format boundary."
-    },
     "sources": [
       {
         "label": "Checked byte processing",
@@ -534,18 +474,6 @@
         "fix": "Bound active/pending snapshot ownership and coalesce obsolete autosaves."
       }
     ],
-    "episode": {
-      "hook": "Save during an explosion without moving a single particle to make saving easier.",
-      "beats": [
-        "Show the live blast",
-        "Explain mixed-tick duplication",
-        "Inventory future-affecting state",
-        "Clone at a boundary",
-        "Advance live state while inspecting the copy"
-      ],
-      "demo": "Capture the same blast before/after autosave and show unchanged particle trajectories.",
-      "recap": "Saving observes a coherent state; it should not secretly become a simulation action."
-    },
     "sources": [
       {
         "label": "Rust Clone behavior",
@@ -629,18 +557,6 @@
         "fix": "Retain the prior committed state until the new protocol is fully complete."
       }
     ],
-    "episode": {
-      "hook": "Crash after writing one region and still recover the whole old world.",
-      "beats": [
-        "Break independent replacement",
-        "Name immutable generations",
-        "Move only the commit reference",
-        "Inject a crash at every stage",
-        "Explain logical versus filesystem durability"
-      ],
-      "demo": "Use a visible stage table showing the recovered generation at each injected crash.",
-      "recap": "The commit pointer follows complete data; it never promises completion in advance."
-    },
     "sources": [
       {
         "label": "std filesystem rename",
@@ -724,18 +640,6 @@
         "fix": "Reject unsupported versions before generation or mutation."
       }
     ],
-    "episode": {
-      "hook": "Upgrade the game without upgrading a player’s untouched hills.",
-      "beats": [
-        "Create one saved and one absent chunk",
-        "Change the latest generator",
-        "Dispatch from old-world metadata",
-        "Test an absent historical chunk",
-        "Reject unknown IDs"
-      ],
-      "demo": "Pan beyond the old saved boundary after changing the new-world default.",
-      "recap": "Format compatibility preserves readable bytes; generator compatibility preserves the world beyond them."
-    },
     "sources": [
       {
         "label": "Game generator-version contract",
@@ -819,18 +723,6 @@
         "fix": "Capture bounded work and hand it to the single writer without blocking main-loop queue operations."
       }
     ],
-    "episode": {
-      "hook": "Make an edit while its previous revision is saving, then pan away without losing it.",
-      "beats": [
-        "Reproduce stale acknowledgement",
-        "Add revision identity",
-        "Separate candidate from safe eviction",
-        "Bound queue ownership",
-        "Measure an edited long pan"
-      ],
-      "demo": "Show current/saved revision and resident/pending memory while a delayed writer catches up.",
-      "recap": "Eviction is safe only when the state you are discarding is the state persistence actually acknowledged."
-    },
     "sources": [
       {
         "label": "Channels and owned messages",
@@ -914,18 +806,6 @@
         "fix": "Store the full fixture identity and commands with the observed output."
       }
     ],
-    "episode": {
-      "hook": "Can somebody else reproduce your claim that the world is persistent and bounded?",
-      "beats": [
-        "Translate exit criteria into fixtures",
-        "Separate behavior and timing",
-        "Expose zero-test false positives",
-        "Measure high-water memory",
-        "Publish a factual gate report"
-      ],
-      "demo": "Show a cross-border edit surviving reload while the evidence table updates.",
-      "recap": "A milestone ends with reproducible evidence, including failures, not just a convincing demonstration."
-    },
     "sources": [
       {
         "label": "Rust test execution",
@@ -1009,18 +889,6 @@
         "fix": "Retain resources and update data, reallocating only on size/resource changes."
       }
     ],
-    "episode": {
-      "hook": "A Retina display doubles your pixels unless you distinguish drawing units from physical pixels.",
-      "beats": [
-        "Count cell/art/physical units",
-        "Show low-DPI versus Retina mapping",
-        "Upload a tiny static buffer",
-        "Present with nearest filtering",
-        "Measure a single cell footprint"
-      ],
-      "demo": "Show a labelled two-by-two art cell expanding to four-by-four physical pixels.",
-      "recap": "DPI conversion belongs at the rendering boundary; simulation cell size stays fixed."
-    },
     "sources": [
       {
         "label": "macroquad window units",
@@ -1104,18 +972,6 @@
         "fix": "Use the exterior/sheltered background rule rather than treating all air alike."
       }
     ],
-    "episode": {
-      "hook": "Create atmosphere with a row of colour and a hard disc, not a blur filter.",
-      "beats": [
-        "Derive channel interpolation",
-        "Check endpoints and clamp",
-        "Rasterize a flat disc",
-        "Occlude with real terrain",
-        "Freeze time for reproducible captures"
-      ],
-      "demo": "Render dusk, night and an underground room from recorded fixtures.",
-      "recap": "The sky changes mood; it must not rewrite terrain or ignore shelter."
-    },
     "sources": [
       {
         "label": "Approved sky and light rules",
@@ -1129,7 +985,7 @@
   },
   "83": {
     "outcome": "Build an actual-scale material contact sheet where required states remain distinguishable in day and night scenes.",
-    "why": "The game asks viewers to notice why something burns, freezes, rots or dries. If those states look the same, the simulation can be internally correct while its cause-and-effect story is invisible.",
+    "why": "If those states look the same, the simulation can be internally correct while its cause-and-effect story is invisible.",
     "sections": [
       {
         "title": "Treat colour as an interface to state",
@@ -1199,18 +1055,6 @@
         "fix": "Test with fixed lighting first, then approve the state signal under time-of-day variation."
       }
     ],
-    "episode": {
-      "hook": "Can a viewer tell wet wood from dry wood before you explain the fire?",
-      "beats": [
-        "Show an unlabelled material pair",
-        "Separate state from RGB",
-        "Build enlarged and native sheets",
-        "Freeze lighting for before/after",
-        "Review the required reaction clips"
-      ],
-      "demo": "Present contact sheets at actual scale, then one visible wet-to-dry transition.",
-      "recap": "A material colour is part of the player’s understanding of the world, not decorative noise."
-    },
     "sources": [
       {
         "label": "Palette/state readability requirements",
@@ -1224,7 +1068,7 @@
   },
   "84": {
     "outcome": "Render rain that respects shelter while changing graphics density leaves precipitation physics unchanged.",
-    "why": "The weather simulation already applies rain at the surface. Decorative streaks should help the viewer read that weather; they must not add a second source of water or appear inside a supposedly dry shelter.",
+    "why": "The weather simulation already applies rain at the surface.",
     "sections": [
       {
         "title": "Draw the causal boundary first",
@@ -1294,18 +1138,6 @@
         "fix": "Rasterize on the art grid and present with nearest filtering."
       }
     ],
-    "episode": {
-      "hook": "Turn rain graphics almost off while the soil keeps getting equally wet.",
-      "beats": [
-        "Draw a roof cross-section",
-        "Separate surface wetting from decoration",
-        "Clip a diagonal pixel by pixel",
-        "Change streak density",
-        "Compare simulation hashes"
-      ],
-      "demo": "Show open hillside rain next to a dry room while toggling visual density.",
-      "recap": "Weather decoration communicates physics; it must not become another physics engine."
-    },
     "sources": [
       {
         "label": "Rain and weather art rules",
@@ -1389,18 +1221,6 @@
         "fix": "Derive both drawing and hit rectangles from the same layout data."
       }
     ],
-    "episode": {
-      "hook": "Click Wood without painting a single accidental block behind the toolbar.",
-      "beats": [
-        "Reproduce paint-through",
-        "Derive half-open hit boxes",
-        "Map pages to typed actions",
-        "Route keyboard and clicks together",
-        "Inspect native-size text and selection"
-      ],
-      "demo": "Show a before/after world-cell counter while selecting materials through the bar.",
-      "recap": "A UI owns input explicitly; being drawn on top is not enough."
-    },
     "sources": [
       {
         "label": "macroquad input API",

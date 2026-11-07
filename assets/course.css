@@ -119,8 +119,6 @@ details p { margin-top:18px; }
 .solution pre { margin-top:14px; }
 .trouble { background:#faf8f0; padding:18px 20px; }
 .trouble summary { line-height:1.6; }
-.episode { background:#eaf0e7; border-left:3px solid var(--accent); padding:22px 28px !important; }
-.episode ol li { margin-bottom:12px; }
 .sources-list li { margin-bottom:10px; }
 .lab-interactive { border:1px solid #b8c6b0; padding:20px 24px !important; background:#edf2e7; }
 .lab-controls { display:flex; flex-wrap:wrap; gap:8px; margin:20px 0; }
@@ -136,5 +134,5 @@ details p { margin-top:18px; }
 .deep-main th,.deep-main td { border:1px solid var(--line); padding:10px 13px; text-align:left; min-width:100px; vertical-align:top; }
 .deep-main th { background:var(--soft); }
 @media(max-width:1000px) { .deep-layout { grid-template-columns:minmax(0,1fr); gap:10px; } .lesson-contents { position:static; grid-row:1; max-height:none; border:1px solid var(--line); padding:20px; margin-bottom:25px; } .lesson-contents ol { columns:2; column-gap:30px; } .lesson-contents li { break-inside:avoid; } }
-@media(max-width:550px) { .deep-main p,.deep-main li { font-size:1rem; } .deep-main h2 { font-size:1.6rem; } .exercise { padding:18px; } .deep-main pre { padding:16px; } .episode { padding:18px !important; } .lesson-contents ol { columns:1; } }
-@media print { .deep-layout { display:block; } .lesson-contents,.copy-code,.lab-controls,[data-exercise-attempt],[data-exercise-check],.exercise-status { display:none; } .deep-main pre { background:#f0f0f0; color:black; border:1px solid #ccc; } .concept-diagram { break-inside:avoid; } .exercise { break-inside:avoid; } .solution[hidden] { display:none !important; } .episode { background:white; } }
+@media(max-width:550px) { .deep-main p,.deep-main li { font-size:1rem; } .deep-main h2 { font-size:1.6rem; } .exercise { padding:18px; } .deep-main pre { padding:16px; } .lesson-contents ol { columns:1; } }
+@media print { .deep-layout { display:block; } .lesson-contents,.copy-code,.lab-controls,[data-exercise-attempt],[data-exercise-check],.exercise-status { display:none; } .deep-main pre { background:#f0f0f0; color:black; border:1px solid #ccc; } .concept-diagram { break-inside:avoid; } .exercise { break-inside:avoid; } .solution[hidden] { display:none !important; } }

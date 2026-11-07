@@ -71,18 +71,6 @@
         "fix": "Deduplicate per coordinate and enforce capacity before mouse release."
       }
     ],
-    "episode": {
-      "hook": "Paint, burn and undo: which part should come back?",
-      "beats": [
-        "Demonstrate paused undo",
-        "Break it with a fire",
-        "Derive before/after matching",
-        "Test wet wood",
-        "Bound stroke and history memory"
-      ],
-      "demo": "Show two neighboring cells: only the unchanged one reverts.",
-      "recap": "Undo reverses eligible edits; it does not rewind the simulation."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -170,18 +158,6 @@
         "fix": "Keep an optional source and a recoverable diagnostic."
       }
     ],
-    "episode": {
-      "hook": "Listen to one spark become a forest without adding a single loop voice.",
-      "beats": [
-        "Extract activity counts",
-        "Test pure target gains",
-        "Connect loaded loops",
-        "Add smoothing and event ducking",
-        "Break an asset and recover"
-      ],
-      "demo": "Mute mid-fire, keep simulation moving, then unmute into the current scene.",
-      "recap": "Audio follows the world through a bounded mixer, not one sound per cell."
-    },
     "sources": [
       {
         "label": "macroquad audio API",
@@ -265,18 +241,6 @@
         "fix": "Measure real tick/frame costs and retain the watchdog policy."
       }
     ],
-    "episode": {
-      "hook": "The same world on two screens, with exactly the same grain size.",
-      "beats": [
-        "Name units",
-        "Compute active budget",
-        "Fit a whole-cell rectangle",
-        "Map pointer through panels",
-        "Restore settings on a different display"
-      ],
-      "demo": "Resize through a narrow window and show a four-physical-pixel cell and correct pick.",
-      "recap": "Resolution reveals world; it does not magnify the simulation cells."
-    },
     "sources": [
       {
         "label": "macroquad window implementation",
@@ -290,11 +254,11 @@
   },
   "89": {
     "outcome": "Record and evaluate a reproducible 60-second house-on-a-hillside scene with visible reactions and honest frame-time evidence.",
-    "why": "The first YouTube opener should demonstrate a game that actually exists. A still screenshot can hide slow reactions, lost support, missing sound and frame spikes. This lesson assembles one short scene and a repeatable inspection procedure.",
+    "why": "A still screenshot can hide slow reactions, lost support, missing sound and frame spikes. This lesson assembles one short scene and a repeatable inspection procedure.",
     "sections": [
       {
         "title": "Choose a scene that carries the project",
-        "html": "<p>Use one fixed hill, house, grass patch and contained water feature. Include a flammable beam, a sheltered patch under the roof and a neighbouring exposed patch. That small arrangement can demonstrate placement, exposure, wetness, fire and structural loss without rapidly panning through unrelated systems. Record the seed, generator version, camera coordinate, physical view dimensions, world/step ticks, weather and graphics preset.</p><p>Write the viewer’s expected observations in order: rain wets the open slope; the roof shelters its interior; a dry exposed patch can burn; renewed rain suppresses flame; seasonal change alters the visible environment. If two observations fight each other, adjust the starting fixture or timing rather than cutting around a broken reaction.</p>"
+        "html": "<p>Use one fixed hill, house, grass patch and contained water feature. Include a flammable beam, a sheltered patch under the roof and a neighbouring exposed patch. That small arrangement can demonstrate placement, exposure, wetness, fire and structural loss without rapidly panning through unrelated systems. If two observations fight each other, adjust the starting fixture or timing rather than cutting around a broken reaction.</p>"
       },
       {
         "title": "Use a fixture schedule, not manual luck",
@@ -302,7 +266,7 @@
       },
       {
         "title": "Capture without changing the workload",
-        "html": "<p>On macOS, the built-in Screenshot toolbar opens with Shift-Command-5 and can record a selected region. Choose the world and UI region intentionally and record at the actual tested physical view. Recording adds CPU/GPU work, so measure a baseline without capture and compare a captured run; report the difference instead of claiming the encoder is free. No new recording package is necessary for this exercise.</p><p>Capture the same schedule at the reference settings and target hardware. Keep a raw recording before editing for YouTube. Edit the presentation later, but preserve a link between the claim and the raw run that proves it. A beautiful exported clip is not evidence that the target machine rendered those frames interactively.</p>"
+        "html": "<p>On macOS, the built-in Screenshot toolbar opens with Shift-Command-5 and can record a selected region. Choose the world and UI region intentionally and record at the actual tested physical view. Recording adds CPU/GPU work, so measure a baseline without capture and compare a captured run; report the difference instead of claiming the encoder is free. No new recording package is necessary for this exercise.</p><p>Capture the same schedule at the reference settings and target hardware. Edit the presentation later, but preserve a link between the claim and the raw run that proves it. A beautiful exported clip is not evidence that the target machine rendered those frames interactively.</p>"
       },
       {
         "title": "Score the scene against separate promises",
@@ -330,7 +294,7 @@
       },
       {
         "title": "Make one falsifiable claim",
-        "prompt": "Write one exact rain/shelter acceptance statement before recording.",
+        "prompt": "Write one exact rain/shelter acceptance statement before running the demonstration.",
         "hint": "Name the cause, target and allowed observation.",
         "solution": "<p>For example: while rain runs for ten seconds, the exposed soil moisture rises and the roof-protected comparison cell receives no direct precipitation. Record both moisture values and the matching frame.</p>",
         "proof": "The statement can fail and identify a specific system."
@@ -360,18 +324,6 @@
         "fix": "Score the full raw scene against separate behavior and experience checks."
       }
     ],
-    "episode": {
-      "hook": "Open the episode with the real 60-second goal scene, then show the fixture that makes it repeatable.",
-      "beats": [
-        "Fix the house fixture",
-        "Schedule inputs",
-        "Capture the raw run",
-        "Measure outcomes",
-        "Review the art and performance gates"
-      ],
-      "demo": "Play one raw clip, pause at rain protection and beam loss, and show the corresponding recorded state.",
-      "recap": "The vertical slice proves an experience over time, not only a still image."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -455,18 +407,6 @@
         "fix": "Use the existing checked movement contract."
       }
     ],
-    "episode": {
-      "hook": "Watch one grain reveal why wind cannot simply add x every time the loop sees sand.",
-      "beats": [
-        "Establish a resting dune",
-        "Define entrainment eligibility",
-        "Break the scan order",
-        "Restore bounded transfer",
-        "Review long-run shape and palette"
-      ],
-      "demo": "Show the same dune under calm, rightward and reversed wind with constant sand count.",
-      "recap": "Biome differences are conditions applied to shared material rules."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -496,7 +436,7 @@
       },
       {
         "title": "Build the cone and prove its output",
-        "html": "<p>Generate the cone as normal supported terrain, with a documented vent position and a lava source policy. Decide whether eruption lava is an intentional material source or drawn from a reservoir; otherwise conservation tests will disagree with the visual goal. Ash still has its material kind and wind behavior, even when emitted dramatically.</p><p>Run a tiny eruption fixture at the particle cap before a large volcano. Count emitted, retained, destroyed and deferred material under the chosen policy. Then test the off-screen interval: advance the calendar, reactivate the same feature and assert no unbounded catch-up queue. The viewer should see an event produced by the world, not a memory spike disguised as spectacle.</p>"
+        "html": "<p>Generate the cone as normal supported terrain, with a documented vent position and a lava source policy. Decide whether eruption lava is an intentional material source or drawn from a reservoir; otherwise conservation tests will disagree with the visual goal. Ash still has its material kind and wind behavior, even when emitted dramatically.</p><p>Run a tiny eruption fixture at the particle cap before a large volcano. Count emitted, retained, destroyed and deferred material under the chosen policy. Then test the off-screen interval: advance the calendar, reactivate the same feature and assert no unbounded catch-up queue.</p>"
       }
     ],
     "worked": {
@@ -550,18 +490,6 @@
         "fix": "Derive it from stable feature identity and calendar period."
       }
     ],
-    "episode": {
-      "hook": "Leave a volcano for ten seasons, return, and prove it does not replay ten seasons of explosions.",
-      "beats": [
-        "Define feature identity",
-        "Derive a calendar offset",
-        "Choose off-screen semantics",
-        "Consume one event",
-        "Account for emitted material"
-      ],
-      "demo": "Compare event times before and after reload, then show one budgeted eruption.",
-      "recap": "A deterministic event schedule still needs an explicit activity and consumption policy."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -645,18 +573,6 @@
         "fix": "Add long-horizon silhouette and mass checks before approving rates."
       }
     ],
-    "episode": {
-      "hook": "Freeze the physics and keep the ripple moving: the sand should stay put.",
-      "beats": [
-        "Separate colour and occupancy",
-        "Propose one local erosion step",
-        "Test conservation",
-        "Break contact and destination conditions",
-        "Compare a day with a year"
-      ],
-      "demo": "Show the nine-cell fixture alongside the island shoreline and identify the same transfer.",
-      "recap": "Rendered water can suggest motion; erosion needs its own bounded simulation contract."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -740,18 +656,6 @@
         "fix": "Review actual-size frames and simplify shape/density."
       }
     ],
-    "episode": {
-      "hook": "One spark, one thousand support requests—and only three unique jobs.",
-      "beats": [
-        "Establish a resting forest",
-        "Count burst work",
-        "Coalesce duplicates",
-        "Expose sustained overload",
-        "Run wet/fire/regrowth fixtures"
-      ],
-      "demo": "Display queue length and service latency beside the raw forest-fire capture.",
-      "recap": "A content expansion needs new workload evidence, even when its rules are reused."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -835,18 +739,6 @@
         "fix": "Separate biome configuration and rerun v1 performance gates."
       }
     ],
-    "episode": {
-      "hook": "One rain command, two sources: a player click and the weather schedule.",
-      "beats": [
-        "Capture intent in an enum",
-        "Separate source cooldowns",
-        "Bound command consequences",
-        "Save consumed state coherently",
-        "Run the old-and-new biome matrix"
-      ],
-      "demo": "Show identical rainfall effects from two sources while only the toolbar observes its cooldown.",
-      "recap": "Share effects, specify source policies, and keep old acceptance tests alive."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -876,7 +768,7 @@
       },
       {
         "title": "Make failure fixtures ordinary tests",
-        "html": "<p>Use a missing path, truncated header, invalid material ID, oversized length and unwritable destination as separate fixtures. Each should assert both the reported error and unchanged prior state. Test failures after one region write as well as before the first; the transactional save policy exists for those partial-operation cases.</p><p>For a YouTube episode, show a deliberate corrupt file, the clear recovery message, and the still-running world. Then open the error type and trace the path from the original operation to the caller. This makes Result a practical tool for protecting the player’s work, rather than an abstract enum lesson repeated late in the course.</p>"
+        "html": "<p>Use a missing path, truncated header, invalid material ID, oversized length and unwritable destination as separate fixtures. Each should assert both the reported error and unchanged prior state. Then open the error type and trace the path from the original operation to the caller. This makes Result a practical tool for protecting the player’s work, rather than an abstract enum lesson repeated late in the course.</p>"
       }
     ],
     "worked": {
@@ -930,18 +822,6 @@
         "fix": "Validate a separate candidate state, then commit the replacement."
       }
     ],
-    "episode": {
-      "hook": "Break a save on purpose and keep the player’s world alive.",
-      "beats": [
-        "Locate fallible boundaries",
-        "Build a contextual error type",
-        "Trace question-mark propagation",
-        "Choose recovery at the caller",
-        "Assert unchanged live state"
-      ],
-      "demo": "Demonstrate invalid config, an optional missing clip and a rejected corrupt world with different recoveries.",
-      "recap": "An error value preserves the option to recover; the caller still chooses how."
-    },
     "sources": [
       {
         "label": "Recoverable errors",
@@ -975,7 +855,7 @@
       },
       {
         "title": "Keep fixtures and recovery instructions together",
-        "html": "<p>Commit tiny old-version worlds as test fixtures once their format is released. Tests should cover decode, re-save, expansion into an unsaved neighboring chunk and recovery from an interrupted write. Include a corrupt-new-save/valid-old-save pair to prove backup selection still follows complete-generation validation.</p><p>Write a recovery note that tells a player to copy the world folder before manual repair, how the game selects a backup and how unsupported-version messages differ from corruption. Do not ask them to delete unknown files until a diagnostic establishes what happened. Versioned evidence is also useful for your series: an episode should start from a known revision whose saved sample world still behaves as shown.</p>"
+        "html": "<p>Commit tiny old-version worlds as test fixtures once their format is released. Tests should cover decode, re-save, expansion into an unsaved neighboring chunk and recovery from an interrupted write. Include a corrupt-new-save/valid-old-save pair to prove backup selection still follows complete-generation validation.</p><p>Write a recovery note that tells a player to copy the world folder before manual repair, how the game selects a backup and how unsupported-version messages differ from corruption. Do not ask them to delete unknown files until a diagnostic establishes what happened.</p>"
       }
     ],
     "worked": {
@@ -1029,18 +909,6 @@
         "fix": "Pin and test historical generation behavior with known coordinate fixtures."
       }
     ],
-    "episode": {
-      "hook": "The save loads, but the next hill has a seam—why?",
-      "beats": [
-        "Separate two version promises",
-        "Dispatch old generation",
-        "Test unsaved borders",
-        "Design reversible migration",
-        "Write recovery instructions"
-      ],
-      "demo": "Show generator1 and2 side by side, then extend an old saved world without switching algorithms.",
-      "recap": "Readable bytes and compatible world generation are different contracts."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -1124,18 +992,6 @@
         "fix": "List and verify actual test selection in logs and release gates."
       }
     ],
-    "episode": {
-      "hook": "The game passes on your Mac. Now ask three clean machines the same questions.",
-      "beats": [
-        "Separate headless and graphical evidence",
-        "Build the OS matrix",
-        "Run exact local commands",
-        "Reproduce a seeded failure",
-        "Connect CI to release gates"
-      ],
-      "demo": "Show one deliberate failed gate and the repaired three-platform run.",
-      "recap": "CI repeats explicit checks; it does not certify claims it never exercised."
-    },
     "sources": [
       {
         "label": "GitHub matrix jobs",
@@ -1223,18 +1079,6 @@
         "fix": "Separate writable user data from bundled read-only resources."
       }
     ],
-    "episode": {
-      "hook": "Close your source folder. Can another person launch the game you actually shipped?",
-      "beats": [
-        "Build the native release binary",
-        "Assemble an explicit layout",
-        "Resolve resource paths",
-        "Test outside the checkout",
-        "Inspect platform/channel requirements"
-      ],
-      "demo": "Launch a copied package from a clean folder and create, save and reload one tiny world.",
-      "recap": "A distributable includes its runtime assumptions and proves them on a clean launch."
-    },
     "sources": [
       {
         "label": "Cargo build options",
@@ -1272,7 +1116,7 @@
       },
       {
         "title": "Create a reusable observation record",
-        "html": "<p>A compact record includes task, expected observable outcome, actual behavior, time or attempts, and a reproducible issue. Distinguish completion from understanding: a tester may accidentally discover a shortcut without knowing the selected material, so ask them to repeat the action deliberately.</p><p>For the YouTube series, demonstrate one concrete usability fix before and after. Show the original confusion, the interface change and the repeated task result, with the tester’s permission where relevant. This teaches why software feedback matters while keeping the game’s release documentation small and useful rather than turning it into a textbook the player must read.</p>"
+        "html": "<p>A compact record includes task, expected observable outcome, actual behavior, time or attempts, and a reproducible issue. Show the original confusion, the interface change and the repeated task result, with the tester’s permission where relevant. This teaches why software feedback matters while keeping the game’s release documentation small and useful rather than turning it into a textbook the player must read.</p>"
       }
     ],
     "worked": {
@@ -1326,18 +1170,6 @@
         "fix": "Route the same world event through separate presentation preferences."
       }
     ],
-    "episode": {
-      "hook": "Can someone who has never seen your code build a shelter and recover a save?",
-      "beats": [
-        "Write the one-minute quick start",
-        "Observe a task without coaching",
-        "Separate UI fixes from manual fixes",
-        "Check scaling/mute/flash decisions",
-        "Repeat the task after repair"
-      ],
-      "demo": "Show one confusing interface state, its fix and a successful uncoached retry.",
-      "recap": "Documentation supports the game; readable feedback makes the core loop self-explanatory."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
@@ -1350,12 +1182,12 @@
     ]
   },
   "100": {
-    "outcome": "Assemble a release candidate with explicit evidence, reproducible artifacts and a clean starting point for the next episode.",
+    "outcome": "Assemble a release candidate with explicit evidence, reproducible artifacts and a clean starting point for the next build.",
     "why": "Finishing the course should leave a game you can explain, rebuild and recover—not merely a development binary that happened to launch once. Release readiness is the intersection of several independently proven promises.",
     "sections": [
       {
         "title": "Freeze a candidate before collecting evidence",
-        "html": "<p>Choose a candidate revision and build all reviewed artifacts from that revision and its lockfile. Record the Rust toolchain, native targets, generator/save versions and approved asset set. If a bug fix changes source afterward, identify which checks it invalidates and rebuild the affected artifacts rather than attaching old evidence to a new executable.</p><p>Keep the working tree status visible in the release report. A clean revision makes the YouTube series reproducible: viewers need to know which commit starts an episode and which commit contains its result. Do not silently rely on ignored local assets, hand-edited saves or personal settings that a fresh checkout cannot recreate.</p>"
+        "html": "<p>Choose a candidate revision and build all reviewed artifacts from that revision and its lockfile. Record the Rust toolchain, native targets, generator/save versions and approved asset set. If a bug fix changes source afterward, identify which checks it invalidates and rebuild the affected artifacts rather than attaching old evidence to a new executable.</p><p>Keep the working tree status visible in the release report. Do not silently rely on ignored local assets, hand-edited saves or personal settings that a fresh checkout cannot recreate.</p>"
       },
       {
         "title": "Use gates as claims with evidence",
@@ -1367,7 +1199,7 @@
       },
       {
         "title": "Prepare publication without performing it automatically",
-        "html": "<p>Write a changelog that says what the player can now do and names known limitations. Prepare the release tag name, artifacts and notes for review. Publishing, pushing a tag, uploading to a store or contacting communities is a separate explicit action; this course prepares the reviewable result rather than assuming that distribution is authorized.</p><p>End the series episode by showing the raw game, the evidence behind its important claims and the next clean starting revision. Ask yourself to implement one small change from memory and explain the ownership/update path it touches. That is the learning outcome that distinguishes building this game from merely collecting generated source files.</p>"
+        "html": "<p>Write a changelog that says what the player can now do and names known limitations. Prepare the release tag name, artifacts and notes for review. Ask yourself to implement one small change from memory and explain the ownership/update path it touches. That is the learning outcome that distinguishes building this game from merely collecting generated source files.</p>"
       }
     ],
     "worked": {
@@ -1416,23 +1248,11 @@
         "fix": "Bind revision, final bytes and final test results in one manifest."
       },
       {
-        "symptom": "The next episode cannot reproduce the world",
+        "symptom": "The next build cannot reproduce the world",
         "cause": "Uncommitted source/assets or hidden local state were required.",
-        "fix": "Document the starting revision and deterministic fixture inputs before recording."
+        "fix": "Document the starting revision and deterministic fixture inputs before running the demonstration."
       }
     ],
-    "episode": {
-      "hook": "The final button is not Publish. First show why this exact build is ready.",
-      "beats": [
-        "Freeze the candidate",
-        "Collect M0–M7 evidence",
-        "Hash final artifacts",
-        "Perform fresh-install and recovery checks",
-        "Prepare publication review and the next revision"
-      ],
-      "demo": "Show one intentionally failing gate blocking readiness, then the actual evidence needed to clear it.",
-      "recap": "A finished game has reproducible behavior, recoverable state and honest release claims."
-    },
     "sources": [
       {
         "label": "Game design: local contracts",
