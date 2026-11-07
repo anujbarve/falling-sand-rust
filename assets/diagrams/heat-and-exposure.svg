@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="heat-and-exposure-title heat-and-exposure-desc">
+  <title id="heat-and-exposure-title">Sky exposure and air contact are different questions</title>
+  <desc id="heat-and-exposure-desc">A roof blocks direct rain into a room. A sheltered wall can still touch local air and exchange heat. Local air contact must not imply exposure to the sky.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Sky exposure and air contact are different questions</text>
+  <rect x="90" y="122" width="310" height="24" fill="#243b35" stroke="none" stroke-width="1" rx="0" />
+  <rect x="90" y="146" width="24" height="145" fill="#243b35" stroke="none" stroke-width="1" rx="0" />
+  <rect x="376" y="146" width="24" height="145" fill="#243b35" stroke="none" stroke-width="1" rx="0" />
+  <rect x="90" y="291" width="310" height="20" fill="#243b35" stroke="none" stroke-width="1" rx="0" />
+  <line x1="150" y1="76" x2="150" y2="112" stroke="#28755b" stroke-width="3" />
+  <polygon points="150,112 145.21537912477646,102.09508187412055 154.78462087522354,102.09508187412055" fill="#28755b" />
+  <line x1="230" y1="76" x2="230" y2="112" stroke="#28755b" stroke-width="3" />
+  <polygon points="230,112 225.21537912477646,102.09508187412055 234.78462087522354,102.09508187412055" fill="#28755b" />
+  <line x1="310" y1="76" x2="310" y2="112" stroke="#28755b" stroke-width="3" />
+  <polygon points="310,112 305.21537912477646,102.09508187412055 314.78462087522354,102.09508187412055" fill="#28755b" />
+  <text x="246" y="208" fill="#61736c" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">sheltered air</text>
+  <line x1="329" y1="233" x2="372" y2="233" stroke="#28755b" stroke-width="3" />
+  <polygon points="372,233 362.0950818741206,237.78462087522354 362.0950818741206,228.21537912477646" fill="#28755b" />
+  <text x="470" y="140" fill="#243b35" font-family="Arial, sans-serif" font-size="22" text-anchor="start">Roof: sky-exposed</text>
+  <text x="470" y="208" fill="#243b35" font-family="Arial, sans-serif" font-size="22" text-anchor="start">Inside wall: air-exposed</text>
+  <text x="470" y="257" fill="#243b35" font-family="Arial, sans-serif" font-size="22" text-anchor="start">Inside wall: not sky-exposed</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">Use the surface heightmap for sky exposure and local neighbour tests for air contact.</text>
+</svg>

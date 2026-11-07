@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="lake-bowl-title lake-bowl-desc">
+  <title id="lake-bowl-title">A lake is held by occupied cells, not a painted shore</title>
+  <desc id="lake-bowl-desc">For centre64, half-width12 and level10, the teaching bowl floor is level minus (half-width minus distance). The rim at x52 and76 is stone at altitude10; the centre floor is altitude−2.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">A lake is held by occupied cells, not a painted shore</text>
+  <rect x="65" y="154" width="462" height="166" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <polygon points="80,154 296,286 512,154" fill="#8aaeb1" />
+  <line x1="80" y1="154" x2="296" y2="286" stroke="#28755b" stroke-width="3" />
+  <line x1="296" y1="286" x2="512" y2="154" stroke="#28755b" stroke-width="3" />
+  <line x1="65" y1="154" x2="527" y2="154" stroke="#243b35" stroke-width="2" stroke-dasharray="4 4" />
+  <text x="80" y="345" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">x = 52</text>
+  <text x="296" y="345" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">x = 64</text>
+  <text x="512" y="345" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="middle">x = 76</text>
+  <text x="296" y="118" fill="#28755b" font-family="Arial, sans-serif" font-size="18" text-anchor="middle">WATER LEVEL: ALTITUDE 10</text>
+  <text x="296" y="245" fill="#243b35" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">water</text>
+  <text x="130" y="278" fill="#61736c" font-family="Arial, sans-serif" font-size="20" text-anchor="middle">stone</text>
+  <text x="460" y="278" fill="#61736c" font-family="Arial, sans-serif" font-size="20" text-anchor="middle">stone</text>
+  <text x="582" y="145" fill="#243b35" font-family="Arial, sans-serif" font-size="22" text-anchor="start">Rim: floor = 10</text>
+  <text x="582" y="211" fill="#243b35" font-family="Arial, sans-serif" font-size="22" text-anchor="start">Centre: floor = −2</text>
+  <text x="582" y="277" fill="#243b35" font-family="Arial, sans-serif" font-size="20" text-anchor="start">Sky remains above the fill.</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">Caves and later feature passes must not open a hole through this containment.</text>
+</svg>

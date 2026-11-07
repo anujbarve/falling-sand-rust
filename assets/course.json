@@ -1,0 +1,1503 @@
+[
+  {
+    "number": 1,
+    "stage": "Start",
+    "title": "Install the Rust toolchain",
+    "concept": "We need a compiler before any game instruction can run. rustup manages Rust toolchains; rustc compiles Rust; Cargo coordinates package builds. These are different tools with different jobs.",
+    "work": [
+      "Check rustc --version and cargo --version in your terminal",
+      "If missing, use the official installer for your OS, including its linker prerequisites",
+      "Reopen the terminal and repeat both checks"
+    ],
+    "proof": "Both commands report versions. Record your OS and versions in your own notebook.",
+    "question": "Which tool manages installed Rust toolchains, and which compiles Rust source?",
+    "feedback": "rustup manages toolchains. rustc is the compiler. Cargo uses the toolchain to build packages; the terminal is where you invoke these tools.",
+    "source": "install"
+  },
+  {
+    "number": 2,
+    "stage": "Start",
+    "title": "Create and run the game package",
+    "concept": "Source files are instructions stored as text. Building produces an executable. Cargo gives us one repeatable edit-build-run workflow for every later feature.",
+    "work": [
+      "From the repository root run cargo new game --vcs none, only if game/ does not exist",
+      "Inspect Cargo.toml and src/main.rs, then run cargo run inside game/",
+      "Change the printed greeting, save, and run again"
+    ],
+    "proof": "The terminal prints your edited message. You can point to the source file and package manifest without searching.",
+    "question": "If you edit the greeting but never rebuild or rerun, does the running executable change?",
+    "feedback": "No. Editing source does not rewrite an existing running executable. cargo run rebuilds changed source and launches the resulting program.",
+    "source": "cargo"
+  },
+  {
+    "number": 3,
+    "stage": "Start",
+    "title": "Name the cell position",
+    "concept": "A game needs state: values that describe its current situation. A binding gives a value a name so later expressions can use it. Begin with one coordinate rather than an entire world.",
+    "work": [
+      "Inside main bind column to 12 and row to 5 with let",
+      "Print both values using println! placeholders",
+      "Predict column multiplied by 4 before printing it"
+    ],
+    "proof": "The reported drawing x coordinate is 48. Changing column changes that result while row stays the same.",
+    "question": "What does multiplying a cell column by 4 represent in our teaching window?",
+    "feedback": "It converts a count of cells into a drawing coordinate when each cell is four pixels wide. The cell coordinate and drawing coordinate use different units.",
+    "source": "variables"
+  },
+  {
+    "number": 4,
+    "stage": "Start",
+    "title": "Change state deliberately",
+    "concept": "Falling requires a position to change. Rust bindings are immutable by default; mut makes reassignment an explicit choice. This lets fixed configuration and changing simulation state read differently.",
+    "work": [
+      "Declare row with let mut and increase it using +=",
+      "Remove mut, run cargo check, and read the first compiler error",
+      "Restore mut and keep the fixed cell size immutable"
+    ],
+    "proof": "One update changes row from 5 to 6. You can explain the compiler error rather than just applying its suggestion.",
+    "question": "Why should row be mutable while a fixed cell size can remain immutable?",
+    "feedback": "The update assigns a new value to row. A fixed cell size is only read, so it needs no reassignment permission. Mutability follows intended use.",
+    "source": "variables"
+  },
+  {
+    "number": 5,
+    "stage": "Start",
+    "title": "Choose numeric types and units",
+    "concept": "Coordinates count whole cells, elapsed time measures fractional seconds, and drawing accepts floating-point positions. Keeping these roles distinct prevents mixing units while still letting the renderer convert them.",
+    "work": [
+      "Annotate a coordinate as i32 and a drawing size as f32",
+      "Convert the coordinate with as f32 at the drawing boundary",
+      "Try assigning a decimal directly to an i32 and inspect the diagnostic"
+    ],
+    "proof": "cargo check succeeds after repair. Your cell position stays an integer until drawing.",
+    "question": "Why keep grid coordinates as integers instead of using drawing floats everywhere?",
+    "feedback": "Grid positions identify discrete cells. Floating-point values suit drawing and elapsed time; conversions belong at boundaries where their meanings change.",
+    "source": "types"
+  },
+  {
+    "number": 6,
+    "stage": "Start",
+    "title": "Extract a coordinate conversion function",
+    "concept": "Repeating a conversion invites inconsistent cell sizes. A function names a computation, accepts inputs, and returns a result. That is the first small interface in our game.",
+    "work": [
+      "Write fn screen_position(cell: i32) -> f32 returning cell as f32 * 4.0",
+      "Call it for a column and a row",
+      "Change one input and predict the return value before running"
+    ],
+    "proof": "The function returns 48.0 for input 12 and 20.0 for input 5.",
+    "question": "Why does adding a semicolon to the final return expression change this function?",
+    "feedback": "Without a semicolon the final expression supplies the return value. With a semicolon it becomes a statement; the function then needs an explicit compatible return expression.",
+    "source": "functions"
+  },
+  {
+    "number": 7,
+    "stage": "Start",
+    "title": "Decide whether a cell may fall",
+    "concept": "Motion needs a decision before a change. A condition evaluates to true or false; an if expression selects what happens. We can reason about one blocked cell before building a grid.",
+    "work": [
+      "Set row and floor_row in a terminal experiment",
+      "Print moving when row is below the last free row, otherwise print resting",
+      "Try a position above, touching, and beyond the floor"
+    ],
+    "proof": "Your output distinguishes falling from resting. An invalid starting position is identified rather than silently described as a valid landing.",
+    "question": "Which position should stop a one-cell grain when the floor starts at row 160?",
+    "feedback": "Its top row stops at 159. The cell occupies one row; moving to 160 would overlap the floor.",
+    "source": "control"
+  },
+  {
+    "number": 8,
+    "stage": "Start",
+    "title": "Repeat a small update",
+    "concept": "A loop repeats instructions, but its condition and changing state decide whether it terminates. We need to understand repeated updates before asking a window to redraw forever.",
+    "work": [
+      "Use a finite while loop to move row from 5 toward 8",
+      "Print once per update and predict the number of lines",
+      "Temporarily remove the increment, identify the infinite loop, then stop it with Ctrl+C"
+    ],
+    "proof": "The repaired experiment terminates. Explain the state change that makes the loop condition eventually false.",
+    "question": "What makes this while loop terminate?",
+    "feedback": "Each iteration changes row toward the limit. The condition is rechecked before the next iteration and eventually becomes false.",
+    "source": "control"
+  },
+  {
+    "number": 9,
+    "stage": "Start",
+    "title": "Open the first window",
+    "concept": "macroquad supplies window and drawing services so we can focus on game rules. Its frame loop yields with next_frame().await so the framework can present frames and handle events.",
+    "work": [
+      "Add macroquad = \"=0.4.16\" under the existing dependencies table",
+      "Use the supplied window example, initially at low DPI and fixed 1280 by 720",
+      "Run cargo check then cargo run, close the window, change the title, and rerun"
+    ],
+    "proof": "A responsive window opens and closes normally. The night background uses RGB 15,26,51.",
+    "question": "What job does next_frame().await serve in this macroquad loop?",
+    "feedback": "It yields control to the framework for the next frame. A tight loop without that yield prevents normal frame progression and event handling.",
+    "source": "macroquad"
+  },
+  {
+    "number": 10,
+    "stage": "Start",
+    "title": "Draw one simulation cell",
+    "concept": "A simulation cell is not one physical display pixel. The art design assigns it a four-by-four physical-pixel footprint. For now a low-DPI window makes that mapping simple; the art buffer arrives later.",
+    "work": [
+      "Call draw_rectangle at column times 4 and row times 4 with width and height 4",
+      "Use the sand colour RGB 226,182,121",
+      "Change only column and observe horizontal movement"
+    ],
+    "proof": "A crisp four-pixel block appears. You can distinguish cell position, drawing position, and size.",
+    "question": "If column doubles, must the cell width double too?",
+    "feedback": "No. Position and size are separate arguments. The cell remains four pixels wide while its location changes.",
+    "source": "shapes"
+  },
+  {
+    "number": 11,
+    "stage": "Start",
+    "title": "Group coordinates with a struct",
+    "concept": "Separate variables are easy to mix up once multiple grains exist. A struct makes the coordinates one value with named fields, giving the simulation a meaningful unit to pass around.",
+    "work": [
+      "Define struct Cell with column: i32 and row: i32",
+      "Construct one Cell in main and draw using its fields",
+      "Move the construction outside the frame loop so state persists"
+    ],
+    "proof": "The grain remains visible. Resetting a field does not reconstruct an unrelated coordinate.",
+    "question": "Why create the cell outside the rendering loop?",
+    "feedback": "The value must survive across iterations. Recreating it each frame would reset its state and erase accumulated motion.",
+    "source": "structs"
+  },
+  {
+    "number": 12,
+    "stage": "Start",
+    "title": "Discover a move before borrowing",
+    "concept": "A custom struct without Copy moves when passed by value. This prevents two independent owners from both treating the same non-Copy value as theirs. We first encounter the problem that borrowing will solve.",
+    "work": [
+      "Write a consume_cell function accepting Cell by value",
+      "Pass a cell to it and then try reading the original",
+      "Read the moved-value diagnostic and compare with passing an i32, which implements Copy"
+    ],
+    "proof": "You can reproduce and explain the diagnostic. Do not derive Copy merely to avoid understanding the move.",
+    "question": "Why can passing an i32 leave the caller's value usable while this Cell does not?",
+    "feedback": "i32 implements Copy. Our Cell does not, so a by-value argument moves it. Copy is a type capability, not a rule that every small value automatically gets.",
+    "source": "ownership"
+  },
+  {
+    "number": 13,
+    "stage": "Start",
+    "title": "Borrow state to draw and reset",
+    "concept": "Rendering needs to read the cell repeatedly; resetting needs to change the original. Shared and mutable references express those different permissions without transferring ownership.",
+    "work": [
+      "Write draw_cell(cell: &Cell) and reset_cell(cell: &mut Cell)",
+      "Keep let mut cell in main and pass &cell for drawing and &mut cell on R",
+      "Try changing row through &Cell and repair the rejected mutation"
+    ],
+    "proof": "R resets the same grain. The caller still owns it after both calls.",
+    "question": "Why should draw_cell accept a shared borrow instead of a mutable one?",
+    "feedback": "Drawing only reads state. A shared reference grants the necessary access without claiming exclusive mutation permission. Reset needs a mutable reference because it changes the original.",
+    "source": "borrowing"
+  },
+  {
+    "number": 14,
+    "stage": "Start",
+    "title": "Run movement on a 20 TPS clock",
+    "concept": "A movement update per rendered frame makes faster displays move grains faster. An elapsed-time accumulator separates drawing from simulation. This first clock has 1x speed only and explicitly discards excess catch-up work.",
+    "work": [
+      "Accumulate get_frame_time as seconds",
+      "Run tick_cell whenever accumulated time reaches 0.05 seconds, subtracting that period",
+      "Limit catch-up to two updates per frame and discard excess whole periods after a long stall"
+    ],
+    "proof": "Ordinary rendering-rate changes do not define falling speed. After a debugger pause there is no endless catch-up burst.",
+    "question": "Two frames each add 0.03 seconds to an empty accumulator. How many ticks run and what remains?",
+    "feedback": "One 0.05-second tick runs and 0.01 seconds remains. Keeping that remainder prevents losing ordinary fractional time between frames.",
+    "source": "time"
+  },
+  {
+    "number": 15,
+    "stage": "Start",
+    "title": "Stop a falling grain at a floor",
+    "concept": "Movement proposes a destination; collision constrains it. A fixed floor lets us solve the boundary case before arbitrary cell obstacles. The game's initial falling rule is constant-speed movement, not physical acceleration.",
+    "work": [
+      "Implement tick_cell using up to three downward rows and min(floor_row - 1)",
+      "Draw the floor from that same floor_row",
+      "Reset with R and move the floor by ten rows"
+    ],
+    "proof": "The grain touches the floor without crossing it, even when fewer than three rows remain. From row 5 to row 159 it takes 52 ticks.",
+    "question": "Why is checking only whether the grain starts above the floor insufficient?",
+    "feedback": "A three-row move can overshoot. The destination must be constrained too; arbitrary obstacles will later require inspecting the entire path.",
+    "source": "control"
+  },
+  {
+    "number": 16,
+    "stage": "M0",
+    "title": "Represent air, sand and stone",
+    "concept": "A world cell needs a material identity, not a loose number whose meaning is hidden. An enum lists the valid alternatives; match makes behavior explicit for each alternative.",
+    "work": [
+      "Define Material with Air, Sand, and Stone, deriving the copy/equality traits needed by this small enum",
+      "Write a match that selects a colour",
+      "Add a new variant temporarily and observe which matches need updating"
+    ],
+    "proof": "All material cases are handled. An invalid integer cannot accidentally act as a material through this typed interface.",
+    "question": "Why use an enum instead of magic numbers for materials?",
+    "feedback": "Variants name the valid states. Exhaustive matching helps expose missing handling when a material is added.",
+    "source": "enums"
+  },
+  {
+    "number": 17,
+    "stage": "M0",
+    "title": "Allocate a small world with Vec",
+    "concept": "One cell cannot form a pile. Vec stores a runtime-sized contiguous sequence owned by the world. Start with a small fixed teaching grid before allocating production chunks.",
+    "work": [
+      "Create a World struct with width, height, and Vec<Material>",
+      "Fill a 32 by 18 grid with air and place a stone bottom row",
+      "Draw each material from the same storage"
+    ],
+    "proof": "The bottom row is visible and every other slot begins as air. Recreating the vector each frame is avoided.",
+    "question": "Why should the vector belong to the world instead of draw_world creating it each frame?",
+    "feedback": "It is persistent simulation state. Drawing reads that state; allocating a new vector in drawing would replace or disconnect the simulated world.",
+    "source": "vec"
+  },
+  {
+    "number": 18,
+    "stage": "M0",
+    "title": "Turn coordinates into safe indices",
+    "concept": "A flat vector has one index while the world has two coordinates. Row-major mapping joins them. Bounds must be checked before casting negative coordinates to an unsigned index.",
+    "work": [
+      "Implement index(column,row) returning Option<usize>",
+      "Reject negative and out-of-range coordinates, then calculate row * width + column",
+      "Check all corners plus -1 and the first cell beyond each edge"
+    ],
+    "proof": "A 32 by 18 grid maps its final valid cell to index 575. Invalid positions return None without panic.",
+    "question": "Why must negative coordinates be rejected before conversion to usize?",
+    "feedback": "An unsigned index cannot represent a negative grid coordinate as intended. Validation before conversion prevents a negative input becoming a huge invalid index.",
+    "source": "option"
+  },
+  {
+    "stage": "M0",
+    "title": "Handle a missing cell with match",
+    "concept": "A checked lookup returns a possibility, not a guaranteed cell. Option forces us to decide what an invalid coordinate means before using it. Bounds failure is expected at a brush edge, not an exceptional crash.",
+    "work": [
+      "Match Some(index) and None from the coordinate helper",
+      "Make out-of-view brush edits a no-op while an invalid fixture can report failure",
+      "Try unwrap on an invalid position, observe the panic, and remove it"
+    ],
+    "proof": "Brush-edge handling is explicit and safe. A missing cell is never silently interpreted as cell zero.",
+    "question": "Why should an invalid coordinate not default to index zero?",
+    "feedback": "It would turn an out-of-bounds edit into an unintended change to the first cell. None preserves the distinction between missing and valid.",
+    "source": "option",
+    "number": 19
+  },
+  {
+    "number": 20,
+    "stage": "M0",
+    "title": "Move material without duplicating it",
+    "concept": "Falling in a material grid transfers occupancy. Copying sand into a destination without clearing its source creates matter. A swap expresses relocation while respecting one owner of the vector.",
+    "work": [
+      "Read source and destination material values",
+      "When destination is air, use the vector's swap operation",
+      "Move one grain once and count sand before and after"
+    ],
+    "proof": "Exactly one sand cell remains. You avoid holding two conflicting mutable element references.",
+    "question": "Why is a swap useful for moving sand into air?",
+    "feedback": "It relocates sand and moves air back to the source in one operation. Assigning only the destination would leave duplicate sand behind.",
+    "source": "vec"
+  },
+  {
+    "stage": "M0",
+    "title": "Iterate and inspect a grid without moving it",
+    "concept": "Rendering, counting and simulation need different access patterns. Iterators can borrow elements without consuming the collection; indices are sometimes clearer for neighbour movement. Use the access pattern that preserves the world.",
+    "work": [
+      "Count sand using iter and a predicate",
+      "Contrast iter, iter_mut and into_iter on a small owned vector",
+      "Use borrowed iteration for inspection and indexed access for movement where needed"
+    ],
+    "proof": "Counting and drawing leave the world usable. You can explain why consuming the vector is wrong for per-frame rendering.",
+    "question": "Why can into_iter on an owned vector make that vector unavailable afterwards?",
+    "feedback": "It consumes the collection to produce owned elements. Borrowed iteration instead lends access while retaining the collection with its owner.",
+    "source": "vec",
+    "number": 21
+  },
+  {
+    "number": 22,
+    "stage": "M0",
+    "title": "Prevent a grain moving twice per tick",
+    "concept": "In-place updates can encounter a moved cell again later in the same scan. Scan order and an update marker make a tick's meaning explicit rather than dependent on accidental traversal order.",
+    "work": [
+      "Scan falling material from bottom to top",
+      "Add a moved-this-tick marker that travels with material and resets logically each tick",
+      "Trace a three-row fall through a tiny column by hand"
+    ],
+    "proof": "A grain never receives two movement updates in one tick, including across a later pass. Tests check travelled distance as well as material count.",
+    "question": "Why is bottom-to-top order alone not the final cross-chunk solution?",
+    "feedback": "It helps within one scan, but a later chunk or phase can encounter a moved cell. The update marker protects the once-per-tick rule across those boundaries.",
+    "source": "testing"
+  },
+  {
+    "number": 23,
+    "stage": "M0",
+    "title": "Build piles and level water",
+    "concept": "Blocked powders and liquids need different fallback moves. Sand tries diagonal descent to form piles; water also spreads sideways to level. Candidate order must not create permanent leftward bias.",
+    "work": [
+      "Give sand downward then diagonal candidates",
+      "Add Water and a simple bounded sideways search",
+      "Alternate left/right preference deterministically and build a bowl"
+    ],
+    "proof": "Sand piles above the floor. Water pools in the bowl. Neither leaks through stone or changes its count in a closed scene.",
+    "question": "Why alternate the horizontal preference instead of always trying left first?",
+    "feedback": "A fixed preference creates directional bias. A deterministic alternation reduces that bias while keeping runs reproducible.",
+    "source": "design"
+  },
+  {
+    "number": 24,
+    "stage": "M0",
+    "title": "Paint materials into the world",
+    "concept": "The player edits cells; mouse positions arrive in drawing coordinates. An explicit conversion and a view boundary stop edits leaking through panels or outside storage.",
+    "work": [
+      "Convert mouse drawing coordinates into cell coordinates",
+      "Paint selected sand/stone/water with left drag and erase with right drag",
+      "Ignore positions outside the world view and distinguish a single press from holding"
+    ],
+    "proof": "Dragging paints a continuous brush footprint. Clicking outside the view changes no cells.",
+    "question": "Why must a mouse position be converted before indexing the world?",
+    "feedback": "Mouse and world coordinates use different units and may have different origins. Indexing expects valid cell coordinates, not raw display pixels.",
+    "source": "input"
+  },
+  {
+    "number": 25,
+    "stage": "M0",
+    "title": "Give modules narrow jobs",
+    "concept": "main is becoming crowded. Modules separate simulation state, rules, rendering and input so a test can use physics without opening a window. Visibility should expose only what another module needs.",
+    "work": [
+      "Move World and Material into world.rs",
+      "Move tick logic into simulation.rs and drawing into render.rs",
+      "Keep main responsible for orchestration and remove unused public items"
+    ],
+    "proof": "cargo check succeeds. A simulation test imports no window startup code.",
+    "question": "What should decide whether a helper becomes pub?",
+    "feedback": "Whether another module needs the interface. Making every field and helper public weakens the boundary without helping the game.",
+    "source": "modules"
+  },
+  {
+    "number": 26,
+    "stage": "M0",
+    "title": "Test a tiny scene without a window",
+    "concept": "A visible pile is useful feedback, but a small headless test catches regressions repeatedly. Assertions should check outcomes that matter, not restate the implementation's loop.",
+    "work": [
+      "Add tests for falling onto stone, no tunnelling, count conservation, and invalid coordinates",
+      "Run cargo test without opening a window",
+      "Deliberately break source clearing and watch a conservation test fail"
+    ],
+    "proof": "Tests fail for the deliberate bug and pass after repair. A test explains the behavior it protects.",
+    "question": "Why count material in addition to checking the final grain location?",
+    "feedback": "A grain may arrive at the correct destination while leaving a duplicate behind. Position alone does not prove conservation.",
+    "source": "testing"
+  },
+  {
+    "stage": "M0",
+    "title": "Store chunks by coordinate with a map",
+    "concept": "An explored world is sparse. A map associates a chunk key with owned chunk data so storage need not include every coordinate between the player and the origin. Iteration order must not become an accidental physics rule.",
+    "work": [
+      "Use a HashMap or ordered map keyed by chunk coordinates",
+      "Insert, query and remove a chunk while preserving changed data",
+      "Build an explicit sorted active-key order for deterministic updates"
+    ],
+    "proof": "Far-apart chunk coordinates do not allocate the intervening world. Active iteration order is reproducible.",
+    "question": "Why not let hash-map iteration order define the simulation scan order?",
+    "feedback": "That order is not the game’s specified update order. An explicit ordering prevents container details from changing results.",
+    "source": "collections",
+    "number": 27
+  },
+  {
+    "number": 28,
+    "stage": "M0",
+    "title": "Split storage into 64 by 64 chunks",
+    "concept": "The infinite world cannot be one ever-growing visible vector. Chunks bound storage and give later scheduling a stable unit. This changes storage, not the definition of a simulation cell.",
+    "work": [
+      "Create Chunk storage containing 4096 cells",
+      "Map global positions to a chunk key and local position using Euclidean division",
+      "Keep the current small scene working across a chunk boundary"
+    ],
+    "proof": "Columns -1, 0, 63, and 64 map correctly. Moving across a boundary loses or duplicates no material.",
+    "question": "Why use Euclidean division for negative world coordinates?",
+    "feedback": "It gives nonnegative local offsets with the correct containing chunk. Truncation toward zero puts negative positions in the wrong chunk.",
+    "source": "integers"
+  },
+  {
+    "number": 29,
+    "stage": "M0",
+    "title": "Pan a camera and clip the active rectangle",
+    "concept": "The view decides which cells are visible, while the active rectangle adds a 16-cell simulation margin. Storage chunks may overlap this rectangle only partially; updating whole chunks would exceed the intended budget.",
+    "work": [
+      "Add camera offsets to draw/input conversion",
+      "Compute view and active rectangles in cell units",
+      "Iterate only the intersection of each chunk with the active rectangle"
+    ],
+    "proof": "Frozen cells outside the active rectangle remain unchanged. A partial edge chunk does not update its off-region rows.",
+    "question": "Why is overlapping-chunk selection insufficient to enforce a 16-cell margin?",
+    "feedback": "An overlapping chunk may extend up to 63 cells beyond the rectangle. Per-cell clipping is needed inside each selected chunk.",
+    "source": "design"
+  },
+  {
+    "number": 30,
+    "stage": "M0",
+    "title": "Keep resident storage bounded",
+    "concept": "Panning should not grow memory indefinitely. A resident cache distinguishes active chunks, frozen resident chunks and regenerable unchanged chunks. Before saving exists, changed chunks require an explicit temporary limitation.",
+    "work": [
+      "Track last-active use and changed status",
+      "Evict only unchanged resident chunks in this early stage",
+      "Display the temporary changed-chunk memory limit during development and record the M4 replacement"
+    ],
+    "proof": "Panning through unchanged terrain stays bounded. Edited data is never silently dropped to satisfy the cache cap.",
+    "question": "Why not discard an edited chunk just because it is off-screen?",
+    "feedback": "Its state differs from deterministic generation. Without saving it, discarding it loses the player's changes.",
+    "source": "collections"
+  },
+  {
+    "number": 31,
+    "stage": "M0",
+    "title": "Measure and close the foundation milestone",
+    "concept": "Performance claims need measurements on the actual target, not a developer's fast machine. A synchronous tick and rendering together share a frame budget. M0 also checks graphics compatibility before deeper work.",
+    "work": [
+      "Install the four-phase sequential chunk traversal before the benchmark, retaining the moved marker across phases",
+      "Build a repeatable sand scene at 74624 active cells and a half-water scene",
+      "Record tick time, frame time, memory, hardware, and resolution in release mode",
+      "Check the target GPU and write the M0 result with pass/fail and remaining work"
+    ],
+    "proof": "Sand meets the floor target or the budget is revised openly. Water timings are recorded and the threading decision is evidence-based.",
+    "question": "Why does an acceptable average tick time not prove smooth 60 FPS?",
+    "feedback": "Long individual ticks or multiple ticks in one frame can exceed the frame period. Tail frame times and combined frame work matter too.",
+    "source": "instant"
+  },
+  {
+    "number": 32,
+    "stage": "M1",
+    "title": "Give materials properties and cells temperature",
+    "concept": "Material identity is shared configuration; temperature and moisture belong to each cell. Separating them avoids storing an entire property table in every grain and prepares pairwise reactions.",
+    "work": [
+      "Add a material-property lookup for density and conductivity",
+      "Store a signed temperature per non-air cell",
+      "Check the proposed eight-byte cell layout with size_of rather than assuming field sizes imply layout"
+    ],
+    "proof": "Hot sand and cold water can coexist as different states of the same material types. Actual layout size is reported.",
+    "question": "Why is conductivity a material property but temperature cell state?",
+    "feedback": "Conductivity describes how that material exchanges heat. Temperature describes this particular cell now and can differ between cells of one material.",
+    "source": "structs"
+  },
+  {
+    "stage": "M1",
+    "title": "Exchange materials by density",
+    "concept": "The early prototype moved sand only into air. Density exchange extends the rule to heavier matter sinking through lighter fluids and oil resting above water. Moving through multiple cells still needs path checks and the once-per-tick marker.",
+    "work": [
+      "Add oil and define which material pairs may exchange positions",
+      "Move denser eligible material downward through less-dense fluid without duplicating either cell",
+      "Test sand sinking in water, oil floating above water, and stable solid support"
+    ],
+    "proof": "Oil does not sink below water in the resting fixture. Closed scenes preserve the counts of both exchanged materials.",
+    "question": "Why is density alone insufficient to decide whether every pair can swap?",
+    "feedback": "Kind and support rules constrain movement too. A dense cell must not arbitrarily pass through a rigid solid merely because its numeric density is greater.",
+    "source": "design",
+    "number": 33
+  },
+  {
+    "number": 34,
+    "stage": "M1",
+    "title": "Exchange heat across an edge",
+    "concept": "Heat transfer needs consistent old-state reads and equal-and-opposite updates when no source or sink is present. A tiny isolated pair reveals direction errors and scan-order dependence before a landscape hides them.",
+    "work": [
+      "Implement an isolated two-cell exchange using a defined numeric rule",
+      "Apply paired changes without reading a half-updated neighbour as the old state",
+      "Test warm-to-cool transfer, equilibrium, and closed-pair conservation"
+    ],
+    "proof": "The cold cell warms, the hot cell cools, and equilibrium stays stable. Rounding policy and any source/sink exceptions are documented.",
+    "question": "What result would suggest heat is being created by the update order?",
+    "feedback": "A closed pair's combined heat measure changes without a defined source or sink. Pairwise accounting tests expose that error.",
+    "source": "testing"
+  },
+  {
+    "number": 35,
+    "stage": "M1",
+    "title": "Distinguish sky exposure from air contact",
+    "concept": "Rain needs a route to the sky; cooling needs contact with local air. One boolean cannot represent both. A cave wall may cool even though no rain should reach it.",
+    "work": [
+      "Build the settled, plant-ignoring surface heightmap defined by the game",
+      "Implement separate sky-exposed and air-exposed queries",
+      "Test a roof, falling drop, attached canopy and cave wall"
+    ],
+    "proof": "Falling drops do not redefine the terrain surface. Cave walls exchange with sheltered air while roofs protect interiors from rain.",
+    "question": "Why must a cave wall be air-exposed but not sky-exposed?",
+    "feedback": "It touches air locally but has blocking terrain above. Heat contact and direct weather exposure answer different questions.",
+    "source": "design"
+  },
+  {
+    "number": 36,
+    "stage": "M1",
+    "title": "Freeze and melt water without losing cells",
+    "concept": "A phase transition changes material state when temperature crosses a threshold. The simplest useful test checks both the conversion and what happens when the condition reverses.",
+    "work": [
+      "Implement water-to-ice and ice-to-water thresholds from the spec",
+      "Use a cold exposed pond and a warmed ice scene",
+      "Keep material conversion from accidentally resetting unrelated state"
+    ],
+    "proof": "The pond freezes from the surface under the chosen heat rule and later melts. Total occupied water/ice volume is tracked.",
+    "question": "Why test the reverse transition instead of only freezing?",
+    "feedback": "One-way conversion can trap material permanently or leave stale flags. Reversal checks a complete cycle and transition cleanup.",
+    "source": "design"
+  },
+  {
+    "stage": "M1",
+    "title": "Melt snow in warm air",
+    "concept": "Snow is a moving powder before it becomes water, not just an alternate precipitation drawing. Its thermal conversion must work both for painted snow and accumulated weather snow while preserving material state consistently.",
+    "work": [
+      "Add snow as a light powder with its documented movement rule",
+      "Convert snow above the approved melting threshold into water",
+      "Test a warm-air fixture against the ten-second visibility deadline and a cold control"
+    ],
+    "proof": "Warm snow becomes water within ten seconds at 1x. Cold snow remains snow under the fixture, and conversion clears stale attachment or movement flags as specified.",
+    "question": "Why test painted snow separately from weather-spawned snow?",
+    "feedback": "The two creation paths can initialize temperature and flags differently. Both must enter the same valid material rules.",
+    "source": "design",
+    "number": 37
+  },
+  {
+    "number": 38,
+    "stage": "M1",
+    "title": "Boil water and cool lava into basalt",
+    "concept": "The water/lava contact scene is a required visible reaction. It links transfer, phase conversion and a second solid material. Visibility deadlines constrain tuning; realistic numbers alone do not satisfy this game.",
+    "work": [
+      "Create a fixed lava-water contact fixture",
+      "Add steam and basalt conversions with explicit heat/source policies",
+      "Measure first visible steam and contact basalt against the one-second requirement"
+    ],
+    "proof": "Both effects appear within the stated 1x deadline. Counts and energy exceptions are documented instead of hidden.",
+    "question": "Why does passing a temperature threshold test not prove the reaction meets the game design?",
+    "feedback": "The required effect must also be visible on time. Correct internal numbers can still produce an unreadable or excessively slow scene.",
+    "source": "design"
+  },
+  {
+    "number": 39,
+    "stage": "M1",
+    "title": "Let steam rise and condense near its source",
+    "concept": "Steam has its own temperature and lifetime. It must cool while rising rather than depend on a camera-relative cloud line. Off-screen absorption is a separate boundary policy, not condensation.",
+    "work": [
+      "Tune steam cooling with air and rising movement",
+      "Run the same source near sea level and on a mountain fixture",
+      "Record condensation distance, deadline, and margin-humidity behavior"
+    ],
+    "proof": "Condensation occurs roughly 40–80 cells above formation when the active region contains that path. Camera clipping is reported separately.",
+    "question": "Why must camera-boundary absorption be tested separately from condensation?",
+    "feedback": "One removes gas at the active margin and credits humidity; the other transforms steam locally into water. Treating them as the same process hides camera effects.",
+    "source": "design"
+  },
+  {
+    "stage": "M1",
+    "title": "Borrow disjoint slices before parallel work",
+    "concept": "A mutable reference is exclusive while used. Splitting a slice at a boundary produces two disjoint mutable slices that can safely be handed to separate functions. This is a concrete ownership foundation for threading.",
+    "work": [
+      "Use split_at_mut on a small numeric buffer",
+      "Update each half and verify both changes in the original",
+      "Explain why adjacent chunk reads/writes may need a different partition than simply splitting chunk objects"
+    ],
+    "proof": "The example needs no unsafe code and preserves the single owner of the buffer. The course’s cross-chunk proof remains a separate requirement.",
+    "question": "Why doesn’t splitting the chunk list prove neighbour-cell writes are disjoint?",
+    "feedback": "The workers may still write beyond their own chunks. The proof must cover the entire footprint of each rule, not only container ownership.",
+    "source": "slices",
+    "number": 40
+  },
+  {
+    "number": 41,
+    "stage": "M1",
+    "title": "Schedule independent work before adding threads",
+    "concept": "Threads require a proof of disjoint reads and writes, not just a speed wish. Four chunk phases are a scheduling strategy whose movement and neighbour-read bounds must be verified.",
+    "work": [
+      "Implement the four-phase traversal sequentially first",
+      "Calculate each rule's maximum read/write footprint and test shared-neighbour boundaries",
+      "Only then dispatch proven-disjoint work with scoped threads or another documented safe partition"
+    ],
+    "proof": "Single-threaded and threaded paths share rules. No unsafe shared mutation is introduced to bypass an unproven partition.",
+    "question": "Why does using the same RNG seed not make concurrent writes safe?",
+    "feedback": "Randomness controls choices, not memory access. Threads still need disjoint writes or synchronization and a defined update order.",
+    "source": "threads"
+  },
+  {
+    "stage": "M1",
+    "title": "Use a small trait for deterministic choices",
+    "concept": "A trait names behavior an implementation provides. A narrow randomness interface lets the same simulation request a choice from a production coordinate hash or a scripted test source. Keep the seam small rather than building a generic engine.",
+    "work": [
+      "Define a RandomChoice trait with one documented bounded-choice method",
+      "Implement a coordinate-hash source and a scripted test source",
+      "Pass the source through a generic function only where tests need to control choices"
+    ],
+    "proof": "Tests can force a left or right choice without changing simulation rules. Empty ranges and source state are specified.",
+    "question": "Why add a trait here instead of making every material a trait object?",
+    "feedback": "The useful variation is the choice source used by tests. Material identity already has an enum; adding unrelated dynamic interfaces would not serve this requirement.",
+    "source": "traits",
+    "number": 42
+  },
+  {
+    "number": 43,
+    "stage": "M1",
+    "title": "Prove deterministic water and heat",
+    "concept": "Determinism means the same complete inputs and update schedule produce the same state. Headless comparisons must include tick multipliers and active-region history, not only a terrain seed.",
+    "work": [
+      "Hash state after 10000 ticks at 1,2,4,8 threads",
+      "Compare fixed multipliers and identical inputs, then deliberately vary an input",
+      "Run all water/heat visibility fixtures and record the M1 gate"
+    ],
+    "proof": "Identical cases match and changed inputs are not accidentally ignored. Camera comparisons are restricted to the scope allowed by boundary effects.",
+    "question": "Why does equal seed alone not define a deterministic replay?",
+    "feedback": "Input timing, tick multipliers, camera/active-region history and starting state can change outcomes. A replay needs the relevant complete sequence.",
+    "source": "design"
+  },
+  {
+    "number": 44,
+    "stage": "M2",
+    "title": "Burn fuel without deleting its support immediately",
+    "concept": "A wooden wall must remain wood while burning until fuel runs out. A burning flag and separate flame gas preserve structure while making heat and motion visible.",
+    "work": [
+      "Set a burning flag and fuel timer on flammable cells",
+      "Emit short-lived flame cells into adjacent air",
+      "Convert exhausted fuel to ash or air and recheck support"
+    ],
+    "proof": "A wall burns over time instead of vanishing at ignition. Wet and dry wood fixtures behave differently.",
+    "question": "Why should a burning beam not immediately become a gas cell?",
+    "feedback": "It would lose solid support as soon as ignition occurs. Keeping the material until fuel is consumed lets structural loss follow burning duration.",
+    "source": "design"
+  },
+  {
+    "number": 45,
+    "stage": "M2",
+    "title": "Separate absorbed moisture and surface wetness",
+    "concept": "Porous soil stores water; metal can get wet without absorbing it. The rust requirement needs a wetness path even when metal porosity is zero. This is a design decision to resolve before encoding reactions.",
+    "work": [
+      "Build wet wood and rain-on-metal fixtures",
+      "Specify how the existing moisture field represents surface wetness for nonporous cells",
+      "Implement absorption capacity, saturation and extinguishing without duplicating water"
+    ],
+    "proof": "Wet wood resists ignition and metal can satisfy the documented rust condition. The chosen moisture meaning is recorded in the milestone plan.",
+    "question": "Why does zero porosity not mean rain can never wet a metal surface?",
+    "feedback": "Porosity describes absorption capacity. Surface wetness is a different condition and needs an explicit representation or rule.",
+    "source": "design"
+  },
+  {
+    "number": 46,
+    "stage": "M2",
+    "title": "Generate weather from position and time",
+    "concept": "A weather field is evaluated from world coordinates and calendar time so moving the camera does not invent a new climate. Player-caused humidity deltas are state layered onto a deterministic baseline.",
+    "work": [
+      "Implement 512-cell weather columns with seeded baseline values",
+      "Interpolate between column centres",
+      "Add a saved humidity delta and decay policy without ticking every off-screen column"
+    ],
+    "proof": "Panning across a weather boundary changes conditions smoothly. Returning to the same coordinate/time reproduces baseline values.",
+    "question": "Why separate a functional baseline from a stored humidity delta?",
+    "feedback": "The baseline can be evaluated without off-screen simulation. The delta preserves player and simulation effects that cannot be regenerated from seed and time alone.",
+    "source": "design"
+  },
+  {
+    "number": 47,
+    "stage": "M2",
+    "title": "Apply precipitation at exposed surfaces",
+    "concept": "The current design applies weather at world surfaces and uses decorative streaks separately. This avoids camera-height-dependent drop travel and prevents rain inside caves, while still letting runoff become real water.",
+    "work": [
+      "Apply rain or snow at the specified sky-exposed surface, including plant handling",
+      "Absorb until saturation, then spawn runoff in valid space",
+      "Test a roof, canopy, pond, fire and underground camera"
+    ],
+    "proof": "Sheltered interiors stay dry, rain extinguishes fire within two seconds, and saturated surfaces create water without overwriting solids.",
+    "question": "Why should decorative rain streaks not add a second moisture update?",
+    "feedback": "Simulation precipitation already accounts for water and wetness. Letting the decoration also apply it doubles the effect and couples physics to rendering.",
+    "source": "design"
+  },
+  {
+    "number": 48,
+    "stage": "M2",
+    "title": "Move gases and light matter with wind",
+    "concept": "Wind changes movement preference and drift, while conservation rules depend on material kind. Smoke absorption, steam humidity credit and powder retention are distinct outcomes at the active margin.",
+    "work": [
+      "Implement wind influence on smoke, steam, snow and unattached leaves",
+      "Keep powders and liquids inside the active boundary",
+      "Test gas absorption and steam humidity accounting at all four sides"
+    ],
+    "proof": "Wind is readable without material teleporting. Boundary tests distinguish gas removal from conserved mass stopping.",
+    "question": "Why is ash not automatically a gas just because smoke contains it visually?",
+    "feedback": "The material table defines ash as powder. Boundary and movement behavior must follow its simulated kind rather than an imprecise visual label.",
+    "source": "design"
+  },
+  {
+    "number": 49,
+    "stage": "M2",
+    "title": "Find connected support groups",
+    "concept": "Neighbour contact alone allows a floating row to support itself. A connected-component search asks whether the entire rigid group has an anchor. Bounding that search introduces an explicit gameplay approximation.",
+    "work": [
+      "Use a bounded queue to flood-fill four-neighbour rigid cells",
+      "Track whether the group reaches bedrock or valid external support",
+      "Test a floating roof, supported arch and group beyond the fill cap"
+    ],
+    "proof": "Small unsupported groups are identified correctly. The cap/off-region support exception is visible in tests and the acceptance requirement is scoped accordingly.",
+    "question": "Why do two adjacent floating cells not prove each other supported?",
+    "feedback": "They belong to the same group. Support must come from outside that group or an explicit anchor, not circular internal contact.",
+    "source": "vecdeque"
+  },
+  {
+    "number": 50,
+    "stage": "M2",
+    "title": "Drop and float rigid groups as units",
+    "concept": "A roof fragment keeps its shape while moving. A serial group pass avoids concurrent multi-chunk writes. Floating and impact rules need group-level tests rather than isolated material checks.",
+    "work": [
+      "Move unsupported groups up to three rows with path collision checks",
+      "Implement the approved denser-liquid flotation rule and weak-material impact breakup",
+      "Check interaction with the active margin and a chunk boundary"
+    ],
+    "proof": "A slab lands intact, a weak group breaks under the specified drop condition, and a raft/floe follows the approved buoyancy rule.",
+    "question": "Why can't a rigid group's cells each fall independently?",
+    "feedback": "Independent moves deform the group. A rigid move must validate and apply a single displacement for all its cells together.",
+    "source": "design"
+  },
+  {
+    "number": 51,
+    "stage": "M2",
+    "title": "Throw material as budgeted particles",
+    "concept": "Explosions need velocity, which ordinary grid cells do not store. A particle list owns thrown material temporarily and returns it to the grid on impact. Reinsertion must have a bounded failure policy.",
+    "work": [
+      "Remove thrown cells from the grid and store position, velocity and full material state",
+      "Sweep particle motion for collisions and define nearest-free placement limits",
+      "Test cap overflow, a full region and margin contact"
+    ],
+    "proof": "No thrown material exists in both list and grid. Destruction beyond the cap is explicitly counted as the designed exception.",
+    "question": "Why is checking only a particle's final position unsafe at high speed?",
+    "feedback": "It can cross a solid between its start and end. Swept/path collision checks prevent tunnelling through intermediate cells.",
+    "source": "design"
+  },
+  {
+    "stage": "M2",
+    "title": "Ignite gunpowder and resolve a blast",
+    "concept": "Particle movement explains thrown debris but does not yet create an explosion. Gunpowder ignition must trigger one bounded event that selects a radius, compares hardness, applies heat and transfers thrown material into the particle list.",
+    "work": [
+      "Make ignition or a completed fuse enqueue one explosion event, not one event every subsequent tick",
+      "Apply a bounded radius rule for destruction, outward velocity and heat using documented hardness thresholds",
+      "Test gunpowder ignition, crater creation, thrown material, secondary ignition and particle-cap overflow"
+    ],
+    "proof": "Gunpowder explodes within the one-second deadline and the explosion fixture shows a crater and outward motion. Destroyed material is counted as an explicit exception.",
+    "question": "Why enqueue a single explosion instead of treating hot gunpowder as an endlessly active blast source?",
+    "feedback": "An event should be consumed once. Re-triggering each tick repeats energy and destruction beyond the specified charge.",
+    "source": "design",
+    "number": 52
+  },
+  {
+    "number": 53,
+    "stage": "M2",
+    "title": "Strike the actual world surface",
+    "concept": "Lightning is an event with a world-coordinate target and a visible consequence. A bright flash alone is not the reaction; heat and ignition must be applied to the actual surface or connected metal group.",
+    "work": [
+      "Resolve a strike from cloud base to surface without loading an unbounded column",
+      "Heat connected metal or ignite flammable targets",
+      "Test a roof shelter and a metal conductor fixture"
+    ],
+    "proof": "The struck world cell changes as specified. The decorative bolt does not independently mutate material.",
+    "question": "Why separate drawing a bolt from resolving the strike target?",
+    "feedback": "The visible effect may be clipped by the camera. Its physics target must still come from world geometry, not screen coordinates.",
+    "source": "design"
+  },
+  {
+    "number": 54,
+    "stage": "M2",
+    "title": "Select tools and save cooldown state",
+    "concept": "A tool differs from a paint material: it may trigger one event and have a cooldown. Explicit event commands make input, tests and later replays use the same operation.",
+    "work": [
+      "Add the Tools page and commands for fire, bomb, rain and lightning",
+      "Assign cooldowns to calendar ticks and fuse timing to the explicitly chosen physics clock",
+      "Test repeated clicks, pause behavior and invalid targets"
+    ],
+    "proof": "Unavailable tools give feedback and do not fire. Fuse and cooldown behavior is documented against the two clocks.",
+    "question": "Why must a bomb fuse and a seasonal cooldown name their clock?",
+    "feedback": "Physics and calendar ticks can diverge in fast-forward. An unnamed duration becomes ambiguous and may change behavior across machines.",
+    "source": "design"
+  },
+  {
+    "number": 55,
+    "stage": "M2",
+    "title": "Verify the fire weather and structure slice",
+    "concept": "M2 combines systems that were tested separately. It needs an integrated hillside fixture, including a roof, wet and dry materials, a fire and active-margin movement.",
+    "work": [
+      "Build one repeatable hillside and house scene",
+      "Run fire spread, rain suppression, wet-wood, roof-fall and edge-pan checks",
+      "Profile the serial support/particle work as well as cell phases"
+    ],
+    "proof": "All M2 exit conditions are recorded with timings and a clip. Any oversized-group exception is stated rather than hidden.",
+    "question": "Why recheck performance after adding bounded support searches?",
+    "feedback": "One bounded search can still be repeated many times after an explosion. Total per-tick work depends on event count as well as each search cap.",
+    "source": "design"
+  },
+  {
+    "number": 56,
+    "stage": "M3",
+    "title": "Count days and seasons with integers",
+    "concept": "Completed simulation steps and elapsed calendar ticks answer different questions. Separate integer counters make day boundaries explicit without confusing seasonal speed with physical updates.",
+    "work": [
+      "Introduce step_tick and world_tick as u64",
+      "Derive day, season and year from 24000,72000,288000 ticks",
+      "Test boundary values immediately before and after a season change"
+    ],
+    "proof": "Day and season transitions are exact at their documented boundaries. Simulation step count is not silently substituted for calendar time.",
+    "question": "Why keep step_tick when world_tick already exists?",
+    "feedback": "The executed update count seeds deterministic choices and measures physics progress. Calendar time may advance by more than one unit per executed step.",
+    "source": "integers"
+  },
+  {
+    "number": 57,
+    "stage": "M3",
+    "title": "Budget the production scheduler",
+    "concept": "The teaching accumulator is too small a model for fast-forward. The production scheduler must define clamping, pause resets, overdue discard, single-tick duration and combined simulation time per rendered frame.",
+    "work": [
+      "Translate spec section 5.3 into a table of scheduler states before coding",
+      "Inject elapsed times and synthetic tick costs into a headless scheduler test",
+      "Verify pause/speed resets and the 250 ms clamp without sleeping in tests"
+    ],
+    "proof": "Switching 64x to 1x leaves no physics backlog. Both measured frame work and uncancellable single-tick overshoots are reported honestly.",
+    "question": "Why can checking a time budget only after a tick still allow an over-budget frame?",
+    "feedback": "A synchronous tick cannot be interrupted by that later check. Prediction reduces risk but worst-case tick duration still needs measurement and a fallback policy.",
+    "source": "instant"
+  },
+  {
+    "number": 58,
+    "stage": "M3",
+    "title": "Distribute exact calendar multipliers",
+    "concept": "A capped physics rate cannot always use one integer multiplier for every tick. Quotient/remainder distribution preserves the sum while keeping each assignment integral. Residual debt needs an explicit persistence policy.",
+    "work": [
+      "Implement the W and k allocation rule from the current spec with integer arithmetic",
+      "Test nondivisible totals, early budget stop, zero-tick frames and speed resets",
+      "Decide whether fractional scheduler debt persists through save/load and record the choice"
+    ],
+    "proof": "For every completed allocation, spent plus retained world ticks equals the accumulated budget. No early stop loses unspent calendar ticks.",
+    "question": "For W=10 and k=3 under the sequential ceiling allocation, which multipliers sum to the budget?",
+    "feedback": "The sequence is 4,3,3. After assigning 4, divide the remaining 6 across the remaining 2. All assigned values sum to 10.",
+    "source": "design"
+  },
+  {
+    "number": 59,
+    "stage": "M3",
+    "title": "Sample slow work deterministically",
+    "concept": "Random ticks bound background work without storing timestamps per moving cell. The sample is a deterministic function of seed, executed tick, chunk and pick index, so test runs can reproduce it.",
+    "work": [
+      "Implement 16 picks per active chunk at M=1",
+      "Skip picks outside the clipped active rectangle",
+      "Test repeatability and visit frequency over a documented multi-day sample"
+    ],
+    "proof": "Off-screen cells receive no slow work. Fixed inputs reproduce the exact pick sequence, while measured frequencies are evaluated statistically.",
+    "question": "Why must the pick index be included in the hash input?",
+    "feedback": "A chunk needs several choices in one tick. Without a differing index, every choice could select the same cell from identical hash inputs.",
+    "source": "design"
+  },
+  {
+    "number": 60,
+    "stage": "M3",
+    "title": "Bound accelerated slow processes",
+    "concept": "Fast-forward needs more visits before it needs bigger changes per visit. The capped fallback is approximate; it must prevent invalid probabilities and same-tick chains through newly changed cells.",
+    "work": [
+      "Use P=min(16*M,256) and the documented fallback scaling",
+      "Enforce the once-per-tick changed-cell rule using a defined marker or deferred edits",
+      "Test duplicate picks, newly grown neighbours, stage boundaries and small progress rates"
+    ],
+    "proof": "A cell cannot rot through two stages in one tick. Probability 0 stays 0 and probability 1 stays 1, including fallback mode.",
+    "question": "Why is clamping progress on each visit insufficient if picks can repeat?",
+    "feedback": "A second visit could process the newly transitioned material in the same tick. The once-per-tick rule or deferred edits must prevent that chain.",
+    "source": "design"
+  },
+  {
+    "number": 61,
+    "stage": "M3",
+    "title": "Close drying seepage and evaporation loops",
+    "concept": "Rain without sinks floods the sandbox; evaporation without replenishment drains it. The design uses approximate humidity accounting rather than exact atmospheric conservation, so tests must track visible water balance.",
+    "work": [
+      "Implement drying to equilibrium, downward seepage and exposed-water evaporation",
+      "Credit humidity according to the documented water-cycle policy",
+      "Check sheltered wood, porous soil above stone, a puddle and a lake"
+    ],
+    "proof": "A puddle dries faster than a lake. Moisture never leaves its allowed range, and seepage stops at nonporous material.",
+    "question": "Why distinguish a material-count test from a long-run water-balance test?",
+    "feedback": "The weather model has explicit sources and sinks. Exact local conservation and approximate regional balance are different promises requiring different checks.",
+    "source": "design"
+  },
+  {
+    "number": 62,
+    "stage": "M3",
+    "title": "Age wet wood and rust metal",
+    "concept": "Decay needs progress accumulated under the right conditions and visible intermediate states. Rain-on-metal and wet-wood fixtures also expose whether the moisture representation is complete.",
+    "work": [
+      "Advance wood to rotten wood and later soil using stage boundaries",
+      "Advance wet metal to rust powder using the approved wetness rule",
+      "Test dry controls and interrupted wet conditions at several speeds"
+    ],
+    "proof": "Wet fixtures visibly decay within their specified deadlines, dry controls do not, and intermediate states remain observable.",
+    "question": "Why test a dry control alongside a wet decay scene?",
+    "feedback": "It distinguishes conditional weathering from an unconditional age timer. A wet scene passing alone does not prove moisture matters.",
+    "source": "design"
+  },
+  {
+    "number": 63,
+    "stage": "M3",
+    "title": "Erode a slope without flattening every hill",
+    "concept": "Erosion is a slow spatial transfer, not arbitrary deletion. Moving loose matter downhill should create channels while preserving plausible terrain over many seasons. Its rates must be judged at multiple time scales.",
+    "work": [
+      "Build a fixed bare-soil slope with rain and a dry control",
+      "Move eligible material through bounded neighbour edits",
+      "Compare one-day channels with a many-year silhouette and profile the work"
+    ],
+    "proof": "Channels become visible at the required deadline while the hill retains its broad shape over the longer fixture.",
+    "question": "Why does a good one-day erosion clip not establish a good long-term rate?",
+    "feedback": "A process that looks readable quickly may destroy terrain after many repetitions. Short-term visibility and long-term stability are separate constraints.",
+    "source": "design"
+  },
+  {
+    "number": 64,
+    "stage": "M3",
+    "title": "Restore grass after a fire",
+    "concept": "Growth from surviving neighbours is simple but cannot recolonize an isolated completely burned patch. The recovery requirement needs an explicit source such as roots or a limited seed rule; do not silently assume it.",
+    "work": [
+      "Implement neighbouring grass spread with light/moisture checks",
+      "Build an isolated burn fixture with no surviving grass",
+      "Choose and document the minimal approved recovery source, then test buried grass death"
+    ],
+    "proof": "The isolated fixture either recovers under the approved rule or exposes a decision still needed. The seasonal recovery requirement is not claimed from neighbour spread alone.",
+    "question": "Why can't neighbour-only spread restore grass when no grass remains nearby?",
+    "feedback": "Its prerequisite is absent. Recovery needs a surviving source, a seed/root mechanism, or a revised scoped requirement.",
+    "source": "design"
+  },
+  {
+    "number": 65,
+    "stage": "M3",
+    "title": "Grow trees and cycle leaves",
+    "concept": "A tree is a template of real wood and leaf cells, not a picture immune to physics. Growth must stop at occupied space and preserve rooted/attached relationships as leaves fall and return.",
+    "work": [
+      "Grow a small template one permitted edit at a time",
+      "Check collision before adding trunk or leaves",
+      "Detach deciduous leaves in autumn, retain evergreen needles and regrow leaves on living trees"
+    ],
+    "proof": "A growing tree never overwrites a house. Detached leaves drift and eventually join the soil-formation cycle.",
+    "question": "Why must tree templates check occupancy at every growth step?",
+    "feedback": "The world can change after the sapling starts. Prechecking once does not prevent later growth from overwriting newly painted material.",
+    "source": "design"
+  },
+  {
+    "number": 66,
+    "stage": "M3",
+    "title": "Connect seasons daylight and temperature",
+    "concept": "Calendar time drives mood and ambient conditions, while physical heat transfer remains tick-based. At high multipliers these rates diverge; the course must test the accepted visual approximation rather than promise equivalence.",
+    "work": [
+      "Derive sun/sky and seasonal ambient targets from world_tick",
+      "Feed ambient changes into the heat/exposure rules",
+      "Inspect freezing, drying and fire at 1x,16x,64x with recorded multiplier sequences"
+    ],
+    "proof": "Season boundaries align with the integer clock. Visual side effects of accelerated climate are documented and tested.",
+    "question": "Why can identical calendar dates produce different water states at different fast-forward limits?",
+    "feedback": "Different numbers of physical updates occurred before that date. The design deliberately separates physics progress from calendar advancement.",
+    "source": "design"
+  },
+  {
+    "number": 67,
+    "stage": "M3",
+    "title": "Run a year and close the ecology milestone",
+    "concept": "A working year combines renewal, decay, climate and water balance. Fixed-seed regression protects specific bugs; a multi-seed suite tests whether the chosen rules behave reliably across different samples.",
+    "work": [
+      "Run slow-process fixtures at the required speeds across 32 fixed seeds",
+      "Run a plains-and-lake year and measure remaining vegetation and lake level",
+      "Record the hut-weathering clip and performance on the floor machine"
+    ],
+    "proof": "All required seeds pass or failures become tracked design work. Lake level stays within the specified 20 percent bound in the acceptance fixture.",
+    "question": "Why keep both one fixed regression seed and a 32-seed suite?",
+    "feedback": "The fixed seed gives repeatable diagnosis. Multiple seeds detect reliance on one fortunate random sequence; neither replaces the other.",
+    "source": "testing"
+  },
+  {
+    "number": 68,
+    "stage": "M4",
+    "title": "Separate world altitude from screen rows",
+    "concept": "The prototype used rows increasing downward. The world design uses altitude increasing upward and negative horizontal positions. One explicit conversion prevents gravity and camera signs from diverging across systems.",
+    "work": [
+      "Introduce world-position and view-position types or narrow conversion functions",
+      "Map altitude into screen rows with camera origin",
+      "Test panning above/below zero and round-trip mouse picking"
+    ],
+    "proof": "The same world cell can be drawn and picked after panning. Increasing altitude moves it upward, not downward.",
+    "question": "Why avoid applying the screen-row gravity sign directly to world altitude?",
+    "feedback": "They use opposite vertical conventions. A named conversion keeps drawing conventions from silently changing physics direction.",
+    "source": "design"
+  },
+  {
+    "number": 69,
+    "stage": "M4",
+    "title": "Generate repeatable hills from a seed",
+    "concept": "Generation is a function of seed, position and generator version. Bounded local evaluation makes new chunks independent of traversal order. Begin with hills before combining every feature.",
+    "work": [
+      "Choose a deterministic noise/hash source and pin its configuration",
+      "Generate a height at each world column from a broad and a smaller-scale component",
+      "Compare chunks generated in two different visiting orders"
+    ],
+    "proof": "Shared borders match and generation order does not alter terrain. Seed and generator-version inputs are explicit.",
+    "question": "Why is one mutable RNG consumed during exploration risky for terrain generation?",
+    "feedback": "Its sequence depends on visit order. Coordinate-based deterministic inputs let the same chunk regenerate independently.",
+    "source": "design"
+  },
+  {
+    "number": 70,
+    "stage": "M4",
+    "title": "Blend biomes and place stable strata",
+    "concept": "A biome changes material and feature rules over broad regions. Powder slopes must obey rest constraints; otherwise exploring creates a landscape that immediately collapses rather than a calm world.",
+    "work": [
+      "Generate plains, mountains, sea and beach with slow biome changes",
+      "Place soil/sand only where their slope constraints allow and use stone where steeper",
+      "Saturate generated underwater soil as required"
+    ],
+    "proof": "Biome borders have no chunk seams. Starting terrain largely remains still under the rest test.",
+    "question": "Why can't arbitrary steep hills simply receive a sand surface layer?",
+    "feedback": "Sand obeys its repose rule and would slide immediately. Generation must produce a state compatible with the simulation's resting rules.",
+    "source": "design"
+  },
+  {
+    "number": 71,
+    "stage": "M4",
+    "title": "Place contained lakes caves and features",
+    "concept": "Detecting an unlimited basin outlet conflicts with local chunk generation. Bounded bowl features make lake placement reproducible with finite neighbourhood queries. Feature ordering also affects terrain containment.",
+    "work": [
+      "Place lakes from bounded nearby feature centres",
+      "Carve caves with the required surface/sea exclusion and place supported boulders/trees",
+      "Test overlapping features, chunk borders and sea containment"
+    ],
+    "proof": "Lake water is level and contained, caves do not drain the sea at first activation, and features agree across borders.",
+    "question": "Why search bounded lake centres instead of the entire basin outlet network?",
+    "feedback": "A bounded feature gives a finite generation dependency. An outlet could lie arbitrarily far away, making unrestricted basin discovery unsuitable for local generation.",
+    "source": "design"
+  },
+  {
+    "stage": "M4",
+    "title": "Transfer background jobs with channels",
+    "concept": "Background loading should exchange owned requests/results instead of borrowing the live world indefinitely. A channel moves a message from producer to consumer; queue capacity and cancellation still need policies.",
+    "work": [
+      "Send a chunk request and receive a labelled result using an owned message",
+      "Add world/request generation identifiers to reject stale replies",
+      "Bound pending work and define behavior when a worker fails or the game quits"
+    ],
+    "proof": "A stale result cannot replace the current world’s chunk. Queue growth and shutdown are tested.",
+    "question": "Why is moving an owned result through a channel useful for chunk loading?",
+    "feedback": "The worker no longer needs concurrent mutable access to the live world. The main thread decides when a completed result may enter current state.",
+    "source": "channels",
+    "number": 72
+  },
+  {
+    "stage": "M4",
+    "title": "Return and propagate recoverable errors",
+    "concept": "Save/load code talks to an unreliable outside world. Result distinguishes success from a recoverable error; the question-mark operator propagates a compatible error to a caller that can decide what to show the player.",
+    "work": [
+      "Write a function returning a Result for reading a small file",
+      "Handle success and failure at the caller, then use ? inside a helper",
+      "Add the operation and path to the displayed context without hiding the underlying error"
+    ],
+    "proof": "Missing and malformed files produce useful errors. The program can continue or choose a backup rather than panicking.",
+    "question": "What does ? do on an Err inside a Result-returning function?",
+    "feedback": "It returns the error early to the caller after the applicable conversion. It does not display a message or retry automatically.",
+    "source": "errors",
+    "number": 73
+  },
+  {
+    "number": 74,
+    "stage": "M4",
+    "title": "Define a versioned binary save format",
+    "concept": "A stable save is a protocol, not a raw dump of compiler memory layout. Explicit field encodings, lengths and limits let the loader reject corrupt or incompatible input safely.",
+    "work": [
+      "Specify headers, byte order, version, chunk coordinates and cell encoding",
+      "Round-trip one changed chunk and heightmap",
+      "Reject truncated data, invalid materials and excessive declared lengths with Result"
+    ],
+    "proof": "A chunk survives a round-trip exactly and malformed input returns an error without giant allocation or panic.",
+    "question": "Why not write the raw in-memory struct bytes as the public format?",
+    "feedback": "Padding, layout and representation can change and may contain invalid states on decode. Explicit encoding defines what the file actually promises.",
+    "source": "io"
+  },
+  {
+    "stage": "M4",
+    "title": "Group and compress bounded region files",
+    "concept": "The storage design groups up to 32 by 32 chunks per region instead of creating a separate file for every changed chunk. Compression reduces typical size, but decoded-size limits and integrity checks must come before allocation or decoding.",
+    "work": [
+      "Choose and pin a compression codec through the milestone dependency review",
+      "Encode a region index and bounded chunk payloads, then compress and decompress them with explicit maximum sizes",
+      "Round-trip mixed empty/edited chunks and reject truncated, corrupt and oversized payloads"
+    ],
+    "proof": "Region files restore exact chunk identities and data. Report measured compressed sizes rather than promising a fixed compression ratio.",
+    "question": "Why must decoded-size limits be enforced before allocating a claimed decompressed payload?",
+    "feedback": "A small malformed file may claim an enormous expansion. Bounds protect memory and make corruption a recoverable error.",
+    "source": "io",
+    "number": 75
+  },
+  {
+    "number": 76,
+    "stage": "M4",
+    "title": "Snapshot a running world without changing it",
+    "concept": "Saving should capture state, not interrupt an explosion by putting particles back into the grid. The current particle-save policy needs a design decision before exact state round-trips can be claimed.",
+    "work": [
+      "List every saved counter, field, cooldown, falling group and required particle state",
+      "Copy or freeze a consistent snapshot at a tick boundary",
+      "Resolve particle serialization versus the spec's reinsertion policy and test a mid-explosion round-trip"
+    ],
+    "proof": "The snapshot represents one coherent tick. Any save-induced world mutation is explicitly accepted or removed by the approved policy.",
+    "question": "Why can serializing chunks one by one while simulation continues create a broken snapshot?",
+    "feedback": "Different chunks may represent different ticks or transfer states. A coherent boundary prevents duplicated or missing cross-chunk material.",
+    "source": "design"
+  },
+  {
+    "number": 77,
+    "stage": "M4",
+    "title": "Commit a complete save generation",
+    "concept": "Atomic replacement of each file does not make many files one transaction. A crash can mix old and new region files unless a manifest selects a complete generation. One writer removes races but not this consistency problem.",
+    "work": [
+      "Write immutable generation files or equivalent safe staging",
+      "Commit a manifest/index only after its referenced files are complete, preserving the previous generation",
+      "Inject failures before each commit stage and reload"
+    ],
+    "proof": "Loading chooses a complete old or new save, never a mixed generation. Write errors keep a recoverable prior world.",
+    "question": "Why is a single disk-writer thread insufficient for crash consistency?",
+    "feedback": "It orders writes but a crash can interrupt that order. The loader still needs a way to identify which complete set of files belongs together.",
+    "source": "fs"
+  },
+  {
+    "number": 78,
+    "stage": "M4",
+    "title": "Keep generator and save versions distinct",
+    "concept": "A storage format version describes decoding; a generator version describes how absent chunks regenerate. Updating only one can preserve file readability while creating terrain seams in old worlds.",
+    "work": [
+      "Store both version identifiers",
+      "Keep a fixture created with an older generator and extend into an unsaved chunk",
+      "Reject unsupported versions with a useful message rather than guessing"
+    ],
+    "proof": "A released old generator remains available or an explicit migration path is required. Pre-release incompatibility is reported honestly.",
+    "question": "Why can a readable old save still develop seams after a generator update?",
+    "feedback": "Saved chunks retain old terrain while unchanged chunks regenerate with new rules unless the world's generator version is preserved.",
+    "source": "design"
+  },
+  {
+    "number": 79,
+    "stage": "M4",
+    "title": "Stream changed and unchanged chunks",
+    "concept": "Once persistence exists, the cache can evict edited state safely. Loading, generation and writing have different costs; background work needs queues and clear ownership rather than unsynchronized access to the live world.",
+    "work": [
+      "Connect cache eviction to the single-writer persistence queue",
+      "Generate unchanged chunks from seed/version and load changed ones from storage",
+      "Pan rapidly and cancel or ignore obsolete background requests safely"
+    ],
+    "proof": "Thirty minutes of panning keeps resident memory bounded within the documented margin, without missing edits or long foreground stalls.",
+    "question": "Why must background results carry their requested chunk identity or generation?",
+    "feedback": "By completion, the camera or world may have changed. Identity prevents stale work from replacing the wrong current state.",
+    "source": "channels"
+  },
+  {
+    "number": 80,
+    "stage": "M4",
+    "title": "Close the procedural-world milestone",
+    "concept": "Streaming, generation and saving must work as one world. Tiny unit tests do not reveal all border and long-pan failures. M4 needs repeatable exploration plus rest, memory and round-trip evidence.",
+    "work": [
+      "Run 1000 generated chunks through the 600-tick rest fixture",
+      "Pan across all v1 biomes, edit across borders, save, reload and compare hashes",
+      "Record compressed sizes, memory high-water marks and M4 exit evidence"
+    ],
+    "proof": "Rest movement stays within the specified tolerance, changed state reloads exactly, and resident memory stays bounded.",
+    "question": "Why measure actual compressed save size rather than promise a few kilobytes per chunk?",
+    "feedback": "Temperature, moisture and edits change entropy. Compression effectiveness is a measurement of real scenes, not a fixed property of chunk dimensions.",
+    "source": "design"
+  },
+  {
+    "number": 81,
+    "stage": "M5",
+    "title": "Render through an art-pixel buffer",
+    "concept": "The approved look distinguishes art pixels from simulation cells and physical display pixels. A half-resolution art target preserves two-by-two art pixels inside each four-by-four physical cell, including one-art-pixel rims.",
+    "work": [
+      "Create an art target sized for the capped physical world view",
+      "Draw simulation and art details at the correct units, then scale with nearest filtering",
+      "Test Retina, odd window sizes and capped view borders"
+    ],
+    "proof": "Cells remain four physical pixels wide and silhouette edges stay hard. No filtered blur or hidden resampling changes the grain.",
+    "question": "Why not render every simulation cell directly as a single art pixel?",
+    "feedback": "The design gives each cell two-by-two art pixels. Collapsing that loses the smaller rim and silhouette detail allowed inside a cell.",
+    "source": "texture"
+  },
+  {
+    "number": 82,
+    "stage": "M5",
+    "title": "Compose sky sun moon and night",
+    "concept": "Reference scenes supply colour anchors and compositions, not a complete day-night animation system. Sky objects and world terrain use different coordinate roles. Occlusion must still respect real terrain.",
+    "work": [
+      "Implement smooth per-art-row sky ramps from approved keys",
+      "Draw flat celestial discs/crescents and stars with hard edges",
+      "Approve missing phase/path keys and inspect pan/resize/underground occlusion"
+    ],
+    "proof": "No bloom, reflection or decorative middle terrain appears. Sky cannot show through a cave merely because its cells are air.",
+    "question": "Why shouldn't a moon be moved each frame merely to avoid touching a mountain ridge?",
+    "feedback": "That would make composition override camera/world occlusion. The no-touch reference target is not a rule to teleport celestial objects during free panning.",
+    "source": "art"
+  },
+  {
+    "number": 83,
+    "stage": "M5",
+    "title": "Make material states readable without texture noise",
+    "concept": "A muted palette must still show the causes and results the game depends on. Reference colours are anchors, while wetness, rot, rust, heat and material identity need approved coherent variants.",
+    "work": [
+      "Build a contact sheet for every launch material at day/night",
+      "Show wet/dry soil, wood/rot, metal/rust, water/ice, oil/water and smoke/steam pairs",
+      "Review the required reactions at actual four-pixel cell size"
+    ],
+    "proof": "States remain distinguishable at gameplay scale. Unapproved palette choices are proposed and reviewed instead of labelled reference-approved.",
+    "question": "Why does a beautiful enlarged colour swatch not establish gameplay readability?",
+    "feedback": "Players see tiny cells under changing lighting and weather. Identity must survive the actual scale and surrounding materials.",
+    "source": "art"
+  },
+  {
+    "number": 84,
+    "stage": "M5",
+    "title": "Draw weather without changing its physics",
+    "concept": "Clouds, rain streaks and fog are visual treatments; precipitation and moisture already run in the simulation. Shelter masking must agree with exposure while preserving the pixel-art silhouette rules.",
+    "work": [
+      "Approve the missing cloud/fog/snow treatments",
+      "Drive decorative intensity from the weather state and clip rain at shelter boundaries",
+      "Inspect a roof, cave, tree canopy and moving weather front"
+    ],
+    "proof": "Decoration never wets cells a second time and never blurs geometry. Rendered waves remain a visual surface effect rather than extra water mass.",
+    "question": "Why should changing a rain graphics setting leave soil wetting unchanged?",
+    "feedback": "The setting controls decoration. Simulation precipitation belongs to the weather rules and must not depend on how many streaks are drawn.",
+    "source": "art"
+  },
+  {
+    "number": 85,
+    "stage": "M5",
+    "title": "Build a small readable material and time bar",
+    "concept": "The UI should explain available actions without competing with the world. Material pages, tool selection, speed state and hints need clear input ownership so painting does not pass through controls.",
+    "work": [
+      "Create Materials 1, Materials 2 and Tools pages with key labels",
+      "Display calendar speed, physics-limited and slowed states",
+      "Handle UI hit testing before dispatching world paint commands"
+    ],
+    "proof": "Clicking a swatch selects it without painting behind the bar. Text stays legible at each supported UI scale.",
+    "question": "Why resolve UI input ownership before sending paint commands?",
+    "feedback": "The same click can otherwise select a tool and modify the world underneath it. Input needs one intended consumer.",
+    "source": "input"
+  },
+  {
+    "number": 86,
+    "stage": "M5",
+    "title": "Implement bounded local-revert undo",
+    "concept": "A running simulation changes cells after a stroke. Undo therefore restores only cells still matching the recorded painted result, not the entire past world. Memory limits must account for cells as well as action count.",
+    "work": [
+      "Record before/after states for a stroke without repeatedly logging the same cell",
+      "Enforce 20 actions or 200000 changed cells, whichever limit wins",
+      "Test paused exact undo and a running stroke partly transformed by fire/water"
+    ],
+    "proof": "Paused edits revert exactly. Changed-by-simulation cells are skipped according to a documented comparison rule, including what matching state means.",
+    "question": "Why can't undo restore every original cell unconditionally in a running world?",
+    "feedback": "It would overwrite later simulation changes and act like partial time travel. Local revert must respect the world that evolved after the action.",
+    "source": "design"
+  },
+  {
+    "number": 87,
+    "stage": "M5",
+    "title": "Mix sound from simulation state",
+    "concept": "Loaded loops and one-shot clips can follow fire, rain and flow without generating waveforms at runtime. Mixing aggregate activity avoids playing one voice per cell. Asset licensing is part of a shippable sound set.",
+    "work": [
+      "Load licensed wind/rain/fire/water loops and event clips",
+      "Map simulation activity to bounded volumes and event voice counts",
+      "Add mute, event ducking and a missing-audio fallback"
+    ],
+    "proof": "A large fire does not create thousands of voices. Muting is immediate and an audio failure does not destroy a world or block saving.",
+    "question": "Why aggregate burning-cell counts instead of playing one crackle per cell?",
+    "feedback": "Per-cell playback scales poorly and creates noise. Aggregate activity can control a small bounded set of loops and event voices.",
+    "source": "audio"
+  },
+  {
+    "number": 88,
+    "stage": "M5",
+    "title": "Fit settings and camera to real displays",
+    "concept": "A fixed cell footprint makes larger physical windows show more world, until the cell budget caps the view. The panel around a capped view is not frozen terrain. UI scaling and world scaling are distinct decisions.",
+    "work": [
+      "Compute the largest budget-fitting centred view rectangle for each window",
+      "Persist graphics/audio settings and restore camera safely",
+      "Test native Retina, 720p, 1440p, tall/narrow windows and odd sizes"
+    ],
+    "proof": "Input conversion matches the actual rectangle. Resizing never stretches cells or reveals a frozen world strip outside the active budget.",
+    "question": "Why can UI scale change while world-cell size remains fixed?",
+    "feedback": "UI legibility and world extent are separate concerns. The design fixes physical cell size but may choose independent integer text/panel scaling.",
+    "source": "design"
+  },
+  {
+    "number": 89,
+    "stage": "M5",
+    "title": "Finish the 60-second vertical slice",
+    "concept": "The vertical slice is one coherent house-on-a-hill story: rain, fire and seasonal weathering. It validates the game as an experience, not just a collection of isolated mechanics.",
+    "work": [
+      "Capture the target scene with recorded seed/time/camera/weather settings",
+      "Review the clip against linked approved reference assets and reaction deadlines",
+      "Run the target-hardware frame/memory checks and record the M5 result"
+    ],
+    "proof": "The 60-second scene is readable, calm and performant. Missing image assets or unsigned visual decisions remain explicit blockers to visual approval.",
+    "question": "Why isn't a screenshot comparison alone enough to approve the slice?",
+    "feedback": "The slice depends on motion, reactions, sound and performance over time. A still image cannot establish those behaviors.",
+    "source": "art"
+  },
+  {
+    "number": 90,
+    "stage": "M6",
+    "title": "Add desert climate and moving sand",
+    "concept": "A new biome should reuse existing material rules instead of introducing a separate simulation. Desert differences come from terrain, weather, ambient conditions and wind, with the same bounded update policy.",
+    "work": [
+      "Create a seeded dune scene and desert weather constraints",
+      "Apply wind movement to eligible sand using the approved rule",
+      "Check conservation, resting slopes and the approved desert palette"
+    ],
+    "proof": "Dunes remain stable without disturbance and react under wind. The no-rain climate rule is tested at the weather boundary.",
+    "question": "Why shouldn't desert sand get an entirely unrelated movement engine?",
+    "feedback": "The same material should follow consistent rules. Biome context can change conditions without duplicating fundamental mechanics.",
+    "source": "design"
+  },
+  {
+    "number": 91,
+    "stage": "M6",
+    "title": "Erupt a volcano on a deterministic schedule",
+    "concept": "Volcanoes combine seeded terrain, a world-time event schedule, lava and the particle system. The event must be reproducible and bounded even after a long off-screen interval.",
+    "work": [
+      "Generate a cone with supported strata and lava source policy",
+      "Schedule an eruption from seed/time and reuse particle budgets",
+      "Test activation after off-screen time and clarify whether missed events are skipped"
+    ],
+    "proof": "The approved frozen-world policy is preserved. Eruptions do not enqueue an unbounded backlog or bypass particle caps.",
+    "question": "Why define off-screen eruption behavior before implementing its timer?",
+    "feedback": "World time advances while material is frozen. Without a policy, returning could silently catch up many events or contradict the frozen-world promise.",
+    "source": "design"
+  },
+  {
+    "number": 92,
+    "stage": "M6",
+    "title": "Erode island shores with an explicit water policy",
+    "concept": "V1's rendered ripple cannot physically move sand. V2 shore erosion needs a new mechanical driver and a stated volume policy. Adding tides would be a new design decision, not a cosmetic toggle.",
+    "work": [
+      "Build an island shoreline fixture",
+      "Approve a bounded wave-driven erosion rule using existing sand/water behavior",
+      "Compare shoreline change and water counts over many cycles"
+    ],
+    "proof": "The island changes under the approved process without unexplained water creation or drainage. Tides remain absent unless separately designed.",
+    "question": "Why can't moving the visual ripple line alone produce mechanical shore erosion?",
+    "feedback": "The renderer changes colour, not occupancy or forces. Erosion requires a simulation rule with its own budgets and conservation choices.",
+    "source": "design"
+  },
+  {
+    "number": 93,
+    "stage": "M6",
+    "title": "Grow a dense forest without losing the budget",
+    "concept": "Forest density stresses growth, wind, fire, moisture, support and rendering together. Reusing plants is necessary but not enough; interacting worst cases can exceed the limits measured in sparse scenes.",
+    "work": [
+      "Generate a forest with approved density and templates",
+      "Run a wet season, dry fire and spring regrowth fixture",
+      "Measure support-event bursts, draw work, resident memory and long-run vegetation"
+    ],
+    "proof": "A dense forest meets the revised budget or its density is capped explicitly. It still reads as silhouettes rather than noisy per-cell detail.",
+    "question": "Why repeat performance checks for a biome using existing materials?",
+    "feedback": "Density changes interaction frequency and event bursts. Reusing code does not preserve the previous worst-case workload.",
+    "source": "design"
+  },
+  {
+    "number": 94,
+    "stage": "M6",
+    "title": "Integrate optional events and close biome expansion",
+    "concept": "Event tools should exercise the same world rules as natural events. Expansion is complete only when old v1 scenes still work and optional content does not raise the baseline hardware requirement silently.",
+    "work": [
+      "Connect eruption and remaining tools to existing event commands",
+      "Run regression fixtures across desert, volcano, island and forest",
+      "Record a separate M6 gate and update the resource/asset ledger"
+    ],
+    "proof": "All added tools respect cooldowns and budgets. V1 benchmarks remain passing, and expansion-specific caps are documented.",
+    "question": "Why test old plains scenes after adding new biome variants?",
+    "feedback": "Shared material tables and rules may change globally. New content can regress earlier behavior even when its own scene looks correct.",
+    "source": "design"
+  },
+  {
+    "number": 95,
+    "stage": "M7",
+    "title": "Handle failures as normal outcomes",
+    "concept": "A release will encounter malformed configuration, missing audio, unwritable save folders and unsupported graphics. Result expresses recoverable failure; user feedback needs useful context without losing the current world.",
+    "work": [
+      "Return Result from load/save/config operations and attach operation/path context",
+      "Replace avoidable unwrap calls on external data",
+      "Test corrupt files, full/unwritable destinations and missing assets"
+    ],
+    "proof": "The game reports a useful failure and keeps the previous save recoverable. Expected I/O errors are not panics.",
+    "question": "Why is unwrap inappropriate for an ordinary missing save file?",
+    "feedback": "A missing file is a recoverable external condition. Panicking discards the normal error path and can lose unsaved play state.",
+    "source": "errors"
+  },
+  {
+    "number": 96,
+    "stage": "M7",
+    "title": "Keep releases compatible and saves recoverable",
+    "concept": "A release changes dependencies, format readers and generator behavior over time. Compatibility needs retained fixtures and a policy, not only a version number. Before first release, intentional breakage still needs clear messaging.",
+    "work": [
+      "Freeze released generator implementations and retain save fixtures",
+      "Test supported old saves and clear unsupported-version errors",
+      "Document backup, migration and recovery procedures with the transactional writer"
+    ],
+    "proof": "An old supported world loads and expands without seams. An unsupported one is rejected without modifying its files.",
+    "question": "Why must a migration preserve the input save until the replacement is verified?",
+    "feedback": "A failed transformation can otherwise destroy the only recoverable world. Keeping the original makes failure reversible.",
+    "source": "design"
+  },
+  {
+    "number": 97,
+    "stage": "M7",
+    "title": "Automate gates on each target platform",
+    "concept": "CI repeats the checks that can run unattended. It does not prove an old i3 GPU works or audio feels right. Separate automated evidence from hardware and manual acceptance reports.",
+    "work": [
+      "Run formatting, checking, linting and headless tests in a Mac/Windows/Linux matrix",
+      "Include fixed-seed and multi-seed suites plus save fixtures",
+      "Keep performance/reference hardware reports as explicitly maintained artifacts"
+    ],
+    "proof": "The workflow fails for a deliberate regression. Manual GPU, audio and visual checks are not falsely labelled automated passes.",
+    "question": "Why can't a successful cloud CI run certify performance on the target i3?",
+    "feedback": "The runner is different hardware and may lack the relevant graphics path. Performance and compatibility claims need evidence on the actual target.",
+    "source": "cargo"
+  },
+  {
+    "number": 98,
+    "stage": "M7",
+    "title": "Package a runnable game for Mac Windows and Linux",
+    "concept": "A development cargo run assumes a toolchain, source tree and working directory. A release artifact must contain the executable and required assets with tested paths, licences and platform support.",
+    "work": [
+      "Build release artifacts on native platform runners first",
+      "Bundle assets/licences and resolve resources relative to an explicit application location",
+      "Launch each package from a clean folder on a machine without the repository"
+    ],
+    "proof": "Each artifact starts, plays sound where available, creates a world and reloads it. Signing/notarization/store requirements are verified for the chosen distribution channel.",
+    "question": "Why test launching outside the repository working directory?",
+    "feedback": "Relative development asset paths can accidentally depend on the source checkout. A distributable must locate its assets in the installed package.",
+    "source": "release"
+  },
+  {
+    "number": 99,
+    "stage": "M7",
+    "title": "Write the small manual and check real usability",
+    "concept": "The game should be readable without a manual, but controls, saving, recovery and hardware requirements still need documentation. Usability checks reveal where defaults or feedback hide a basic action.",
+    "work": [
+      "Write quick-start controls, material/tool paging and save locations",
+      "Ask a fresh tester to paint, erase, pause, save and recover a world",
+      "Check text scaling, input conflicts, audio mute and a no-flash option if adopted"
+    ],
+    "proof": "A tester completes the core actions without developer coaching. Documented limitations match observed behavior.",
+    "question": "Why watch a fresh tester instead of explaining every control first?",
+    "feedback": "Coaching hides discoverability problems. Observing unprompted behavior reveals which controls or feedback need improvement.",
+    "source": "design"
+  },
+  {
+    "number": 100,
+    "stage": "M7",
+    "title": "Ship the release and preserve the next starting point",
+    "concept": "Finishing means reproducible artifacts, passing acceptance evidence and a recoverable versioned world format. Release decisions remain yours; preparing artifacts does not authorize publishing to an external service.",
+    "work": [
+      "Run all M0–M7 gates and list unresolved failures",
+      "Create a release checklist with tag, changelog, licence notices, hashes and packaged artifacts",
+      "Prepare a fresh-install smoke test and the next episode's reproducible starting revision"
+    ],
+    "proof": "The game is release-ready on the claimed platforms, or the remaining blockers are named. Publish/tag/push only when explicitly requested.",
+    "question": "What evidence separates release-ready from merely builds on my machine?",
+    "feedback": "Repeatable tests, target-hardware measurements, native package smoke tests, save recovery/compatibility checks, approved visuals and documented known limitations support the release claim.",
+    "source": "design"
+  }
+]

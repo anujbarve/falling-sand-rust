@@ -1,0 +1,519 @@
+{
+  "86": {
+    "compiled": true,
+    "sha256": "791ee39a5a66b882f7a399c3cc620a74c52df52b175355cc9f3f9f9f06a80564",
+    "tests_run": false
+  },
+  "87": {
+    "compiled": true,
+    "sha256": "bd1559770c91d40bd523ddbfe15c26c060be5aeb906ead4c046af49a8204ebce",
+    "tests_run": false
+  },
+  "88": {
+    "compiled": true,
+    "sha256": "45ac9126387e029e173fec0c36fb4fc99d1428e540dc6c70718932efd8b1a4bb",
+    "tests_run": false
+  },
+  "89": {
+    "compiled": true,
+    "sha256": "c1362dcedac3abbbb99f69da1cc720e80a48877a3699b61189f37bda2e2dc19b",
+    "tests_run": false
+  },
+  "90": {
+    "compiled": true,
+    "sha256": "fa8caf9fb8734e361661de392e53612d5c980e607008037add3f31fc6733a941",
+    "tests_run": false
+  },
+  "91": {
+    "compiled": true,
+    "sha256": "b152365a63f422cf30b10c6bc1be208027ef6f479672a538fe69fa5ed8328076",
+    "tests_run": false
+  },
+  "92": {
+    "compiled": true,
+    "sha256": "7519dd32dab6fd7a66dc986b622789b1a2300084679a33edadcada2685460b50",
+    "tests_run": false
+  },
+  "93": {
+    "compiled": true,
+    "sha256": "ffe8f7611f6cb75675f7929ec3ec8ce96e521a03f93de62c7d67b5944ec56272",
+    "tests_run": false
+  },
+  "94": {
+    "compiled": true,
+    "sha256": "1ae9910ad6c049bb87c04e21a60f708260d6086cd905deae4d18639d5c16872e",
+    "tests_run": false
+  },
+  "95": {
+    "compiled": true,
+    "sha256": "e8bc5caa1de16eadd403807f90766b34ba68e06d7339f2bb40c18255c5b8448e",
+    "tests_run": false
+  },
+  "96": {
+    "compiled": true,
+    "sha256": "0e4368d2ccda653d2ca1b0c625df92776e242a06d7dfb4fd2d1325f5ef6e15d1",
+    "tests_run": false
+  },
+  "98": {
+    "compiled": true,
+    "sha256": "4ab749acfc13bb09d4ccc55242b6ff17afc70982a1a003d8a43404d2d3b7494c",
+    "tests_run": false
+  },
+  "100": {
+    "compiled": true,
+    "sha256": "bccf577816bf8f1d5d59ffe49b1246008caf765111e9ed9a7042228053943b4a",
+    "tests_run": false
+  },
+  "36": {
+    "compiled": true,
+    "sha256": "8240ac31180267cab4693d466b4d5702d343179a8a6293a7b35a2535a6a9bf5b",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "37": {
+    "compiled": true,
+    "sha256": "277d4cf294826cc90f7c663c4de0ac2373512b2a85c1c2f00a2f457fb1b05c89",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "38": {
+    "compiled": true,
+    "sha256": "af3a233187f5be70876ebe6039a8bb2ab429288a5458abc9ca897c9a6c87474e",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "39": {
+    "compiled": true,
+    "sha256": "b7525e41b72ba8e21f774fb99f3049d74640f1a60cacd6cbb96b5fc593a69cd7",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "40": {
+    "compiled": true,
+    "sha256": "109ebcb1cd761cee66a34c49c5446933459ccf2e831812d9439f5bf607eceff6",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "41": {
+    "compiled": true,
+    "sha256": "4e8b12d3c9ca05d0afe45a7d322e18413e2ecce99fdc7ddc19d8be246b3b473c",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "42": {
+    "compiled": true,
+    "sha256": "0e79f2959c743bb12b7789de949583340da8213919a310c6c5dd2390b500bf0f",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "43": {
+    "compiled": true,
+    "sha256": "71ff4b963dca35dcddbc31bc4f4c59d6b878cb5166f22d11362b4be025f4a8b2",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "44": {
+    "compiled": true,
+    "sha256": "a9d7e8416f3086ff6cf8413a11219953b0a9590c3f5eae06a4cfc77f892a3733",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "45": {
+    "compiled": true,
+    "sha256": "a56abdbfa2c05f9a00460e6df254fb26f51adb4e335aaa5419047d09b5af932b",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "46": {
+    "compiled": true,
+    "sha256": "fc91993bed0fde6b1517c8a842bde18c08473b21d738231be063ec85a5f5c350",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "47": {
+    "compiled": true,
+    "sha256": "23340e78d3acd025c5db677d82e1f24c71120576cfe6d39d66117203fe8d630b",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "48": {
+    "compiled": true,
+    "sha256": "01f2d4310bbb72d61e5b40da818d9f95ec5edc626ed4e50c1f0d1e1fc5e69d2e",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "49": {
+    "compiled": true,
+    "sha256": "69531174c772d3eaf7f01876372d601dc505f025676b960c89269789f27b971e",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "50": {
+    "compiled": true,
+    "sha256": "902d4796c1cb3bd29d23bc74f425fa3f5dca5f395695b8215591496831db0f57",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "51": {
+    "compiled": true,
+    "sha256": "a309bbd73528e454b1e4a7ca8c1ed0a6815ad1490cc8feea293aa9761172fda1",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "52": {
+    "compiled": true,
+    "sha256": "686b61036fb6d1b5a331a7c058be3bc040226a385c181e460e24ff242a900c30",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "53": {
+    "compiled": true,
+    "sha256": "9f58977ea07878db827aee4a0613ffa55b2fbd4e5e062ebc546ffa8b98b0f4b0",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "54": {
+    "compiled": true,
+    "sha256": "dd0d68ed422b93cf6df6b6f2650a8259556e0ea9db6aa63c24b42f8ed5bc26fd",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "55": {
+    "compiled": true,
+    "sha256": "3ac21741c0336e9c3d6f5ff1649814ad049548f4c5b8d485b9a132762c0d64c6",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "56": {
+    "compiled": true,
+    "sha256": "8dea491a345fb11af70149ee986224c0ee1af27cd0708d418a5877e8cf8b5fd5",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "57": {
+    "compiled": true,
+    "sha256": "a614f88cac3ad38aff03f35629704303cd77cfed7de6824ca3233e2d815b966c",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "58": {
+    "compiled": true,
+    "sha256": "3461debc114197eb4293dfd39f4dd2363370318c9214493df51e54162bbcc33c",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "59": {
+    "compiled": true,
+    "sha256": "13f64f7809b9fca4bf2d45c79ac4efa2a3334168b3ecd888711b677b37d33e82",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "60": {
+    "compiled": true,
+    "sha256": "b7f9be6b34487e1eaeb2e053a7269053fed556deaab10a26fa1cea15e72ece21",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "61": {
+    "compiled": true,
+    "sha256": "5994ba21f7a6631f03915f3c42c23f28e04e483de762ad0ca6476d18c627d4eb",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "62": {
+    "compiled": true,
+    "sha256": "dc2ecba3d20377c7d7092a99302babfc26ed41ef1549c120e6a0962f8ac671aa",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "63": {
+    "compiled": true,
+    "sha256": "fe75a40dd2495feb190749c676e91c727f08da1f2761a3772d7ece051d17a29a",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "64": {
+    "compiled": true,
+    "sha256": "ff508218895527b2c9cc8151aac8864c73285a7601f8797f9e3e8e18bbae9e7e",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "65": {
+    "compiled": true,
+    "sha256": "61bdefa8750f3db7ed44f01b35e65b6bf3482afbd5ac510fe9fc9a3b4e518801",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "66": {
+    "compiled": true,
+    "sha256": "35d5ce94b3d5454f86549738b694507be13f7af65dff09c67caef833f2c784a9",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "67": {
+    "compiled": true,
+    "sha256": "d8cd52a20524f788990df44aedf7d6044a61d9d6520973d7ac5cd3eb2504b6cc",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "68": {
+    "compiled": true,
+    "sha256": "cd52927c4e7a1c9a28a8ff366e7f645afa863c1836a3d53b8a9c2dc70696fdab",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "69": {
+    "compiled": true,
+    "sha256": "c5bebff10b8667f818cd992645178b351da3c04bcc75012fbedfcccef38de340",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "70": {
+    "compiled": true,
+    "sha256": "1ff4e59bd1c2aa83ddc428144fab83a3be0949f1554ea4dc710cabc78ca84cc2",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "71": {
+    "compiled": true,
+    "sha256": "20eace67a9dc913f8f939527c2228d699dc54a660d0256b11b0615da702c30cd",
+    "tests_run": false
+  },
+  "72": {
+    "compiled": true,
+    "sha256": "6da1ab0525c707436576ecaa1942472709c3119e995fc527e052aeb4760ab854",
+    "tests_run": false
+  },
+  "73": {
+    "compiled": true,
+    "sha256": "134db1e2452224b7b97e2a169011a690b8c18693ce13afd367cdb18cc21f581c",
+    "tests_run": false
+  },
+  "74": {
+    "compiled": true,
+    "sha256": "886f35e9045b73bc0308f7711b5da025b1f390682b25e07c1e2697831f78a729",
+    "tests_run": false
+  },
+  "75": {
+    "compiled": true,
+    "sha256": "ff10081c2de58127affc034632acc25d67e1dd34fa669e0eff3ed0a0fdd1550d",
+    "tests_run": false
+  },
+  "76": {
+    "compiled": true,
+    "sha256": "8ec9569fd285a96a509dc2d4f2eaf2c33f6f7d55814c67bee3c357fab31ee9c5",
+    "tests_run": false
+  },
+  "77": {
+    "compiled": true,
+    "sha256": "1e7b5e00ec3031904557986aca6cc91e92979e1913bb4f773fbe90027955832f",
+    "tests_run": false
+  },
+  "78": {
+    "compiled": true,
+    "sha256": "e83b8ad444bc8ac81d7d38e1d8a4f251b4fba81f989b074a8a7bd1ea2a9ef3e8",
+    "tests_run": false
+  },
+  "79": {
+    "compiled": true,
+    "sha256": "291e3f73ce7ff1e1af33de2c011cdddbd1648a5c0838787eb2571e62ea95a193",
+    "tests_run": false
+  },
+  "82": {
+    "compiled": true,
+    "sha256": "a9a68c072179d9d2f71d94a0209c9a04b560f08debd83f98962285d5e425cb50",
+    "tests_run": false
+  },
+  "83": {
+    "compiled": true,
+    "sha256": "0b810a723b15669c2e11f2490500897b60424adcfe4c120f0cedab3935809bb5",
+    "tests_run": false
+  },
+  "84": {
+    "compiled": true,
+    "sha256": "af8edfea21d450b6a1db4a7aeb3e3157f007b54d946c57e2d48f87a9088c0f0f",
+    "tests_run": false
+  },
+  "85": {
+    "compiled": true,
+    "sha256": "8fa66c4493e361fa55e18a42282451ffbdb4f32789a265e69ade9f956f894bdf",
+    "tests_run": false
+  },
+  "2": {
+    "compiled": true,
+    "sha256": "f0b64295b1176945f3840daac327d285f5de4e1102e31f0a29866f02d1571308",
+    "tests_run": false
+  },
+  "3": {
+    "compiled": true,
+    "sha256": "b0a209690fb5beca8986a21eb5f51d447418f48f30182fc5e3b14782aa4fa5c0",
+    "tests_run": false
+  },
+  "4": {
+    "compiled": true,
+    "sha256": "1f7956039b42ebb2444dd1972ddcdf1d4b740bf96cc87abb9181a280a6884808",
+    "tests_run": false
+  },
+  "5": {
+    "compiled": true,
+    "sha256": "2e1422d8c7a6b4bf493dff21cabb6013e1a5291d22ed1a838cc5bf4245787c8e",
+    "tests_run": false
+  },
+  "6": {
+    "compiled": true,
+    "sha256": "5c1cf93f1d227e78829f2aa66a7c6dd37ba8b12376088521f382093164d0ae01",
+    "tests_run": false
+  },
+  "7": {
+    "compiled": true,
+    "sha256": "7d06363100c77381ae189297824cde0feb36ad4105620c76caaad8d754eec267",
+    "tests_run": false
+  },
+  "8": {
+    "compiled": true,
+    "sha256": "973a1540c9d15040856dee1db0523911d2f1c46396b96e5adc1ed635683dfe72",
+    "tests_run": false
+  },
+  "11": {
+    "compiled": true,
+    "sha256": "a121a3b7f29d5090d61fb3735c1f998a9e7e893274699c3ea371cb1b86589ea1",
+    "tests_run": false
+  },
+  "12": {
+    "compiled": false,
+    "expected_compile_error": "E0382",
+    "expected_failure_verified": true,
+    "sha256": "cc29b5ca076a6e9ead987d49cbcbf5c9208db8120c56b5111cfe27d9f0b8a30e"
+  },
+  "13": {
+    "compiled": true,
+    "sha256": "29f9a4512b39fadf6f140e1c0bdd38b3d55d5f2678be4f013c84c3509ba424fd",
+    "tests_run": false
+  },
+  "14": {
+    "compiled": true,
+    "run_passed": true,
+    "sha256": "07ed94b5a0b5264c23d6723fd142b7e93d8cc9f3fa2e635a43bf5bb56846959d"
+  },
+  "15": {
+    "compiled": true,
+    "sha256": "1aa2b9a3b43a95bc5710d00ed021065f7ee55dc09429ea6b3a2945417b3a92f5",
+    "tests_run": false
+  },
+  "16": {
+    "compiled": true,
+    "sha256": "ef7873a0a4fb1de488274485a2203f1b454e684e36ae7c5e16d57f221afd3d94",
+    "tests_run": false
+  },
+  "17": {
+    "compiled": true,
+    "sha256": "3648af62b88bea0b21692f2028cbee4fdb5295372793e87da3206f6a263b189c",
+    "tests_run": false
+  },
+  "18": {
+    "compiled": true,
+    "sha256": "c569144f2d639f717c4e61247c5b02686fc5e8d6f93759cc17f0f650f4b1e31c",
+    "tests_run": false
+  },
+  "19": {
+    "compiled": true,
+    "sha256": "4b98074a7c5b4b4d0b0ae6bd511c85b2d6e8f35dbc195e1d48ec7dbabdd4ac9a",
+    "tests_run": false
+  },
+  "20": {
+    "compiled": true,
+    "sha256": "9494cb9fa722b6c74b363909c5791bd27cbed77164d1e3b78bb63a5bb5427b52",
+    "tests_run": false
+  },
+  "21": {
+    "compiled": true,
+    "sha256": "20b2c3ace415477033fabd1289ab4dfe473de3e4b2ae5e43b053ba528b110bdc",
+    "tests_run": false
+  },
+  "22": {
+    "compiled": true,
+    "sha256": "6a516e66151948fcf42511b886cf9d092779c93b1fb5b54f98482db5e04547a6",
+    "tests_run": false
+  },
+  "23": {
+    "compiled": true,
+    "sha256": "819ea9f207aaf844ee25d29312cabe64bdc87425b30bf608aea9c81c4142ad1a",
+    "tests_run": false
+  },
+  "24": {
+    "compiled": true,
+    "sha256": "a879deb2bfdf623a05c139e7fd3ca3aa4cb278bdae86e19723b10c1c28c37b05",
+    "tests_run": false
+  },
+  "25": {
+    "compiled": true,
+    "sha256": "622b30a15b793b7d81a72453a33e9946a9071aece7151eb6b7d614ce55f49b89",
+    "tests_run": false
+  },
+  "26": {
+    "compiled": true,
+    "sha256": "9afa776ccb5c15fba18e9e4f3e7524979c09cec99f44c8decb7484f20c99d641",
+    "tests_run": true,
+    "tests_passed": true
+  },
+  "27": {
+    "compiled": true,
+    "sha256": "54da318777247cab9c8b4276b241792ff4bd3542dc00f030e6b61e16d792293f",
+    "tests_run": false
+  },
+  "28": {
+    "compiled": true,
+    "sha256": "543d7bdcfc3f703a343a40dcf0250eed8c2d736e2f18fdb3b0629c976188cfdb",
+    "tests_run": false
+  },
+  "29": {
+    "compiled": true,
+    "sha256": "35e25c29bdad17b7007793317bed82cf3b78955fb2ead8fe1fb506a43930f1d0",
+    "tests_run": false
+  },
+  "30": {
+    "compiled": true,
+    "sha256": "32a0327efa20eee6dadb6c536703091f0646297ccccf1789e3a9bd54d218fc15",
+    "tests_run": false
+  },
+  "31": {
+    "compiled": true,
+    "sha256": "54ae76e850d7aa94c5988d45c00dc0a977613074572809ec82f019e3fafefae8",
+    "tests_run": false
+  },
+  "32": {
+    "compiled": true,
+    "sha256": "673dce93cf14c7ea38ca421c751f6c80fbc9404b2323a8456c6257fac00a9217",
+    "tests_run": false
+  },
+  "33": {
+    "compiled": true,
+    "sha256": "b4e62742ddb3cbecfeecfe524674bc9cf772be217f90961a1cafb81b5fcc03db",
+    "tests_run": false
+  },
+  "34": {
+    "compiled": true,
+    "sha256": "bf9379d78413c186ac8e9f4b01a0e180fced9ad10f0359c70f48d082544485dd",
+    "tests_run": false
+  },
+  "35": {
+    "compiled": true,
+    "sha256": "77568613b2f6fc87f297dcf4fb5ca22b9c9c8ac8647375c45bb2ccb3875f51f8",
+    "tests_run": false
+  },
+  "9": {
+    "compiled": true,
+    "mode": "macroquad offline compile only",
+    "sha256": "e3cae2fe47fbc0e2c8f7a9a8074d8b01f1d1d42f7c2af344b61bb17be99ed4c6"
+  },
+  "10": {
+    "compiled": true,
+    "mode": "macroquad offline compile only",
+    "sha256": "7753126179552008813185b82e948543d0ca391fe778f00b6bffa5dce72a415a"
+  },
+  "81": {
+    "compiled": true,
+    "mode": "macroquad offline compile only",
+    "sha256": "d4a584421e559c4b71ddc227111bee142cd3ad51ca665419737e843e397390a6"
+  }
+}

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rusty — the world we are building</title>
+<style>
+:root { color-scheme:dark; --paper:#11191c; --muted:#8c9c9c; --ink:#dce3de; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+main { max-width:1728px; margin:auto; padding:42px 40px 30px; }
+header { display:flex; justify-content:space-between; align-items:end; gap:24px; margin-bottom:24px; }
+.eyebrow { color:#8fa39c; text-transform:uppercase; font-size:10px; letter-spacing:.21em; margin:0 0 8px; }
+h1 { font:normal clamp(26px,3vw,38px)/1.15 Georgia,serif; letter-spacing:-.03em; margin:0; }
+.caption { margin:0; max-width:330px; text-align:right; color:var(--muted); font-size:12px; }
+.frame { position:relative; width:100%; aspect-ratio:16/9; overflow:hidden; background:#3b4a52; border:1px solid #303b3e; }
+canvas { display:block; width:100%; height:100%; image-rendering:pixelated; image-rendering:crisp-edges; }
+.hud { position:absolute; top:25px; right:27px; display:flex; align-items:center; gap:16px; color:#d2dbd2; font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:.06em; }
+.hud .dim { color:#a2b2ac; }
+.hud .divide { height:13px; width:1px; background:#b0bfb12e; }
+.palette-wrap { position:absolute; bottom:23px; left:50%; transform:translateX(-50%); }
+.palette { display:flex; margin:0; padding:5px; list-style:none; background:#17231ff0; border:1px solid #596c5d70; gap:2px; }
+.slot { width:43px; height:41px; padding:7px; display:flex; justify-content:center; align-items:center; position:relative; border:1px solid transparent; }
+.slot.selected { border-color:#b2c0a2; background:#354337; }
+.swatch { display:block; width:13px; height:13px; background:var(--colour); }
+.slot small { position:absolute; top:0; left:3px; color:#98a79c; font:8px/1.3 ui-monospace,monospace; }
+.selected-label { margin:0 0 8px; text-align:center; color:#c1cabd; font:10px/1.4 ui-monospace,monospace; letter-spacing:.06em; }
+.hint { position:absolute; left:26px; bottom:23px; color:#9cac9d; font:10px/1.5 ui-monospace,monospace; }
+footer { display:flex; justify-content:space-between; gap:30px; margin-top:18px; color:var(--muted); font-size:12px; }
+footer p { margin:0; }
+footer a { color:#bdcbc1; text-underline-offset:3px; }
+.key { color:#c3cec3; }
+@media(max-width:900px) { main { padding:26px 18px; } .caption { max-width:240px; } .hud { top:14px; right:16px; font-size:9px; gap:10px; } .palette-wrap { bottom:13px; } .slot { width:30px; height:31px; padding:5px; } .swatch { width:10px; height:10px; } .hint { display:none; } footer { font-size:11px; } }
+@media(max-width:550px) { header { display:block; } .caption { text-align:left; margin-top:12px; max-width:none; } .hud { top:8px; right:10px; font-size:7px; gap:7px; } .slot { width:22px; height:24px; padding:3px; } .swatch { width:8px; height:8px; } .slot small { font-size:6px; } .selected-label { font-size:8px; margin-bottom:4px; } .palette-wrap { bottom:8px; } .palette { padding:3px; gap:1px; } footer { display:block; } footer p+p { margin-top:8px; } }
+@media print { body { background:white; color:black; } main { padding:0; } header,footer { color:black; } .frame { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<main>
+<header><div><p class="eyebrow">The end of the course · a frame from the sandbox</p><h1>A house. A hillside. A living world.</h1></div><p class="caption">Late autumn, after the rain.<br>No character to control. Just a world to tend.</p></header>
+<figure class="frame" style="margin:0" aria-label="Pixel-art concept: a small timber house on a green hillside, scattered pine trees, a quiet sea on the right, a crescent moon and fine rain at dusk.">
+<canvas id="world" width="960" height="540" role="img" aria-label="A still concept frame of the finished ecological sandbox">A pixel-art hillside with a timber house, pine trees, a quiet sea and a crescent moon in light rain.</canvas>
+<div class="hud" aria-label="Game time: day four, autumn, eighteen forty-two, paused at normal speed"><span>DAY 04 <span class="dim">/ AUTUMN</span></span><span class="divide"></span><span>18:42</span><span class="divide"></span><span>Ⅱ <span class="dim">1×</span></span></div>
+<div class="palette-wrap" aria-label="Material bar, wood selected"><p class="selected-label">WOOD <span style="color:#879a89">· BRUSH 4</span></p><ol class="palette">
+<li class="slot" title="1 · Sand" aria-label="Sand"><small>1</small><i class="swatch" style="--colour:#e2b679"></i></li>
+<li class="slot" title="2 · Soil" aria-label="Soil"><small>2</small><i class="swatch" style="--colour:#796451"></i></li>
+<li class="slot" title="3 · Water" aria-label="Water"><small>3</small><i class="swatch" style="--colour:#496c7c"></i></li>
+<li class="slot" title="4 · Stone" aria-label="Stone"><small>4</small><i class="swatch" style="--colour:#798087"></i></li>
+<li class="slot selected" title="5 · Wood, selected" aria-label="Wood, selected"><small>5</small><i class="swatch" style="--colour:#92765c"></i></li>
+<li class="slot" title="6 · Grass" aria-label="Grass"><small>6</small><i class="swatch" style="--colour:#627855"></i></li>
+<li class="slot" title="7 · Metal" aria-label="Metal"><small>7</small><i class="swatch" style="--colour:#8c989e"></i></li>
+<li class="slot" title="8 · Fire" aria-label="Fire"><small>8</small><i class="swatch" style="--colour:#c18b61"></i></li>
+<li class="slot" title="9 · Snow" aria-label="Snow"><small>9</small><i class="swatch" style="--colour:#c5d3d4"></i></li>
+<li class="slot" title="0 · Air" aria-label="Air"><small>0</small><i class="swatch" style="--colour:#35463c; border:1px solid #667767"></i></li>
+</ol></div>
+<div class="hint"><span class="key">LMB</span> PAINT &nbsp; <span class="key">RMB</span> ERASE<br><span class="key">SPACE</span> RESUME &nbsp; <span class="key">TAB</span> HIDE UI</div>
+</figure>
+<footer><p>Visual target, not a running game. House and HUD styling are proposed.<br>960 × 540 art grid · hard pixel edges · no bloom or reflections.</p><p><a href="../../lessons/index.html">Back to the course ↗</a><br>Preview fits your browser; native reference size is 1920 × 1080.</p></footer>
+</main>
+<script>
+(() => {
+  'use strict';
+  const W = 960, H = 540;
+  const ctx = document.querySelector('#world').getContext('2d', { alpha:false });
+  ctx.imageSmoothingEnabled = false;
+  const ground = new Int16Array(W);
+  const shelter = new Int16Array(W);
+  let state = 20261106;
+  function random() {
+    state = (Math.imul(1664525,state) + 1013904223) >>> 0;
+    return state / 4294967296;
+  }
+  function hex(s) { return [1,3,5].map(i => parseInt(s.slice(i,i+2),16)); }
+  function mix(a,b,t) { return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')})`; }
+  function rect(x,y,w,h,c) {
+    ctx.fillStyle=c; ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h));
+  }
+  // One row per art pixel: smooth colour, hard geometry, no dithering.
+  const top = hex('#293843'), mid = hex('#52666d'), horizon = hex('#91a19a');
+  for(let y=0;y<H;y++) {
+    const t=Math.min(y/426,1);
+    rect(0,y,W,1,t<0.58?mix(top,mid,t/0.58):mix(mid,horizon,(t-0.58)/0.42));
+  }
+  function disc(cx,cy,r,c) {
+    for(let y=-r;y<=r;y++) {
+      const half=Math.floor(Math.sqrt(r*r-y*y));
+      rect(cx-half,cy+y,half*2+1,1,c);
+    }
+  }
+  // Three flat discs. The cutout is intentionally flat, never a soft glow.
+  disc(743,109,36,'#465d6c');
+  disc(743,109,27,'#e6ebdf');
+  disc(753,101,23,'#465d6c');
+  // A single continuous terrain mass slopes down into the sea.
+  function height(x) {
+    return Math.round(390 - 67*Math.exp(-Math.pow((x-360)/225,2))
+      + 58/(1+Math.exp(-(x-760)/53))
+      + 4*Math.sin(x/51) + 2*Math.sin(x/19));
+  }
+  for(let x=0;x<W;x++) { ground[x]=height(x); shelter[x]=ground[x]; }
+  // Quiet water occupies the basin, without a moon reflection.
+  const waterTop=hex('#526e77'), waterBottom=hex('#253e4b');
+  for(let y=410;y<H;y++) {
+    rect(0,y,W,1,mix(waterTop,waterBottom,(y-410)/130));
+  }
+  // Ground is opaque and deliberately untextured.
+  for(let x=0;x<W;x++) {
+    rect(x,ground[x],1,H-ground[x],'#26392f');
+    rect(x,ground[x],1,1,'#69816b');
+    // A thin soil edge belongs to the contiguous terrain, not a backdrop.
+    rect(x,ground[x]+1,1,3,'#354b39');
+  }
+  // Sea surface colour ripple stays inside occupied water.
+  for(let x=0;x<W;x++) if(ground[x]>410) {
+    const y=411+Math.round(Math.sin(x/21)*1);
+    if(y<ground[x]) rect(x,y,1,1,'#8caaa9');
+  }
+  // Sparse ground objects remain single silhouettes.
+  function pine(x,h) {
+    x=Math.round(x); h=Math.round(h/2)*2;
+    const base=ground[Math.max(0,Math.min(W-1,x))];
+    const peak=base-h;
+    const width=Math.max(4,Math.round(h*0.28/2)*2);
+    for(let y=peak;y<base-5;y+=2) {
+      const t=(y-peak)/(h-5);
+      const half=Math.max(1,Math.round(width*0.5*t));
+      rect(x-half,y,half*2,2,'#182d25');
+      rect(x-half,y,1,2,'#3e5746');
+    }
+    rect(x-1,base-11,2,12,'#182d25');
+  }
+  [[69,41],[95,61],[130,35],[177,47],[218,31],[567,44],[602,69],[633,43],[690,27],[716,35],[875,19]].forEach(p=>pine(...p));
+  // A small timber house: simple structural masses, no decorative texture.
+  const left=332, right=444, floor=332, ridge=253;
+  // Level stone footing merges into the hillside rather than floating.
+  for(let x=left-6;x<right+7;x+=2) {
+    const base=Math.max(floor+4,ground[x]+2);
+    rect(x,floor,2,base-floor,'#56645c');
+    ground[x]=Math.min(ground[x],floor);
+    shelter[x]=ground[x];
+  }
+  // Visible walls and dark openings, without source-cast light.
+  rect(left,284,right-left,floor-284,'#695f4f');
+  rect(left+4,287,right-left-8,44,'#756856');
+  rect(left+15,304,14,28,'#26392f');
+  rect(left+48,299,18,16,'#2e4240');
+  rect(left+82,299,18,16,'#2e4240');
+  rect(left+56,299,2,16,'#695f4f');
+  rect(left+90,299,2,16,'#695f4f');
+  // Chimney is a quiet solid, no invented smoke or fire effect.
+  rect(419,258,8,24,'#4e5b55');
+  rect(417,256,12,4,'#67756c');
+  const roofLeft=left-9, roofRight=right+9, centre=388;
+  for(let x=roofLeft;x<=roofRight;x+=2) {
+    const t=Math.abs(x-centre)/(centre-roofLeft);
+    const roofY=2*Math.round((ridge+t*34)/2);
+    rect(x,roofY,2,290-roofY,'#2c403b');
+    rect(x,roofY,2,2,'#718474');
+    shelter[x]=Math.min(shelter[x],roofY);
+  }
+  rect(roofLeft,288,roofRight-roofLeft+2,3,'#20382e');
+  // A narrow step is part of the build, not another landscape layer.
+  rect(342,332,25,4,'#667367');
+  // Grass tufts have no speckled fill inside the ground.
+  for(let i=0;i<89;i++) {
+    const x=Math.floor(random()*W);
+    if((x>roofLeft-10&&x<roofRight+12)||ground[x]>=410) continue;
+    const h=2+Math.floor(random()*4);
+    rect(x,ground[x]-h,1,h,'#172e24');
+    if(i%3===0) rect(x+2,ground[x]-h+2,1,Math.max(1,h-2),'#172e24');
+  }
+  // Bresenham line: integer art pixels, never anti-aliased canvas strokes.
+  function line(x0,y0,x1,y1,c) {
+    x0=Math.round(x0);y0=Math.round(y0);x1=Math.round(x1);y1=Math.round(y1);
+    const dx=Math.abs(x1-x0),sx=x0<x1?1:-1,dy=-Math.abs(y1-y0),sy=y0<y1?1:-1;
+    let error=dx+dy;
+    for(;;) {
+      if(x0>=0&&x0<W&&y0>=0&&y0<H&&y0<Math.min(shelter[x0],ground[x0],410)) rect(x0,y0,1,1,c);
+      if(x0===x1&&y0===y1) break;
+      const twice=2*error;
+      if(twice>=dy){error+=dy;x0+=sx;}
+      if(twice<=dx){error+=dx;y0+=sy;}
+    }
+  }
+  // One deterministic frozen rain frame; there is no animation or simulation.
+  for(let i=0;i<1400;i++) {
+    const x=Math.floor(random()*W),y=Math.floor(random()*H);
+    const length=5+Math.floor(random()*9);
+    const near=i>=1050;
+    line(x,y,x-length*0.4,y+length,near?'rgba(195,211,204,.55)':'rgba(159,179,171,.30)');
+  }
+})();
+</script>
+</body>
+</html>

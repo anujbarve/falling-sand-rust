@@ -1,0 +1,32 @@
+# Rusty quick start
+
+Choose a material in the bottom bar, paint, then watch the world respond.
+
+| Action | Default control |
+| --- | --- |
+| Paint / use selected tool | Left mouse button |
+| Erase | Right mouse button |
+| Paint only empty cells | Alt + left mouse button |
+| Brush size | Mouse wheel or [ and ] |
+| Select slot | 1–9, then 0 |
+| Change bar page | Q / E |
+| Pan | Middle drag or WASD |
+| Pause / resume | Space |
+| Slower / faster | , and . |
+| Undo eligible paint edits | Ctrl+Z or Cmd+Z |
+| Save / load | F5 / F9 |
+| Hide material bar | Tab |
+| Mute | M |
+| Settings | Escape |
+
+Only the active view and its margin are simulated; off-screen material freezes.
+Fast-forward may advance seasons faster than physical motion when limited.
+Undo is a local revert: cells changed by the simulation may be skipped.
+
+Find the current world's save location and backup/recovery actions in Settings.
+Keep a copy of the world folder before manual recovery or migration.
+If loading reports an unsupported version, preserve the files and use a
+compatible build; do not delete the world to make the error disappear.
+
+If a save fails, keep the game open and use the shown recovery choices before
+quitting. Report the game version, OS and the visible error when asking for help.

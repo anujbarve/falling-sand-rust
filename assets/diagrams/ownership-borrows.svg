@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="ownership-borrows-title ownership-borrows-desc">
+  <title id="ownership-borrows-title">Move ownership, or lend access</title>
+  <desc id="ownership-borrows-desc">A by-value move transfers a non-Copy value. Shared references lend read access; a mutable reference lends exclusive mutable access while used.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Move ownership, or lend access</text>
+  <rect x="36" y="90" width="230" height="70" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="151.0" y="132.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">owner: cell</text>
+  <line x1="266" y1="125" x2="350" y2="125" stroke="#28755b" stroke-width="3" />
+  <polygon points="350,125 340.0950818741206,129.78462087522354 340.0950818741206,120.21537912477646" fill="#28755b" />
+  <rect x="350" y="90" width="245" height="70" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="472.5" y="132.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">move: new owner</text>
+  <text x="630" y="133" fill="#61736c" font-family="Arial, sans-serif" font-size="18" text-anchor="start">old binding unusable</text>
+  <rect x="36" y="200" width="230" height="70" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="151.0" y="242.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">owner keeps Cell</text>
+  <line x1="266" y1="235" x2="350" y2="235" stroke="#28755b" stroke-width="3" />
+  <polygon points="350,235 340.0950818741206,239.78462087522354 340.0950818741206,230.21537912477646" fill="#28755b" />
+  <rect x="350" y="200" width="245" height="70" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="472.5" y="232.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">&amp;Cell</text>
+  <text x="472.5" y="261.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">shared read access</text>
+  <text x="630" y="242" fill="#61736c" font-family="Arial, sans-serif" font-size="18" text-anchor="start">may lend several reads</text>
+  <rect x="36" y="300" width="230" height="50" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="151.0" y="332.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">owner keeps Cell</text>
+  <line x1="266" y1="325" x2="350" y2="325" stroke="#28755b" stroke-width="3" />
+  <polygon points="350,325 340.0950818741206,329.78462087522354 340.0950818741206,320.21537912477646" fill="#28755b" />
+  <rect x="350" y="300" width="245" height="50" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="472.5" y="332.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">&amp;mut Cell</text>
+  <text x="630" y="333" fill="#61736c" font-family="Arial, sans-serif" font-size="18" text-anchor="start">exclusive access while used</text>
+</svg>

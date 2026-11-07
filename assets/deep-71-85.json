@@ -1,0 +1,1415 @@
+{
+  "71": {
+    "outcome": "Generate the same contained lake from either side of a chunk border, and explain why it cannot drain on activation.",
+    "why": "A beautiful bowl drawn on top of water is not a contained lake. The actual occupied cells must hold the liquid, and generation must agree when neighbouring chunks are requested in different orders.",
+    "sections": [
+      {
+        "title": "Start with the failure, not the noise function",
+        "html": "<p>Imagine a basin whose left wall is in chunk A and right wall is in chunk B. If A fills water before B supplies its wall, activation can spill the lake. Generating more noise does not fix this. We need a world-coordinate feature definition that both chunks can evaluate independently. The feature owns its bowl profile and fill level; chunks merely sample it.</p><p>Use a handcrafted cross-section first: solid walls, level water and air above. Run 600 ticks before adding procedural placement. If this tiny fixture leaks, debug occupancy, absorption or boundaries before blaming generation.</p>"
+      },
+      {
+        "title": "Bound the neighbourhood that can affect a cell",
+        "html": "<p>The design caps a lake width at 96 cells. Represent a candidate by centre, half-width and rim altitude. A chunk only asks for candidate centres close enough to overlap it. This is a finite dependency, unlike asking whether an arbitrary distant outlet exists somewhere in an infinite valley.</p><p>For a teaching bowl, let depth decrease linearly toward the rim: depth = half_width - distance_from_centre. A cell below the resulting floor is stone, between floor and water level is water, and above is air. This deliberately angular bowl proves the spatial contract; a smooth profile can replace the depth calculation later without changing ownership.</p>"
+      },
+      {
+        "title": "Resolve feature ordering explicitly",
+        "html": "<p>Apply base strata, candidate bowl carving and water placement in a fixed order. Two overlapping bowls need a tie-break, such as the lowest feature ID, rather than whichever chunk happens to load first. Caves must respect the sea/surface exclusion band. Otherwise a valid lake can be drained by a later cave pass.</p><p>Water over generated porous soil must begin with the approved saturation state. If fresh water immediately disappears through absorption, that is a generation-state mismatch, not an excuse to weaken the rest test. Keep containment geometry and moisture initialization in separate assertions.</p>"
+      },
+      {
+        "title": "Integrate one pure sampling function",
+        "html": "<p>The function below receives a world coordinate and returns a material classification. It has no mutable RNG, no chunk cache and no dependence on camera position. Sampling the same coordinate twice therefore produces the same result. In the real generator combine it with bounded candidate lookup and the existing material table.</p><p>Save the example as indicated, then call the sampler through your chunk-generation loop. Generate the left and right chunks in opposite orders and compare their output hashes. Finally activate the whole bowl, because pure generation equality cannot prove the water simulation rests.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_071.rs, then run cargo run --example lesson_071 from game/.",
+      "language": "rust",
+      "code": "#[derive(Debug, PartialEq)]\nenum Kind { Air, Water, Stone }\nfn sample_lake(x: i32, y: i32, centre: i32, half: i32, level: i32) -> Kind {\n    assert!(half > 0);\n    let distance = (x - centre).abs();\n    if distance > half { return Kind::Air; }\n    let floor = level - (half - distance);\n    if y <= floor { Kind::Stone }\n    else if y <= level { Kind::Water }\n    else { Kind::Air }\n}\nfn main() {\n    assert_eq!(sample_lake(64, 8, 64, 12, 10), Kind::Water);\n    assert_eq!(sample_lake(52, 10, 64, 12, 10), Kind::Stone);\n    assert_eq!(sample_lake(64, 11, 64, 12, 10), Kind::Air);\n    println!(\"bowl centre, rim and open sky agree\");\n}",
+      "explanation": [
+        "y is world altitude here, increasing upward. This is not the early downward screen-row convention.",
+        "The rim at distance == half is stone even at the fill level, containing water in the teaching profile.",
+        "The Air result outside the feature means no lake override; in production preserve base terrain there rather than replacing it with air."
+      ],
+      "expected": "bowl centre, rim and open sky agree"
+    },
+    "exercises": [
+      {
+        "title": "Trace the cross-section",
+        "prompt": "At x=64, centre=64, half=12 and level=10, classify altitudes -3, 0, 10 and 11.",
+        "hint": "Calculate floor before choosing a material.",
+        "solution": "<p>The floor is -2. Altitude -3 is Stone; 0 and 10 are Water; 11 is Air. The lake does not decide which altitude is on the screen.</p>",
+        "proof": "Write four assertions with those outcomes."
+      },
+      {
+        "title": "Put the lake on a seam",
+        "prompt": "Move the centre to a coordinate exactly divisible by 64. Generate neighbouring chunks in both orders.",
+        "hint": "Feature data should be computed from world identity, not load order.",
+        "solution": "<p>A centre of 64 puts the feature across chunks 0 and 1. Both evaluate the same centre/profile. Generate A then B and B then A, concatenate by coordinate and compare equal arrays.</p>",
+        "proof": "The combined arrays and activation behavior agree."
+      },
+      {
+        "title": "Make a deliberately broken cave",
+        "prompt": "Carve one air cell through a bowl wall below the water level. Explain the resulting rest-test failure.",
+        "hint": "A lake is only contained by actual cells.",
+        "solution": "<p>Water exits through the hole under the existing movement rule. Restore the wall or constrain the cave feature. Changing the decorative shoreline cannot repair a missing solid.</p>",
+        "proof": "The broken fixture moves water; restoring the cell prevents that escape."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Lake drains at first activation",
+        "cause": "Bowl geometry or generated moisture is inconsistent with movement/absorption.",
+        "fix": "Inspect a tiny cross-section and saturation before widening the fixture."
+      },
+      {
+        "symptom": "Seam through the bowl",
+        "cause": "Features were chosen by mutable RNG consumption or different local origins.",
+        "fix": "Select candidates in world coordinates with a deterministic tie-break."
+      },
+      {
+        "symptom": "Caves erase a lake wall",
+        "cause": "Feature ordering has no exclusion constraint.",
+        "fix": "Check cave placement against the generated surface/sea and bounded feature geometry."
+      }
+    ],
+    "episode": {
+      "hook": "Show a lake draining through one missing cell, then make the generator guarantee containment.",
+      "beats": [
+        "Reveal the one-cell leak",
+        "Derive a bounded bowl from centre and rim",
+        "Trace three sample coordinates",
+        "Generate opposite chunk orders",
+        "Activate and run the rest fixture"
+      ],
+      "demo": "Record a zoomed teaching cross-section, then a native-size contained lake after 600 ticks.",
+      "recap": "A lake is a generated occupancy guarantee, not a painted blue region."
+    },
+    "sources": [
+      {
+        "label": "Game generation/rest rules",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "72": {
+    "outcome": "Move a labelled owned result from a worker to the main thread using a bounded channel.",
+    "why": "Generation and disk work should not freeze drawing, but letting a worker mutate the live world makes ownership and timing harder. A message lets one owner finish work and transfer the result at a controlled point.",
+    "sections": [
+      {
+        "title": "Discover the ownership boundary",
+        "html": "<p>The main loop owns the live world. A worker owns a request while processing it, then owns the produced data. Sending a message transfers that data; receiving it gives the main loop the opportunity to install it. The worker does not need a permanent mutable reference to the whole world.</p><p>Start with one labelled result rather than a full threaded loader. If you cannot point to the owner before and after send, pause here and revisit moves. A String or Vec in a sent message moves; a small Copy identifier behaves differently.</p>"
+      },
+      {
+        "title": "Bound the queue before making it fast",
+        "html": "<p>An unbounded channel can accumulate work faster than a slow disk or generator finishes it. A sync_channel with a finite capacity applies backpressure. Blocking send is acceptable inside a worker, but a full request queue must not block the rendering thread. For main-loop requests, use a nonblocking send policy or cap outstanding requests.</p><p>A capacity of two in the experiment is an instructional limit, not a tuned game value. Measure queue depth and memory in production. A camera flying across terrain should not enqueue every obsolete intermediate chunk forever.</p>"
+      },
+      {
+        "title": "Reject stale results by identity",
+        "html": "<p>A result needs both its chunk coordinates and the world/request generation it belongs to. Imagine loading world A, requesting chunk (0,0), then switching to world B before the worker replies. Coordinates alone match, but installing A’s data into B corrupts the new world.</p><p>Compare a world epoch or request token when receiving. Discard or cache stale results according to an explicit policy. This is a correctness condition even with a perfectly reliable channel and no data races.</p>"
+      },
+      {
+        "title": "Receive without freezing the frame",
+        "html": "<p>The complete example uses recv once because a terminal demo has nothing to draw while waiting. In the game use try_recv in a bounded drain loop, stopping after a message/time allowance. An empty queue is not an error requiring a panic. Disconnection means all relevant senders have gone away; decide how to surface worker failure.</p><p>Keep a JoinHandle and define shutdown: stop accepting work, drop request senders, let the worker exit or cancel cooperatively, then join. A thread does not automatically stop because the camera no longer needs its result.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_072.rs, then run cargo run --example lesson_072 from game/.",
+      "language": "rust",
+      "code": "use std::sync::mpsc::sync_channel;\nuse std::thread;\n#[derive(Debug)]\nstruct ChunkReply { epoch: u64, x: i32, cells: Vec<u8> }\nfn main() {\n    let (tx, rx) = sync_channel(2);\n    let worker = thread::spawn(move || {\n        let reply = ChunkReply { epoch: 7, x: -1, cells: vec![0; 4096] };\n        tx.send(reply).expect(\"demo receiver exists\");\n    });\n    let live_epoch = 7;\n    let reply = rx.recv().expect(\"demo worker sends one reply\");\n    if reply.epoch == live_epoch {\n        println!(\"install chunk {} with {} cells\", reply.x, reply.cells.len());\n    }\n    worker.join().expect(\"demo worker completes\");\n}",
+      "explanation": [
+        "move transfers the sender into the worker closure; it does not borrow the main stack indefinitely.",
+        "The payload vector is moved through the message. No second mutable alias to those cells is created.",
+        "expect is used to make a tiny controlled experiment fail loudly; production handles disconnects through Result."
+      ],
+      "expected": "install chunk -1 with 4096 cells"
+    },
+    "exercises": [
+      {
+        "title": "Reject the wrong world",
+        "prompt": "Change live_epoch to 8. What should be installed?",
+        "hint": "Do not change the reply to make the test pass.",
+        "solution": "<p>Nothing is installed because reply epoch 7 does not match live epoch 8. Add an explicit stale-result counter and assert it increments.</p>",
+        "proof": "No chunk data from the previous world enters the current map."
+      },
+      {
+        "title": "Protect the frame loop",
+        "prompt": "Replace the terminal waiting receive with a game-loop-friendly receive strategy.",
+        "hint": "An empty queue is normal between completed jobs.",
+        "solution": "<p>Use try_recv; handle Ok(reply), Empty by stopping this frame’s drain, and Disconnected by reporting worker status. Bound the number of replies installed per frame.</p>",
+        "proof": "An empty queue returns control immediately."
+      },
+      {
+        "title": "Explain backpressure",
+        "prompt": "A worker sends three replies to capacity two without a receiver draining. Where does it wait?",
+        "hint": "Count queued messages, not total sends.",
+        "solution": "<p>The first two replies fill the queue. A blocking third send waits until capacity is available or the receiver disconnects. Never perform that blocking path on the drawing thread.</p>",
+        "proof": "A small controlled test demonstrates blocking or uses try_send to observe Full."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Window stops while loading",
+        "cause": "Main loop called recv or blocking send.",
+        "fix": "Use nonblocking main-loop queue operations and bounded work."
+      },
+      {
+        "symptom": "Old terrain appears after loading another world",
+        "cause": "Replies are checked only by chunk coordinates.",
+        "fix": "Include and compare a world/request epoch."
+      },
+      {
+        "symptom": "Application never exits",
+        "cause": "A sender remains alive or the worker has no shutdown condition.",
+        "fix": "Drop request senders deliberately and join workers once their loop can terminate."
+      }
+    ],
+    "episode": {
+      "hook": "Pan away before generation finishes: should the old result still enter the world?",
+      "beats": [
+        "Make the ownership transfer visible",
+        "Send one small payload",
+        "Force a stale epoch",
+        "Bound a queue",
+        "Replace waiting with nonblocking draining"
+      ],
+      "demo": "Show a debug counter accepting current replies and rejecting an old-world reply.",
+      "recap": "Channels transfer ownership; identities decide whether a completed result is still relevant."
+    },
+    "sources": [
+      {
+        "label": "Rust message passing",
+        "url": "https://doc.rust-lang.org/book/ch16-02-message-passing.html"
+      }
+    ]
+  },
+  "73": {
+    "outcome": "Propagate a recoverable file error to a caller that prints a useful message and keeps running.",
+    "why": "A missing save is an expected external condition. It should lead to a useful choice—new world, backup or another path—not a panic that throws away the current session.",
+    "sections": [
+      {
+        "title": "Begin with two possible outcomes",
+        "html": "<p>An integer-returning parser cannot say both “the value is zero” and “there was no valid value” using zero alone. Result keeps those outcomes separate. Its Ok variant contains the successful value; Err contains failure information. Which action follows belongs to the caller, not automatically to the low-level parser.</p><p>For a save header reader, success means validated metadata. Failure might mean the file cannot be read, the bytes are invalid or the version is unsupported. Preserve enough context to distinguish them. Do not turn every error into “save missing.”</p>"
+      },
+      {
+        "title": "Follow the question mark through one function",
+        "html": "<p>The ? operator on a Result unwraps the success path for continued processing, or returns the error early through a compatible Result-returning function. It does not log, retry, choose a backup or repair data. Those decisions remain visible at the boundary where the operation is presented to the player.</p><p>First write the function using match on fs::read_to_string. Then replace the early-return pattern with ?. Compare the two versions. The shorter syntax is valuable only after the control flow is understood.</p>"
+      },
+      {
+        "title": "Validate after reading",
+        "html": "<p>A successful read proves bytes were obtained, not that they form a valid world. Trim text in this teaching experiment, parse the number and map parser failure into an io::Error with InvalidData. A binary loader will later validate magic bytes, versions, lengths and material identifiers in the same logical order.</p><p>Keep this terminal experiment separate from real world saves. Its small text format is not the production format. We are learning failure flow before coupling it to chunks and background writers.</p>"
+      },
+      {
+        "title": "Handle failure where context is available",
+        "html": "<p>The main function knows which path the user requested. It can print that path with the underlying error and leave the current world untouched. In production attach operation context, preserve the prior save and offer recovery. A low-level decoder should not reach into the UI to display a dialog.</p><p>Test both success and failure intentionally. A happy-path demonstration alone leaves the useful half of this lesson untested. Missing files, invalid text and permission failures may require different recovery messages even though all return Err.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_073.rs, then run cargo run --example lesson_073 from game/.",
+      "language": "rust",
+      "code": "use std::{fs, io};\nfn read_seed(path: &str) -> io::Result<u64> {\n    let text = fs::read_to_string(path)?;\n    text.trim().parse().map_err(|error| {\n        io::Error::new(io::ErrorKind::InvalidData, format!(\"invalid seed: {error}\"))\n    })\n}\nfn main() {\n    let path = \"lesson-seed.txt\";\n    match read_seed(path) {\n        Ok(seed) => println!(\"seed = {seed}\"),\n        Err(error) => eprintln!(\"Could not read {path}: {error}\"),\n    }\n}",
+      "explanation": [
+        "Run with no lesson-seed.txt first; failure is part of the exercise, not a broken installation.",
+        "Create the file containing 42 and run again to see the success branch.",
+        "A failed parse becomes InvalidData; a failed read keeps the filesystem error kind."
+      ],
+      "expected": "With a file containing 42: seed = 42. With no file: a contextual missing-file message; no panic."
+    },
+    "exercises": [
+      {
+        "title": "Make both branches real",
+        "prompt": "Run once without the file, once with 42, and once with sand as its contents.",
+        "hint": "The current working directory determines this teaching path.",
+        "solution": "<p>The first run returns an I/O error, the second returns Ok(42), and the third returns InvalidData. Only the caller prints the operation and path.</p>",
+        "proof": "Capture all three distinct outcomes."
+      },
+      {
+        "title": "Expand the control flow",
+        "prompt": "Rewrite the first ? using match without changing behavior.",
+        "hint": "Err must return from read_seed, not only print.",
+        "solution": "<p>Use let text = match fs::read_to_string(path) { Ok(text) => text, Err(error) => return Err(error) }; and leave parsing unchanged.</p>",
+        "proof": "The three fixtures produce equivalent success/error kinds."
+      },
+      {
+        "title": "Protect existing state",
+        "prompt": "A world with seed 7 is live. Loading seed text fails. What must remain unchanged?",
+        "hint": "Do not assign partially loaded data into the world.",
+        "solution": "<p>Retain seed 7 and all live world state. Construct and validate replacement state first; install it only after the load operation succeeds.</p>",
+        "proof": "A failed load fixture compares the live world hash before and after."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Question mark rejected by compiler",
+        "cause": "The enclosing function does not return a compatible Result.",
+        "fix": "Return the appropriate Result or handle the error locally with match."
+      },
+      {
+        "symptom": "Missing and invalid files show the same message",
+        "cause": "Code discarded the original error context.",
+        "fix": "Keep the error kind and add the operation/path at the boundary."
+      },
+      {
+        "symptom": "The file exists but the program cannot find it",
+        "cause": "The relative path is resolved against a different current directory.",
+        "fix": "Run from game/ or print the resolved path in the teaching experiment."
+      }
+    ],
+    "episode": {
+      "hook": "Delete the save input on purpose and keep the application alive.",
+      "beats": [
+        "Show a deliberate missing file",
+        "Trace Ok and Err",
+        "Expand then compress ?",
+        "Reject invalid input",
+        "Keep the previous state intact"
+      ],
+      "demo": "Film missing, valid and malformed inputs side by side with their messages.",
+      "recap": "Reading succeeded is not the same as validation succeeded; installing state comes last."
+    },
+    "sources": [
+      {
+        "label": "Rust Result and propagation",
+        "url": "https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html"
+      }
+    ]
+  },
+  "74": {
+    "outcome": "Encode a small explicit versioned header and reject truncated or unsupported input before using it.",
+    "why": "An in-memory struct is a convenient Rust value, but its layout is not automatically a portable save protocol. We need byte meanings that future readers can understand even after the implementation changes.",
+    "sections": [
+      {
+        "title": "Decide what every byte means",
+        "html": "<p>Start with a tiny header rather than serializing the whole world. Our teaching header has four magic bytes, a little-endian format version and a seed. Magic distinguishes this file family; the version selects a decoding contract; the seed is data interpreted under that contract.</p><p>Write offsets on paper before code: bytes 0 through 3 are RSTY, 4 through 5 are version 1, and 6 through 13 are a u64 seed. That totals 14 bytes. Explicit byte order avoids depending on the host machine’s endianness.</p>"
+      },
+      {
+        "title": "Validate shape before conversion",
+        "html": "<p>A loader first checks exact length in the small example, then magic, then version, and only then decodes payload fields. The order prevents out-of-bounds slicing and makes unsupported input fail before allocating world data. In a larger format validate each declared length against configured maximums before allocation.</p><p>Do not cast arbitrary bytes into Material or a Rust struct. Invalid enum discriminants and layout padding are not a public format. Encode material IDs deliberately and validate each accepted ID during decode.</p>"
+      },
+      {
+        "title": "Keep versions about different promises",
+        "html": "<p>The header here carries only a format version. The full world also needs generator version, tick counters, changed regions and the other saved-state inventory. A format version answers how to read bytes. A generator version answers how to regenerate absent chunks. One number cannot safely stand for both.</p><p>Build the codec as a pure byte-to-value function returning Result. File reading belongs outside it. This lets tests supply truncated buffers directly without creating temporary files or opening the game.</p>"
+      },
+      {
+        "title": "Prove equality and rejection",
+        "html": "<p>Round-trip equality means decoding our encoding returns the original metadata. It does not prove corrupt data is rejected; add negative cases for every validation boundary. Change one magic byte, try a future version and truncate at every byte position.</p><p>In the game, migrate this experiment into save/codec.rs and add payload-specific encoding. Keep a tiny known byte fixture in tests so an accidental endian or field-order change becomes obvious. Before a public format change, either retain the old reader or implement an explicit migration.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_074.rs, then run cargo run --example lesson_074 from game/.",
+      "language": "rust",
+      "code": "const HEADER_LEN: usize = 14;\nfn encode(seed: u64) -> Vec<u8> {\n    let mut bytes = Vec::with_capacity(HEADER_LEN);\n    bytes.extend_from_slice(b\"RSTY\");\n    bytes.extend_from_slice(&1_u16.to_le_bytes());\n    bytes.extend_from_slice(&seed.to_le_bytes());\n    bytes\n}\nfn decode(bytes: &[u8]) -> Result<u64, &'static str> {\n    if bytes.len() != HEADER_LEN { return Err(\"invalid header length\"); }\n    if &bytes[0..4] != b\"RSTY\" { return Err(\"wrong file family\"); }\n    let version = u16::from_le_bytes([bytes[4],bytes[5]]);\n    if version != 1 { return Err(\"unsupported format version\"); }\n    let mut seed = [0_u8;8];\n    seed.copy_from_slice(&bytes[6..14]);\n    Ok(u64::from_le_bytes(seed))\n}\nfn main() {\n    let bytes = encode(42);\n    assert_eq!(bytes.len(),14);\n    assert_eq!(decode(&bytes),Ok(42));\n    for end in 0..14 { assert!(decode(&bytes[..end]).is_err()); }\n    println!(\"header round-trip and truncation checks pass\");\n}",
+      "explanation": [
+        "All slices are reached only after the length check.",
+        "to_le_bytes/from_le_bytes define the file byte order independently of native layout.",
+        "This minimal format is a worked codec experiment; do not use it to replace the full world-state inventory."
+      ],
+      "expected": "header round-trip and truncation checks pass"
+    },
+    "exercises": [
+      {
+        "title": "Predict a field",
+        "prompt": "What are the eight seed bytes for seed 42?",
+        "hint": "The least-significant byte comes first in little-endian order.",
+        "solution": "<p>The seed bytes are 42,0,0,0,0,0,0,0. Magic and version precede them. Print the encoded vector and identify the offsets.</p>",
+        "proof": "Your predicted bytes match the produced buffer."
+      },
+      {
+        "title": "Reject future data",
+        "prompt": "Change version bytes to 2 and 0.",
+        "hint": "Do not silently interpret unknown versions as version 1.",
+        "solution": "<p>decode returns unsupported format version. Preserve the original buffer/file and choose a supported reader or explicit migration rather than rewriting it during rejection.</p>",
+        "proof": "The error path leaves the input unchanged."
+      },
+      {
+        "title": "Add a bounded payload length",
+        "prompt": "Describe where a chunk count should be checked before allocating its cells.",
+        "hint": "Check both a format limit and arithmetic overflow.",
+        "solution": "<p>Decode the count, reject counts above the region limit, use checked multiplication for bytes required, and verify the buffer has that many bytes before allocation/copy.</p>",
+        "proof": "A huge count produces a small error without a huge allocation."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Round-trip works only on one machine",
+        "cause": "The codec used native memory layout or byte order.",
+        "fix": "Encode each public field explicitly with a documented endian convention."
+      },
+      {
+        "symptom": "Truncated saves panic",
+        "cause": "The decoder slices before validating length.",
+        "fix": "Check lengths before indexing every variable-length section."
+      },
+      {
+        "symptom": "Unknown material becomes a strange cell",
+        "cause": "The reader accepts unchecked IDs.",
+        "fix": "Map explicit accepted byte values to Material and reject other values."
+      }
+    ],
+    "episode": {
+      "hook": "Turn a Rust struct into a deliberately specified 14-byte contract.",
+      "beats": [
+        "Draw byte offsets",
+        "Encode one seed",
+        "Decode after validation",
+        "Truncate every boundary",
+        "Explain format versus generator version"
+      ],
+      "demo": "Show a byte table and a corrupted fixture being rejected without a crash.",
+      "recap": "A save format is a byte contract, not a dump of Rust memory."
+    },
+    "sources": [
+      {
+        "label": "Integer byte conversion",
+        "url": "https://doc.rust-lang.org/std/primitive.u64.html#method.to_le_bytes"
+      },
+      {
+        "label": "Slice access",
+        "url": "https://doc.rust-lang.org/std/primitive.slice.html"
+      }
+    ]
+  },
+  "75": {
+    "outcome": "Compress a bounded payload, decode it exactly and reject expansion beyond the declared cell budget.",
+    "why": "Uniform terrain often compresses well, but compression must not become an unbounded allocation path. A simple run-length experiment makes encoding, expansion and limits visible before choosing a production codec.",
+    "sections": [
+      {
+        "title": "Understand a run before choosing a library",
+        "html": "<p>Consider material IDs [0,0,0,2,2,1]. Run-length encoding records three zeros, two twos and one one. This is useful for uniform spans, while alternating values can expand. Therefore compression effectiveness is a property of data and codec, not a promise that every chunk becomes a few kilobytes.</p><p>Our teaching codec stores a one-byte count followed by a one-byte value. Runs are limited to 255 so a long uniform span becomes several runs. This is a small educational format, not an instruction to prefer it over LZ4 without measurement.</p>"
+      },
+      {
+        "title": "Put bounds before allocation",
+        "html": "<p>The decoder receives a maximum output length. Before each extension it checks whether the next run fits. It also rejects odd byte counts and zero-length runs. These checks make malformed input a normal Result error instead of a large allocation or ambiguous stream.</p><p>For production the maximum follows from a validated region index, up to 32 by 32 chunks and the documented cell encoding. Do not trust a compressed payload’s self-reported uncompressed size as authority. The external format and configured limits supply that authority.</p>"
+      },
+      {
+        "title": "Group chunks without confusing identifiers",
+        "html": "<p>A region contains sparse changed chunks, not necessarily all 1024 possible entries. Its index needs local chunk coordinates, payload offset/length and enough metadata to validate each entry. Reject duplicate coordinates, out-of-range slots and overlapping payload sections unless a sharing rule deliberately allows them.</p><p>Compression can apply per chunk or per whole region. Per-chunk compression supports selective loading; whole-region compression may improve ratio but amplifies reads and rewrites. Choose based on measured panning and autosave behavior, and record the choice before freezing the format.</p>"
+      },
+      {
+        "title": "Test content, limits and cost separately",
+        "html": "<p>Round-trip testing proves fidelity. Corruption tests prove rejection. Size/time measurements characterize usefulness. None substitutes for the others. Run uniform stone, alternating cells and mixed temperature/moisture payloads; material IDs alone underestimate the real save’s entropy.</p><p>Before adopting a codec dependency, check its primary documentation for maximum-output controls and error behavior, pin its version and review its licence. The worked standard-library codec lets us learn the control flow without installing a package; it does not settle the production compression decision.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_075.rs, then run cargo run --example lesson_075 from game/.",
+      "language": "rust",
+      "code": "fn encode(data: &[u8]) -> Vec<u8> {\n    let mut out = Vec::new();\n    let mut i=0;\n    while i<data.len() {\n        let value=data[i]; let mut count=1_usize;\n        while i+count<data.len() && data[i+count]==value && count<255 { count+=1; }\n        out.extend_from_slice(&[count as u8,value]); i+=count;\n    }\n    out\n}\nfn decode(data: &[u8], max: usize) -> Result<Vec<u8>, &'static str> {\n    if data.len()%2!=0 { return Err(\"truncated run\"); }\n    let mut out=Vec::new();\n    for pair in data.chunks_exact(2) {\n        let count=pair[0] as usize;\n        if count==0 { return Err(\"empty run\"); }\n        let end=out.len().checked_add(count).ok_or(\"length overflow\")?;\n        if end>max { return Err(\"output limit\"); }\n        out.resize(end,pair[1]);\n    }\n    Ok(out)\n}\nfn main() {\n    let input=vec![7;4096]; let packed=encode(&input);\n    assert_eq!(decode(&packed,4096),Ok(input));\n    assert!(decode(&packed,4095).is_err());\n    assert!(decode(&[1],4096).is_err());\n    println!(\"4096 uniform bytes -> {} bytes\",packed.len());\n}",
+      "explanation": [
+        "Runs never exceed 255, so 4096 equal bytes become 17 runs, or 34 encoded bytes.",
+        "checked_add prevents arithmetic overflow before applying the configured bound.",
+        "Use the full encoded cell payload in real measurements, not only material IDs."
+      ],
+      "expected": "4096 uniform bytes -> 34 bytes"
+    },
+    "exercises": [
+      {
+        "title": "Find the bad workload",
+        "prompt": "Encode 100 alternating zero/one bytes.",
+        "hint": "Every run has length one.",
+        "solution": "<p>The encoded output has 200 bytes, twice the input. A production format can choose an uncompressed representation when compression expands the data, with an explicit mode flag.</p>",
+        "proof": "Measure and report the expansion rather than claiming universal savings."
+      },
+      {
+        "title": "Reject a decompression bomb",
+        "prompt": "Decode [255,0,255,0] with max=256.",
+        "hint": "The second run would exceed the limit.",
+        "solution": "<p>The first run yields 255 bytes. The second proposes 510, so the decoder returns output limit before resizing.</p>",
+        "proof": "The decoder returns Err and never produces a 510-byte result."
+      },
+      {
+        "title": "Index sparse chunks",
+        "prompt": "A region has changed chunks at local coordinates (0,0) and (31,31). Must it store 1024 payloads?",
+        "hint": "An index can describe only present entries.",
+        "solution": "<p>No. Encode two validated entries and their payloads; absent chunks regenerate from the world’s generator version. Duplicate or out-of-range coordinates must be rejected.</p>",
+        "proof": "A sparse region round-trip restores both coordinates and no invented payloads."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Compression makes a save larger",
+        "cause": "The scene has short runs or high entropy.",
+        "fix": "Measure actual cells and support a raw mode when useful."
+      },
+      {
+        "symptom": "Corrupt input allocates enormous memory",
+        "cause": "The decoder trusts declared expansion.",
+        "fix": "Enforce a validated maximum before every output growth."
+      },
+      {
+        "symptom": "One chunk edit rewrites a huge region",
+        "cause": "Storage granularity and compression granularity are coupled poorly.",
+        "fix": "Measure per-chunk indexed payloads versus whole-region compression and choose deliberately."
+      }
+    ],
+    "episode": {
+      "hook": "Compress a whole uniform chunk to 34 bytes—then show the workload that doubles in size.",
+      "beats": [
+        "Trace six input bytes",
+        "Derive count/value encoding",
+        "Reject invalid runs",
+        "Bound decompression",
+        "Compare compression granularities"
+      ],
+      "demo": "Display uniform and alternating payload sizes and a rejected oversized decode.",
+      "recap": "Compression is measured optimization behind a validated format boundary."
+    },
+    "sources": [
+      {
+        "label": "Checked byte processing",
+        "url": "https://doc.rust-lang.org/std/primitive.slice.html#method.chunks_exact"
+      },
+      {
+        "label": "Game region-file design",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "76": {
+    "outcome": "Capture one coherent world state while leaving the live particles and chunks unchanged.",
+    "why": "An autosave during a blast should not freeze debris in midair by returning it to grid cells. Saving asks what the world was at one tick, not how to modify the world into a shape that is convenient to serialize.",
+    "sections": [
+      {
+        "title": "Define a snapshot boundary",
+        "html": "<p>Imagine grain A moving from chunk 0 to chunk 1. Copy chunk 0 before the move and chunk 1 after it: the snapshot contains A twice. Copy in the opposite order and A disappears. Each chunk may be individually valid while the assembled save is wrong.</p><p>Choose a completed simulation tick as the logical boundary. Capture all needed values from that boundary before the next mutation can invalidate the view. For a first correct version, pause mutation briefly while cloning state into an owned snapshot. Measure the copy cost before optimizing with immutable pages or copy-on-write.</p>"
+      },
+      {
+        "title": "Inventory state by its ability to affect the future",
+        "html": "<p>Chunks alone do not define the next tick. Include seed, generator/format versions, step/calendar counters, surface metadata, weather deltas, cooldowns and falling groups. Particle position, velocity and material payload also matter if loading should continue the same blast.</p><p>The current spec’s reinsertion-before-save rule deliberately mutates the live world. Treat changing it to particle serialization as a proposal requiring the corresponding spec update, not a silent compatibility fix. A saved snapshot can be coherent under either explicitly approved policy, but the two have different gameplay outcomes.</p>"
+      },
+      {
+        "title": "Transfer the copy, not the live borrow",
+        "html": "<p>A writer job should own its snapshot after capture. Then the game can continue while a single writer encodes and writes the captured generation. The writer must not borrow a mutable World that the next frame also wants to update. Ownership is the practical boundary between simulation and I/O.</p><p>Cloning a large world every five minutes is not automatically cheap enough. Clone the changed/relevant state rather than every regenerated chunk, bound concurrent snapshots, and coalesce obsolete autosaves if the writer cannot keep up. A slow disk must not produce an unlimited queue of entire worlds.</p>"
+      },
+      {
+        "title": "Distinguish exact continuation from exact timing",
+        "html": "<p>The experiment clones grid and particles together. Moving the original afterwards cannot alter the captured values. In production save the agreed scheduler residual state if exact scheduling continuation is part of the contract; otherwise document resetting it. A restored world hash can match while wall-clock timing still restarts differently.</p><p>Test a mid-transfer chunk fixture and a mid-explosion fixture. Save, continue, restore into a separate world, and compare the complete state inventory. Only then compare subsequent updates under the same injected inputs and tick multipliers.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_076.rs, then run cargo run --example lesson_076 from game/.",
+      "language": "rust",
+      "code": "#[derive(Clone, Debug, PartialEq)]\nstruct Particle { x: i32, velocity_x: i32, material: u8 }\n#[derive(Clone, Debug, PartialEq)]\nstruct Snapshot { step: u64, cells: Vec<u8>, particles: Vec<Particle> }\nfn main() {\n    let mut live=Snapshot { step: 10, cells: vec![0,2,0],\n        particles: vec![Particle{x:4,velocity_x:3,material:2}] };\n    let captured=live.clone();\n    live.step+=1;\n    live.cells.swap(1,2);\n    live.particles[0].x+=live.particles[0].velocity_x;\n    assert_eq!(captured.step,10);\n    assert_eq!(captured.cells,vec![0,2,0]);\n    assert_eq!(captured.particles[0].x,4);\n    assert_eq!(live.particles[0].x,7);\n    println!(\"snapshot retained tick 10; live world advanced\");\n}",
+      "explanation": [
+        "The snapshot has independent owned vectors because Clone clones each Vec element.",
+        "Capture occurs before any next-tick mutation in this experiment. A background writer must receive the captured owned value.",
+        "Fixed-point particle coordinates keep this experiment tiny; production particles may use the agreed floating-point representation."
+      ],
+      "expected": "snapshot retained tick 10; live world advanced"
+    },
+    "exercises": [
+      {
+        "title": "Find a missing field",
+        "prompt": "Remove particle velocity from serialization but keep its position. What diverges after load?",
+        "hint": "Compare the next update, not only the screenshot at load.",
+        "solution": "<p>The loaded particle begins in the correct place but follows a different trajectory because its future displacement is missing. Save the full agreed particle state or explicitly change the continuation contract.</p>",
+        "proof": "A one-tick continuation test detects the omission."
+      },
+      {
+        "title": "Construct the double-count bug",
+        "prompt": "Copy the source chunk before a crossing and the destination after it.",
+        "hint": "Count the same material ID in both copies.",
+        "solution": "<p>Both copies contain the transferring grain. A tick-boundary snapshot must capture either the before pair or the after pair, never a mixture.</p>",
+        "proof": "A count assertion fails for the mixed snapshot."
+      },
+      {
+        "title": "Bound autosave memory",
+        "prompt": "The disk takes longer than the autosave interval. How should pending snapshots behave?",
+        "hint": "More background jobs do not make the disk faster.",
+        "solution": "<p>Keep one active write and a bounded pending/latest snapshot policy. Preserve an explicit manual-save request if required. Measure snapshot-copy peak memory as well as resident chunk cache memory.</p>",
+        "proof": "Stress the writer queue and confirm memory stays bounded."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Autosave changes explosions",
+        "cause": "Particles are reinserted into the live grid to simplify saving.",
+        "fix": "Choose and document a full-state particle snapshot policy or explicitly accept reinsertion behavior."
+      },
+      {
+        "symptom": "World hash differs after load",
+        "cause": "A future-affecting field or cross-chunk transfer was omitted.",
+        "fix": "Compare the complete saved-state inventory at one tick boundary."
+      },
+      {
+        "symptom": "Memory spikes during slow disk writes",
+        "cause": "Multiple full snapshots are queued.",
+        "fix": "Bound active/pending snapshot ownership and coalesce obsolete autosaves."
+      }
+    ],
+    "episode": {
+      "hook": "Save during an explosion without moving a single particle to make saving easier.",
+      "beats": [
+        "Show the live blast",
+        "Explain mixed-tick duplication",
+        "Inventory future-affecting state",
+        "Clone at a boundary",
+        "Advance live state while inspecting the copy"
+      ],
+      "demo": "Capture the same blast before/after autosave and show unchanged particle trajectories.",
+      "recap": "Saving observes a coherent state; it should not secretly become a simulation action."
+    },
+    "sources": [
+      {
+        "label": "Rust Clone behavior",
+        "url": "https://doc.rust-lang.org/std/clone/trait.Clone.html"
+      },
+      {
+        "label": "Game saved-state inventory",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "77": {
+    "outcome": "Simulate crashes at save stages and always recover a complete old or complete new generation.",
+    "why": "A single writer prevents competing writes, but a crash can stop it between any two operations. The loader needs a commit rule that identifies a complete world rather than picking whichever region files happen to be newest.",
+    "sections": [
+      {
+        "title": "Find the multi-file failure",
+        "html": "<p>Suppose the world has regions A and B plus an index. Replacing A successfully and crashing before B leaves new A with old B. Per-file rename did its job, but the world transaction failed. A single writer serializes the operations; it does not combine them into one indivisible operation.</p><p>Use immutable generation-specific files or directories. Write all new payloads under generation N+1 without overwriting the committed N. The new manifest names exactly which immutable files form the new world. Do not ask the loader to guess from timestamps.</p>"
+      },
+      {
+        "title": "Commit only the reference to complete data",
+        "html": "<p>The logical protocol is prepare payloads, verify/sync required data, write a manifest referencing those payloads, then publish the commit reference. Before commitment, load generation N. After commitment, load N+1 only if its validated files are complete. Retain N until the new state is known recoverable.</p><p>This is a design protocol, not a claim that one std::fs call provides power-loss durability everywhere. File synchronization, directory metadata synchronization and platform rename behavior must be checked on supported filesystems. A crash-recovery simulation proves logical ordering; real fault testing validates the implementation.</p>"
+      },
+      {
+        "title": "Validate the manifest as untrusted input",
+        "html": "<p>A manifest needs a generation ID, format/generator identity and bounded region entries with integrity metadata. Validate entry count and paths; entries must resolve inside the world’s own save directory. Reject missing, truncated or mismatched payloads. If the newest committed candidate is invalid, use the explicit previous committed generation policy.</p><p>Avoid inventing a sophisticated recovery scheme before this two-generation model works. Keep errors visible and preserve both candidates until recovery is understood. Automatic cleanup must never delete the sole coherent generation because the newest directory merely exists.</p>"
+      },
+      {
+        "title": "Make failure injection a normal test input",
+        "html": "<p>The worked model separates payload-written from committed. It deliberately does not touch the filesystem, allowing every stopping stage to be tested instantly and deterministically. Extend it with checksums and two region IDs, then connect the same state machine to actual writer operations.</p><p>Inject failures after each region write, after manifest write and before/after commit publication. A successful normal save is only one path through this state machine. Record the selected generation and complete world hash after every recovery case.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_077.rs, then run cargo run --example lesson_077 from game/.",
+      "language": "rust",
+      "code": "#[derive(Default)]\nstruct Store { committed: u64, complete: Vec<u64> }\nfn recover(store: &Store) -> Option<u64> {\n    store.complete.iter().copied().find(|id| *id==store.committed)\n}\nfn save_model(crash_after: u8) -> Store {\n    let mut s=Store {committed:1,complete:vec![1]};\n    if crash_after==0 { return s; }\n    // All payloads and manifest for generation 2 now validate.\n    s.complete.push(2);\n    if crash_after==1 { return s; }\n    // Publish the commit reference only after completion.\n    s.committed=2;\n    s\n}\nfn main() {\n    assert_eq!(recover(&save_model(0)),Some(1));\n    assert_eq!(recover(&save_model(1)),Some(1));\n    assert_eq!(recover(&save_model(2)),Some(2));\n    println!(\"every interruption selects a complete generation\");\n}",
+      "explanation": [
+        "complete is the model’s validated-data set, not a directory-exists test.",
+        "The commit reference chooses one complete generation. An uncommitted new payload cannot accidentally become current.",
+        "This pure state-machine model is a logic test, not an implemented durable filesystem writer."
+      ],
+      "expected": "every interruption selects a complete generation"
+    },
+    "exercises": [
+      {
+        "title": "Interrupt the region writes",
+        "prompt": "Add two separate payload-written flags and crash after the first.",
+        "hint": "A generation is complete only if all referenced payloads validate.",
+        "solution": "<p>Keep committed=1 after only new A exists. Do not include generation 2 in complete until B and the new manifest are validated too.</p>",
+        "proof": "Recover returns generation 1 and its full original world hash."
+      },
+      {
+        "title": "Reject a corrupt commit target",
+        "prompt": "The commit reference names generation 2, but one payload checksum fails.",
+        "hint": "Directory existence is insufficient.",
+        "solution": "<p>Validation must reject generation 2. Under the approved recovery policy, select the retained previous committed generation 1 and report that recovery occurred.</p>",
+        "proof": "No mixture of region versions is loaded."
+      },
+      {
+        "title": "Explain a safe cleanup",
+        "prompt": "When may old generation 1 be deleted?",
+        "hint": "Think about crash windows and retained recovery policy.",
+        "solution": "<p>Only after generation 2 is durably committed and validated under the platform-specific writer protocol, and only if the retention policy still keeps the required recovery history.</p>",
+        "proof": "Fault-injection tests never leave zero coherent recoverable generations."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Some chunks revert after a crash",
+        "cause": "The loader mixes independently renamed region files.",
+        "fix": "Use a committed manifest selecting an entire coherent generation."
+      },
+      {
+        "symptom": "Newest directory is loaded although incomplete",
+        "cause": "Recency is used as a commit signal.",
+        "fix": "Separate generation creation from explicit commit publication."
+      },
+      {
+        "symptom": "Recovery deletes the only good world",
+        "cause": "Cleanup runs before new generation validation/durability.",
+        "fix": "Retain the prior committed state until the new protocol is fully complete."
+      }
+    ],
+    "episode": {
+      "hook": "Crash after writing one region and still recover the whole old world.",
+      "beats": [
+        "Break independent replacement",
+        "Name immutable generations",
+        "Move only the commit reference",
+        "Inject a crash at every stage",
+        "Explain logical versus filesystem durability"
+      ],
+      "demo": "Use a visible stage table showing the recovered generation at each injected crash.",
+      "recap": "The commit pointer follows complete data; it never promises completion in advance."
+    },
+    "sources": [
+      {
+        "label": "std filesystem rename",
+        "url": "https://doc.rust-lang.org/std/fs/fn.rename.html"
+      },
+      {
+        "label": "File synchronization",
+        "url": "https://doc.rust-lang.org/std/fs/struct.File.html#method.sync_all"
+      }
+    ]
+  },
+  "78": {
+    "outcome": "Load an old world using its original generator even when the current default generator changes.",
+    "why": "An unchanged chunk is usually regenerated rather than stored. That saves disk space only if the game remembers which generation rules originally produced it. Otherwise the edge of explored terrain can become a permanent seam after an update.",
+    "sections": [
+      {
+        "title": "Separate bytes from terrain identity",
+        "html": "<p>A format version explains how saved bytes are decoded. A generator version explains how absent terrain is produced from seed and position. The same format can store worlds created by several generators; the same generator can survive a storage format upgrade. Conflating them forces unrelated changes together.</p><p>Draw a world with saved chunk A and absent chunk B. Upgrade the default hill formula, then regenerate B with the new formula. A remains old terrain while B changes. The save loaded without a parse error, yet the world continuity promise was broken.</p>"
+      },
+      {
+        "title": "Dispatch from the world, not the application default",
+        "html": "<p>The world metadata owns generator_version. Opening the world selects its generator implementation, and all future unsaved chunks use that implementation. A new-world screen may default to the latest generator, but that default must not leak into an already loaded world.</p><p>Use a small version enum parsed from explicit IDs. Unsupported IDs return an error. Never map unknown IDs to latest; that replaces a helpful incompatibility message with silent geometry corruption.</p>"
+      },
+      {
+        "title": "Freeze released generation contracts",
+        "html": "<p>A generator contract includes seed interpretation, noise algorithm/version, biome thresholds, feature order and material placement details. Changing an indirect dependency can alter output even if your own function name remains v1. Pin dependencies and keep small expected-coordinate fixtures that detect changes.</p><p>Before first release the project may intentionally invalidate temporary worlds, with a clear message. After release either retain old implementations or design a deliberate migration. A migration must decide what happens at the seam between edited saved chunks and newly generated data; it cannot simply erase the player’s edits.</p>"
+      },
+      {
+        "title": "Test absence as well as saved data",
+        "html": "<p>Round-trip fixtures generally cover stored chunks. Add a fixture where one known chunk is deliberately absent, then load using the old generator and request it. Verify its terrain hash and shared border against the historical expectation. This tests the part of persistence that has no payload to decode.</p><p>The worked example uses tiny height functions so the difference is obvious. In the real world pass generator identity through worker requests too; an old-world background result must not be installed after switching to a new world.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_078.rs, then run cargo run --example lesson_078 from game/.",
+      "language": "rust",
+      "code": "#[derive(Clone, Copy)]\nenum Generator { V1, V2 }\nfn parse_version(id: u16) -> Result<Generator,&'static str> {\n    match id {1=>Ok(Generator::V1),2=>Ok(Generator::V2),_=>Err(\"unsupported generator\")}\n}\nfn height(version: Generator,x:i32) -> i32 {\n    match version {\n        Generator::V1 => 20+x.rem_euclid(4),\n        Generator::V2 => 40+x.rem_euclid(8),\n    }\n}\nfn main() {\n    let world_generator=parse_version(1).unwrap();\n    let new_default=Generator::V2;\n    assert_eq!(height(world_generator,64),20);\n    assert_eq!(height(new_default,64),40);\n    assert!(parse_version(99).is_err());\n    println!(\"old world keeps its generator; new worlds may use v2\");\n}",
+      "explanation": [
+        "These simple periodic heights isolate version dispatch; they are not the production noise algorithm.",
+        "The world retains V1 even when the application default is V2.",
+        "unwrap is confined to the controlled known-ID demo; real file parsing propagates the unsupported-version error."
+      ],
+      "expected": "old world keeps its generator; new worlds may use v2"
+    },
+    "exercises": [
+      {
+        "title": "Find the hidden seam",
+        "prompt": "A saved old chunk ends at height 20, while the adjacent regenerated chunk starts at 40. Which version should be checked?",
+        "hint": "Successful byte decoding does not settle generation.",
+        "solution": "<p>Check the world-owned generator version used for the absent chunk. The format can be correct while generator selection is wrong.</p>",
+        "proof": "Requesting the absent chunk uses the historical function."
+      },
+      {
+        "title": "Reject rather than guess",
+        "prompt": "Replace metadata with generator ID 99.",
+        "hint": "Latest is a new-world preference, not an error recovery policy.",
+        "solution": "<p>Return unsupported generator and preserve the world untouched. Ask for a compatible reader or migration rather than regenerating with V2.</p>",
+        "proof": "No chunks are generated or saved after the rejection."
+      },
+      {
+        "title": "Protect a released version",
+        "prompt": "A noise dependency update changes V1 output. What test should fail?",
+        "hint": "Use a golden coordinate/output fixture, not only same-run equality.",
+        "solution": "<p>Keep known seed/coordinate outputs or hashes from the released generator. Their mismatch detects algorithm drift even if two fresh runs agree with each other.</p>",
+        "proof": "Historical fixtures remain unchanged across unrelated updates."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Old worlds gain terrain seams",
+        "cause": "Default generator replaced the world-owned generator.",
+        "fix": "Dispatch from saved generator identity for every absent chunk."
+      },
+      {
+        "symptom": "Determinism tests pass but historical terrain changed",
+        "cause": "Only fresh-run comparisons exist.",
+        "fix": "Retain released generator output fixtures."
+      },
+      {
+        "symptom": "Unknown version opens with strange geometry",
+        "cause": "The loader silently maps unknown IDs to latest.",
+        "fix": "Reject unsupported versions before generation or mutation."
+      }
+    ],
+    "episode": {
+      "hook": "Upgrade the game without upgrading a player’s untouched hills.",
+      "beats": [
+        "Create one saved and one absent chunk",
+        "Change the latest generator",
+        "Dispatch from old-world metadata",
+        "Test an absent historical chunk",
+        "Reject unknown IDs"
+      ],
+      "demo": "Pan beyond the old saved boundary after changing the new-world default.",
+      "recap": "Format compatibility preserves readable bytes; generator compatibility preserves the world beyond them."
+    },
+    "sources": [
+      {
+        "label": "Game generator-version contract",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Rust enum dispatch",
+        "url": "https://doc.rust-lang.org/book/ch06-02-match.html"
+      }
+    ]
+  },
+  "79": {
+    "outcome": "Evict a changed chunk only after the exact saved revision has been acknowledged, without blocking camera movement.",
+    "why": "The early cache kept changed chunks forever because it could not safely discard them. With persistence available, eviction becomes a small protocol: dirty state, queued snapshot, acknowledged revision, then release of memory.",
+    "sections": [
+      {
+        "title": "Identify the stale-acknowledgement bug",
+        "html": "<p>A chunk is edited to revision 4 and queued for saving. Before the writer finishes, the player edits it again to revision 5. The writer reports revision 4 saved. If the cache merely sees “save finished” and drops the chunk, revision 5 is lost.</p><p>Attach a revision counter to the chunk and capture that revision with the queued payload. Acknowledgement clears dirty status only if the acknowledged revision equals the current live revision. A newer live revision still needs saving. Coordinate identity alone is not enough.</p>"
+      },
+      {
+        "title": "Treat eviction as a state transition",
+        "html": "<p>An unchanged regenerable chunk may be dropped immediately. A changed chunk becomes an eviction candidate, is snapshotted/queued, and stays resident until safe persistence is confirmed. Active chunks are protected from eviction. If the cache is over budget while writes are pending, apply the documented queue/memory fallback rather than discarding edits.</p><p>Use a resident-memory cap and an explicit accounting of pending snapshots. Otherwise the cache can appear bounded while the writer queue holds many extra cloned chunks. LRU means least recently used among eligible candidates, not blindly the oldest map entry.</p>"
+      },
+      {
+        "title": "Coordinate loading and cancellation",
+        "html": "<p>A camera can request a chunk and leave before the worker returns. Label each request with world epoch and chunk identity; install only results still belonging to the current world. Deduplicate outstanding requests so the same missing chunk does not spawn a new job every frame.</p><p>For changed chunks, load persisted data. For unchanged absent chunks, regenerate with the world’s generator version. Keep the per-cell active rectangle separate from resident status: loading a chunk does not mean simulating all of its cells.</p>"
+      },
+      {
+        "title": "Measure the whole panning pipeline",
+        "html": "<p>A useful stress run pans for thirty minutes while making periodic edits. Record resident chunk bytes, pending writer bytes, queue lengths and foreground frame spikes. A cache-size printout alone cannot prove the total memory bound.</p><p>The focused experiment below models revision acknowledgement, the most important correctness edge before integrating disk operations. Combine it with the bounded channels and committed writer already built. A failed write must leave the chunk dirty and available for retry or explicit error handling.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_079.rs, then run cargo run --example lesson_079 from game/.",
+      "language": "rust",
+      "code": "#[derive(Debug)]\nstruct Resident { revision:u64, saved_revision:u64, active:bool }\nimpl Resident {\n    fn dirty(&self)->bool {self.revision!=self.saved_revision}\n    fn acknowledge(&mut self,written:u64) {\n        if written==self.revision {self.saved_revision=written;}\n    }\n    fn may_evict(&self)->bool {!self.active && !self.dirty()}\n}\nfn main() {\n    let mut c=Resident {revision:4,saved_revision:3,active:false};\n    let queued=c.revision;\n    c.revision=5;\n    c.acknowledge(queued);\n    assert!(!c.may_evict());\n    c.acknowledge(5);\n    assert!(c.may_evict());\n    println!(\"stale acknowledgement cannot discard revision 5\");\n}",
+      "explanation": [
+        "The written revision describes a captured payload, not necessarily the current chunk.",
+        "An active chunk remains protected even after its current revision is saved.",
+        "A production revision counter needs an overflow policy; this short fixture isolates normal acknowledgement ordering."
+      ],
+      "expected": "stale acknowledgement cannot discard revision 5"
+    },
+    "exercises": [
+      {
+        "title": "Replay the race",
+        "prompt": "Queue revision 8, edit to 9, receive acknowledgement 8. Is eviction allowed?",
+        "hint": "Compare acknowledged and live revisions.",
+        "solution": "<p>No. The acknowledgement proves only revision 8 is persisted. Keep revision 9 dirty, retain its data and arrange a new save job.</p>",
+        "proof": "may_evict stays false."
+      },
+      {
+        "title": "Account for hidden memory",
+        "prompt": "Resident cache is 64 MB, but ten queued snapshots are 16 MB each. What is the actual problem?",
+        "hint": "The cache counter excludes owned copies in the queue.",
+        "solution": "<p>At least 224 MB is owned by these two components before other memory. Bound snapshot queues and report their bytes; a 64 MB resident cap alone is not a total-memory guarantee.</p>",
+        "proof": "A stress trace includes both resident and queued memory."
+      },
+      {
+        "title": "Handle a failed write",
+        "prompt": "The writer returns disk-full for the newest snapshot.",
+        "hint": "A failed write is not a save acknowledgement.",
+        "solution": "<p>Keep the chunk dirty and resident or safely retained by the pending snapshot policy. Report the error and pause/retry according to the approved memory policy, never pretend eviction is safe.</p>",
+        "proof": "The edit remains recoverable after the simulated failure."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Recent edits disappear after panning",
+        "cause": "A stale write acknowledgement clears newer dirty state.",
+        "fix": "Compare snapshot revision with live revision before clearing or evicting."
+      },
+      {
+        "symptom": "Memory grows although the cache cap holds",
+        "cause": "Background queues own additional snapshots or duplicate requests.",
+        "fix": "Bound and account for all queues, not only the resident map."
+      },
+      {
+        "symptom": "Panning stutters on every eviction",
+        "cause": "Disk encoding/write happens on the frame path.",
+        "fix": "Capture bounded work and hand it to the single writer without blocking main-loop queue operations."
+      }
+    ],
+    "episode": {
+      "hook": "Make an edit while its previous revision is saving, then pan away without losing it.",
+      "beats": [
+        "Reproduce stale acknowledgement",
+        "Add revision identity",
+        "Separate candidate from safe eviction",
+        "Bound queue ownership",
+        "Measure an edited long pan"
+      ],
+      "demo": "Show current/saved revision and resident/pending memory while a delayed writer catches up.",
+      "recap": "Eviction is safe only when the state you are discarding is the state persistence actually acknowledged."
+    },
+    "sources": [
+      {
+        "label": "Channels and owned messages",
+        "url": "https://doc.rust-lang.org/book/ch16-02-message-passing.html"
+      },
+      {
+        "label": "Game cache/persistence requirements",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "80": {
+    "outcome": "Produce a reproducible M4 acceptance report for generation, rest, streaming, memory and exact reload.",
+    "why": "Finishing the procedural world means its parts work together under repetition. A single pleasant pan or successful load cannot reveal every boundary, activation or persistence failure.",
+    "sections": [
+      {
+        "title": "Turn milestone words into fixtures",
+        "html": "<p>The M4 gate promises long seeded exploration, rest and memory tests, and exact save/load. Give each promise a named fixture with seed, generator version, starting camera, input sequence and measured duration. Use the same fixtures after future changes so “still works” means comparable evidence.</p><p>For the rest fixture, generate 1000 chunks across the v1 biomes, run 600 ticks and count moved cells under the documented tolerance. Keep temperature/moisture initialization compatible with the generator so normal startup does not create avoidable motion.</p>"
+      },
+      {
+        "title": "Separate logical clocks from wall-clock measurements",
+        "html": "<p>Simulation fixtures should inject ticks, not sleep for ten seconds hoping the scheduler happened to run the right count. Performance tests measure real elapsed time in optimized builds; behavior tests control world state and update count. They answer different questions.</p><p>Record hardware model, build profile, active-cell count, display size and thread count with timings. A faster developer machine cannot certify the floor machine. Include combined frame work, not only mean cell-update duration.</p>"
+      },
+      {
+        "title": "Use exact comparisons only where promised",
+        "html": "<p>A save round-trip compares the agreed complete state, including the chosen particle/group and scheduler policy. A compressed byte stream can differ while decoded world state is equal; comparing only file bytes is not the semantic test. Conversely, comparing only visible colours can miss temperatures and cooldowns that affect the next tick.</p><p>For long-pan memory, track high-water marks and queue bytes in addition to ending memory. A run may finish under the cap after a large transient spike. Capture the largest observed resident/pending state and foreground stall, with a reason for each exception.</p>"
+      },
+      {
+        "title": "Write a report another person can reproduce",
+        "html": "<p>Use a small table with fixture, command, expected result, observed result, hardware and pass/fail. Attach logs and one short clip showing a cross-border edit followed by save/load. State unresolved visual approvals separately; M4 is not M5 art sign-off.</p><p>The worked command sequence below assumes the named fixtures you built in earlier lessons. Replace filter names with the actual test names once and record them; do not claim they exist merely because the example mentions them. A failed condition becomes concrete remaining work rather than a green checkbox.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Follow this worked procedure inside the learner-created game package.",
+      "language": "sh",
+      "code": "# Run from game/ after adding the named fixtures in earlier lessons.\ncargo fmt --check\ncargo check\ncargo test --release rest_generated_world\ncargo test --release save_round_trip\ncargo test --release negative_chunk_boundaries\ncargo test --release stale_save_ack\ncargo run --release\n\n# During the recorded manual run:\n# 1. Use the documented fixed seed and generator version.\n# 2. Pan across all v1 biomes and edit across a chunk boundary.\n# 3. Save; reload; compare complete agreed state hashes.\n# 4. Record resident AND queued memory throughout the stress run.\n# 5. Preserve hardware, timings and observed failures in the M4 report.",
+      "explanation": [
+        "Test filters select real test names; no tests is not a passing fixture. Check the runner reports the expected nonzero count.",
+        "Use --release for the measured stress run, while keeping behavior tests deterministic and headless.",
+        "The manual part records actual observations. Comments in a command block are not proof that those observations occurred."
+      ],
+      "expected": "A report with actual fixture counts, rest tolerance, exact state comparison, memory high-water marks and unresolved failures—not just successful command exit codes."
+    },
+    "exercises": [
+      {
+        "title": "Catch a false green run",
+        "prompt": "cargo test rest_generated_world reports zero tests. Did the rest gate pass?",
+        "hint": "Read the test count as well as the exit code.",
+        "solution": "<p>No. The filter did not execute the intended fixture. Fix the name/module path and require a nonzero expected count before accepting the result.</p>",
+        "proof": "The report records the exact executed fixture count."
+      },
+      {
+        "title": "Choose the right hash",
+        "prompt": "A screenshot matches after load, but the water temperature differs.",
+        "hint": "Future state depends on more than current colour.",
+        "solution": "<p>The semantic world hash must include temperature and all agreed future-affecting fields. The round-trip fails even though the screenshot looks right.</p>",
+        "proof": "The comparison reports the differing field or complete-state mismatch."
+      },
+      {
+        "title": "Report a spike honestly",
+        "prompt": "The cache ends at 60 MB but peaks at 400 MB during panning.",
+        "hint": "A final sample is not a high-water measurement.",
+        "solution": "<p>Record the 400 MB peak and queue contribution. The bounded-memory gate fails or requires an explicitly approved higher bound; the final value cannot hide the spike.</p>",
+        "proof": "The report includes the maximum observed total, not just the ending cache."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Rest gate passes on one seed only",
+        "cause": "The fixture does not cover the required generated sample.",
+        "fix": "Record and execute the full chunk/biome set."
+      },
+      {
+        "symptom": "Reload looks right but later diverges",
+        "cause": "The state comparison omits future-affecting fields.",
+        "fix": "Hash and compare the complete agreed inventory and subsequent fixed-input steps."
+      },
+      {
+        "symptom": "Performance report cannot be reproduced",
+        "cause": "Seed, hardware, profile or input path is missing.",
+        "fix": "Store the full fixture identity and commands with the observed output."
+      }
+    ],
+    "episode": {
+      "hook": "Can somebody else reproduce your claim that the world is persistent and bounded?",
+      "beats": [
+        "Translate exit criteria into fixtures",
+        "Separate behavior and timing",
+        "Expose zero-test false positives",
+        "Measure high-water memory",
+        "Publish a factual gate report"
+      ],
+      "demo": "Show a cross-border edit surviving reload while the evidence table updates.",
+      "recap": "A milestone ends with reproducible evidence, including failures, not just a convincing demonstration."
+    },
+    "sources": [
+      {
+        "label": "Rust test execution",
+        "url": "https://doc.rust-lang.org/book/ch11-02-running-tests.html"
+      },
+      {
+        "label": "Cargo build profiles",
+        "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+      }
+    ]
+  },
+  "81": {
+    "outcome": "Display an art-pixel image with nearest filtering while preserving four physical pixels per simulation cell.",
+    "why": "The first window drew four logical units per cell at low DPI. A Retina window can map those units to more physical pixels. The finished art style fixes the physical grain, so the renderer must explicitly connect simulation cells, art pixels and display pixels.",
+    "sections": [
+      {
+        "title": "Derive the three coordinate spaces",
+        "html": "<p>One cell occupies two art pixels across. One art pixel occupies two physical display pixels across. Therefore a cell is four physical pixels wide. These multipliers describe units, not zoom preferences. A larger framebuffer should show more cells rather than magnifying the same cell array.</p><p>macroquad screen_width and screen_height are DPI-adjusted drawing dimensions. Multiplying by screen_dpi_scale recovers the corresponding physical extent. Perform budget and integer-pixel calculations in physical units, then convert destination coordinates back into drawing units when calling the API.</p>"
+      },
+      {
+        "title": "Render details at the art resolution",
+        "html": "<p>A one-art-pixel crest rim is half a simulation cell high. Rendering one colour pixel per cell cannot express it. Build an art image with two-by-two art pixels per cell, draw the flat material fill, then place the rim inside the occupied top surface. Upload that image to a texture.</p><p>Set nearest filtering explicitly. Linear filtering blends neighbouring colours during presentation, softening hard silhouette edges. Nearest presentation preserves the chosen art values; fractional destination alignment can still create uneven pixel widths, so align the physical viewport and round dimensions as the design specifies.</p>"
+      },
+      {
+        "title": "Separate the experiment from the production viewport",
+        "html": "<p>The complete example draws a 160 by 90 art image at exactly two physical pixels per art pixel. It centres that small image in the window so the unit conversion is easy to inspect. It does not claim to fill the final game viewport.</p><p>In the production path choose an art target from the budget-capped physical view rectangle. Its width/height are half that rectangle. Keep the border panel outside the world. Rebuild images/textures when the required size changes, not each frame. Update pixel content through the existing texture rather than repeatedly allocating GPU resources.</p>"
+      },
+      {
+        "title": "Verify output with measurement, not appearance alone",
+        "html": "<p>A crisp-looking image can still use the wrong physical scale. Test low-DPI and high-DPI windows, then inspect a known two-art-pixel cell footprint in a captured framebuffer or reliable pixel measurement. Also verify mouse conversion against the centred physical rectangle.</p><p>Record odd-size behavior and platform DPI reporting. A UI text scale may change independently, but that must not silently change the world’s cell footprint. The experiment uses a static image to isolate rendering; integrate simulation uploads only after this unit contract is verified.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_081.rs, then run cargo run --example lesson_081 from game/.",
+      "language": "rust",
+      "code": "use macroquad::prelude::*;\nfn conf()->Conf { Conf {window_title:\"Art pixels\".into(),high_dpi:true,\n    window_width:800,window_height:500,sample_count:1,..Default::default()} }\n#[macroquad::main(conf)]\nasync fn main() {\n    let mut image=Image::gen_image_color(160,90,Color::from_rgba(15,26,51,255));\n    for y in 60..90 { for x in 0..160 {\n        image.set_pixel(x,y,Color::from_rgba(29,48,80,255));\n    }}\n    image.set_pixel(80,58,Color::from_rgba(226,182,121,255));\n    image.set_pixel(81,58,Color::from_rgba(226,182,121,255));\n    image.set_pixel(80,59,Color::from_rgba(226,182,121,255));\n    image.set_pixel(81,59,Color::from_rgba(226,182,121,255));\n    let texture=Texture2D::from_image(&image);\n    texture.set_filter(FilterMode::Nearest);\n    loop {\n        clear_background(BLACK);\n        let dpi=screen_dpi_scale();\n        let physical_w=(screen_width()*dpi).round();\n        let physical_h=(screen_height()*dpi).round();\n        let x=((physical_w-320.0)/2.0).floor()/dpi;\n        let y=((physical_h-180.0)/2.0).floor()/dpi;\n        draw_texture_ex(&texture,x,y,WHITE,DrawTextureParams {\n            dest_size:Some(vec2(320.0/dpi,180.0/dpi)),..Default::default()\n        });\n        next_frame().await;\n    }\n}",
+      "explanation": [
+        "The sand patch is exactly two-by-two art pixels, representing one simulation cell.",
+        "Destination size is 320 by 180 physical pixels, divided by DPI for the drawing API.",
+        "This static teaching texture avoids per-frame allocation; the live renderer updates an existing texture/image."
+      ],
+      "expected": "A small crisp image centred in the window; the sand cell measures four-by-four physical pixels on supported DPI configurations."
+    },
+    "exercises": [
+      {
+        "title": "Calculate a Retina size",
+        "prompt": "DPI scale is 2. What logical drawing width presents one four-physical-pixel cell?",
+        "hint": "Divide physical units by the drawing scale.",
+        "solution": "<p>Two logical drawing units correspond to four physical pixels at scale 2. An art pixel occupies one logical unit in this case.</p>",
+        "proof": "A captured known cell has a four-pixel physical footprint."
+      },
+      {
+        "title": "Break filtering deliberately",
+        "prompt": "Switch Nearest to Linear and compare a magnified edge.",
+        "hint": "Inspect blended colours around the silhouette.",
+        "solution": "<p>Linear presentation introduces interpolated colours at scaling boundaries. Restore Nearest, integer physical alignment and exact dimensions for the game look.</p>",
+        "proof": "The restored edge has no interpolated colour fringe."
+      },
+      {
+        "title": "Avoid resource churn",
+        "prompt": "Why should Texture2D::from_image not run every frame for a stable-size target?",
+        "hint": "Separate resource allocation from content update.",
+        "solution": "<p>Allocate once and update its contents as needed. Reallocate only when dimensions or graphics resources require it; repeated allocation creates avoidable CPU/GPU work.</p>",
+        "proof": "A frame profile shows no steady-state texture recreation."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Cells become eight physical pixels on Retina",
+        "cause": "Logical units were mistaken for physical pixels.",
+        "fix": "Use screen_dpi_scale and convert the physical destination to drawing units."
+      },
+      {
+        "symptom": "Edges are blurry",
+        "cause": "Texture uses linear filtering or fractional presentation.",
+        "fix": "Use nearest filtering and align the physical rectangle."
+      },
+      {
+        "symptom": "GPU work spikes during every redraw",
+        "cause": "Textures are recreated inside the loop.",
+        "fix": "Retain resources and update data, reallocating only on size/resource changes."
+      }
+    ],
+    "episode": {
+      "hook": "A Retina display doubles your pixels unless you distinguish drawing units from physical pixels.",
+      "beats": [
+        "Count cell/art/physical units",
+        "Show low-DPI versus Retina mapping",
+        "Upload a tiny static buffer",
+        "Present with nearest filtering",
+        "Measure a single cell footprint"
+      ],
+      "demo": "Show a labelled two-by-two art cell expanding to four-by-four physical pixels.",
+      "recap": "DPI conversion belongs at the rendering boundary; simulation cell size stays fixed."
+    },
+    "sources": [
+      {
+        "label": "macroquad window units",
+        "url": "https://docs.rs/macroquad/0.4.16/src/macroquad/window.rs.html"
+      },
+      {
+        "label": "Texture2D filtering",
+        "url": "https://docs.rs/macroquad/0.4.16/macroquad/texture/struct.Texture2D.html"
+      }
+    ]
+  },
+  "82": {
+    "outcome": "Build a deterministic row-by-row sky ramp and place hard-edged celestial shapes without changing terrain.",
+    "why": "Atmosphere should come from colour, light discs and weather rather than noisy terrain detail. The sky is also an opportunity to separate view composition from world geometry so camera movement does not reshape the land.",
+    "sections": [
+      {
+        "title": "Make the gradient a calculation you can inspect",
+        "html": "<p>Choose two approved RGB anchors and a span in art rows. For a row inside the span compute its fractional distance, then interpolate each channel. Clamp above/below the ramp rather than extrapolating into unexpected colours. A three-key dusk ramp performs the same operation in two segments.</p><p>Use exact computed colours with no palette snapping or dithering. The examples’ named palette anchors come from the art spec; intermediate time-of-day keys still need approval. A smooth ramp does not require blur: every row can be a solid exact colour while geometry remains pixel-edged.</p>"
+      },
+      {
+        "title": "Rasterize a disc without softened edges",
+        "html": "<p>A pixel belongs to a flat disc when its squared distance from the centre is no larger than the squared radius. This integer membership test draws hard boundaries. A halo ring is another flat disc behind it, not an opacity falloff. A crescent subtracts an offset disc from the lit disc within the approved construction.</p><p>Place these shapes in the view’s sky composition while allowing actual terrain to occlude them. Do not teleport the moon each time a ridge approaches it. The reference composition target describes a chosen camera view, not a rule overriding free-camera geometry.</p>"
+      },
+      {
+        "title": "Decide where sky can exist",
+        "html": "<p>Air in a cave is not automatically open sky. Use the approved exposure/background treatment to keep the sky behind exterior air and the underground treatment behind sheltered cavities. This distinction must remain visible when the player excavates and builds.</p><p>Stars are sparse single art pixels in eligible night sky, with the explicitly allowed dusk-star exception. Do not fill every empty cell with stars. Sun/moon reflections, bloom, god rays and soft glow remain prohibited. Adding a weather cloud layer requires the separate approved treatment, not a new decorative terrain range.</p>"
+      },
+      {
+        "title": "Connect time after the still frame works",
+        "html": "<p>First freeze world time and render the same frame repeatedly. Record camera, palette keys and visual time so comparisons are reproducible. Then interpolate approved sky keys using world_tick and position. Celestial paths/phases need explicit keys and occlusion tests at dawn, dusk and short/tall views.</p><p>The following terminal helper isolates ramp math and disc membership. Integrate it into your art image loop only after the endpoints and boundary pixels are correct. Floating point here is a colour interpolation tool, not a replacement for the integer world/calendar state.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_082.rs, then run cargo run --example lesson_082 from game/.",
+      "language": "rust",
+      "code": "fn ramp(top:[u8;3],bottom:[u8;3],row:u32,span:u32)->[u8;3] {\n    assert!(span>0);\n    let t=(row as f32/span as f32).clamp(0.0,1.0);\n    std::array::from_fn(|i| (top[i] as f32+(bottom[i] as f32-top[i] as f32)*t).round() as u8)\n}\nfn in_disc(x:i32,y:i32,cx:i32,cy:i32,r:i32)->bool {\n    let dx=i64::from(x)-i64::from(cx); let dy=i64::from(y)-i64::from(cy);\n    dx*dx+dy*dy<=i64::from(r)*i64::from(r)\n}\nfn main() {\n    let top=[15,26,51]; let horizon=[51,80,122];\n    assert_eq!(ramp(top,horizon,0,400),top);\n    assert_eq!(ramp(top,horizon,400,400),horizon);\n    assert_eq!(ramp(top,horizon,900,400),horizon);\n    assert!(in_disc(3,4,0,0,5));\n    assert!(!in_disc(4,4,0,0,5));\n    println!(\"sky endpoints and hard disc boundary verified\");\n}",
+      "explanation": [
+        "The span must be positive; treating it as configuration with a validated minimum is better than hiding divide-by-zero behavior.",
+        "The helper clamps beyond the horizon endpoint, so lower rows stay at that approved endpoint.",
+        "Disc coordinates/radius in the actual art target are small; choose arithmetic bounds appropriate to production coordinate ranges."
+      ],
+      "expected": "sky endpoints and hard disc boundary verified"
+    },
+    "exercises": [
+      {
+        "title": "Predict a middle row",
+        "prompt": "Interpolate halfway between channel values 20 and 100.",
+        "hint": "Halfway means t=0.5.",
+        "solution": "<p>The channel is 60. Calculate all three channels independently; do not snap the result to a fixed palette.</p>",
+        "proof": "An assertion for the midpoint matches the helper."
+      },
+      {
+        "title": "Occlude the moon",
+        "prompt": "A ridge rises across the moon while panning. What should change?",
+        "hint": "Separate world geometry from celestial composition.",
+        "solution": "<p>The ridge occludes the moon where appropriate. Keep the approved moon path; do not move the terrain or moon to protect a reference composition.</p>",
+        "proof": "A pan capture shows natural overlap without shape teleportation."
+      },
+      {
+        "title": "Choose the cave background",
+        "prompt": "An empty underground room is drawn with the daylight sky. Which condition is missing?",
+        "hint": "Air material alone does not prove sky access.",
+        "solution": "<p>The background renderer must distinguish sheltered cavities from exterior sky-visible air according to the approved treatment. An underground view should not reveal stars through rock.</p>",
+        "proof": "The same world geometry renders a separate interior background."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Gradient bands appear after quantization",
+        "cause": "Computed colours were snapped to a fixed palette.",
+        "fix": "Use the per-row calculated colour without palette snapping."
+      },
+      {
+        "symptom": "Sun edge is softened",
+        "cause": "Canvas/graphics circle antialiasing or filtering was used.",
+        "fix": "Rasterize membership at the art grid and present nearest."
+      },
+      {
+        "symptom": "Night sky appears inside a cave",
+        "cause": "Background choice checks only Material::Air.",
+        "fix": "Use the exterior/sheltered background rule rather than treating all air alike."
+      }
+    ],
+    "episode": {
+      "hook": "Create atmosphere with a row of colour and a hard disc, not a blur filter.",
+      "beats": [
+        "Derive channel interpolation",
+        "Check endpoints and clamp",
+        "Rasterize a flat disc",
+        "Occlude with real terrain",
+        "Freeze time for reproducible captures"
+      ],
+      "demo": "Render dusk, night and an underground room from recorded fixtures.",
+      "recap": "The sky changes mood; it must not rewrite terrain or ignore shelter."
+    },
+    "sources": [
+      {
+        "label": "Approved sky and light rules",
+        "url": "../docs/superpowers/specs/2026-11-06-art-style.md"
+      },
+      {
+        "label": "Image pixel writing",
+        "url": "https://docs.rs/macroquad/0.4.16/macroquad/texture/struct.Image.html"
+      }
+    ]
+  },
+  "83": {
+    "outcome": "Build an actual-scale material contact sheet where required states remain distinguishable in day and night scenes.",
+    "why": "The game asks viewers to notice why something burns, freezes, rots or dries. If those states look the same, the simulation can be internally correct while its cause-and-effect story is invisible.",
+    "sections": [
+      {
+        "title": "Treat colour as an interface to state",
+        "html": "<p>A material ID supplies a base colour, while moisture, temperature, burning progress and variants may select approved changes. Use one coherent lookup rather than sprinkling colour arithmetic through simulation rules. Rendering reads state; changing a pixel colour must not change whether the material is wet.</p><p>Begin with the 21 launch material anchors from the current design. Then identify required distinctions: water versus ice, oil versus water, stone versus basalt, wood versus rotten wood, metal versus rust and smoke versus steam. A proposed palette is not approved simply because a function can return it.</p>"
+      },
+      {
+        "title": "Compare pairs at the size players see",
+        "html": "<p>Large swatches hide tiny-cell readability failures. Make two displays: enlarged labelled swatches for discussing colour choices, and four-physical-pixel cells in a realistic terrain context. Inspect them under day, dusk, night and rain conditions.</p><p>Do not use random per-cell speckle as a shortcut. The art direction calls for flat materials or coherent ramps/variants. A wet-to-dry soil patch should lighten in an organized way that reveals change, while neighbouring unchanged soil provides a control. Avoid decorative texture that masks the actual state signal.</p>"
+      },
+      {
+        "title": "Separate state appearance from event evidence",
+        "html": "<p>A static rust-coloured patch shows one state, but the required reaction also needs a visible transition within its deadline. Capture before and after with identical camera and lighting. For fire/lava and flashes, propose explicit brightness/saturation exceptions and check them against the no-bloom/no-reflection rules.</p><p>The contact sheet is not a substitute for reaction clips. It is a diagnostic that can tell us whether the reaction would remain unreadable even if the physics completed instantly. Add labels outside the game frame rather than adding permanent debug text to the release HUD.</p>"
+      },
+      {
+        "title": "Make approval and accessibility concrete",
+        "html": "<p>Ask reviewers to identify the material/state without looking at its label. Record confusion pairs and revise only those until the complete scene remains calm and legible. Also inspect a grayscale or reduced-colour view as a supplementary diagnostic; it does not prove accessibility but can reveal reliance on barely distinguishable hue.</p><p>The helper below demonstrates deterministic wetness interpolation from a base dry to base wet colour. It clamps moisture to the supported range. The exact RGB choices are teaching values; the final scene-dependent keys must be approved, and temperature indicators must not accidentally introduce forbidden glow.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_083.rs, then run cargo run --example lesson_083 from game/.",
+      "language": "rust",
+      "code": "fn soil_colour(moisture:u8)->[u8;3] {\n    let dry=[121_i32,100,81]; let wet=[76_i32,69,59];\n    let m=i32::from(moisture.min(100));\n    std::array::from_fn(|i| (dry[i]+(wet[i]-dry[i])*m/100) as u8)\n}\nfn main() {\n    assert_eq!(soil_colour(0),[121,100,81]);\n    assert_eq!(soil_colour(100),[76,69,59]);\n    for m in [0,25,50,75,100] {println!(\"moisture {m}: {:?}\",soil_colour(m));}\n    assert_eq!(soil_colour(200),soil_colour(100));\n}",
+      "explanation": [
+        "The simulation stores moisture; this function only selects a display colour from it.",
+        "Clamping prevents an invalid renderer input from extrapolating beyond the chosen wet endpoint.",
+        "Use the contact sheet to decide whether intermediate keys actually communicate change at gameplay scale."
+      ],
+      "expected": "Five progressively darker soil colours for increasing moisture, with dry/wet endpoints exactly as asserted."
+    },
+    "exercises": [
+      {
+        "title": "Separate rendering from physics",
+        "prompt": "Change the wet-soil colour to blue for a diagnostic. Should ignition behavior change?",
+        "hint": "Follow which state the fire rule reads.",
+        "solution": "<p>No. Fire reads material/moisture/temperature state, not the renderer’s RGB result. If behaviour changes, a simulation rule is incorrectly coupled to appearance.</p>",
+        "proof": "The same physics fixture hash is produced with both display palettes."
+      },
+      {
+        "title": "Find a confusion pair",
+        "prompt": "At native cell size water and ice become indistinguishable at night. What should be compared first?",
+        "hint": "Keep camera and lighting fixed while changing one variable.",
+        "solution": "<p>Build labelled and unlabelled paired samples, compare approved colour/value variants, and retest the freeze transition in context. Do not add sparkles or bloom merely to force distinction.</p>",
+        "proof": "A reviewer identifies the pair and sees the transition without a label."
+      },
+      {
+        "title": "Record a state transition",
+        "prompt": "Prepare proof that drying is visible rather than merely a counter changing.",
+        "hint": "Use an unchanged control patch.",
+        "solution": "<p>Capture wet-to-dry soil under fixed lighting and alongside a constant-moisture control. Record the state values and the visible colour change within the specified world-time deadline.</p>",
+        "proof": "Both the counter and on-screen difference are documented."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Every material looks like grey noise",
+        "cause": "Independent per-cell variation overwhelms identity.",
+        "fix": "Use coherent state-driven colours and remove speckle."
+      },
+      {
+        "symptom": "Palette works only when enlarged",
+        "cause": "Swatch review ignored four-pixel gameplay cells.",
+        "fix": "Include native-scale, scene-context comparisons."
+      },
+      {
+        "symptom": "Drying disappears at sunset",
+        "cause": "Lighting changes mask the material transition.",
+        "fix": "Test with fixed lighting first, then approve the state signal under time-of-day variation."
+      }
+    ],
+    "episode": {
+      "hook": "Can a viewer tell wet wood from dry wood before you explain the fire?",
+      "beats": [
+        "Show an unlabelled material pair",
+        "Separate state from RGB",
+        "Build enlarged and native sheets",
+        "Freeze lighting for before/after",
+        "Review the required reaction clips"
+      ],
+      "demo": "Present contact sheets at actual scale, then one visible wet-to-dry transition.",
+      "recap": "A material colour is part of the player’s understanding of the world, not decorative noise."
+    },
+    "sources": [
+      {
+        "label": "Palette/state readability requirements",
+        "url": "../docs/superpowers/specs/2026-11-06-art-style.md"
+      },
+      {
+        "label": "Material base colours",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "84": {
+    "outcome": "Render rain that respects shelter while changing graphics density leaves precipitation physics unchanged.",
+    "why": "The weather simulation already applies rain at the surface. Decorative streaks should help the viewer read that weather; they must not add a second source of water or appear inside a supposedly dry shelter.",
+    "sections": [
+      {
+        "title": "Draw the causal boundary first",
+        "html": "<p>Use a debug cross-section with a roof and an open hillside. Mark the exposed surface for each column. Rain simulation uses its approved surface rule, while visual streaks are clipped before they pass into sheltered space. The two systems share world meaning but do different work.</p><p>A renderer may draw 300 or 1400 streaks depending on graphics settings. The same tick/input sequence must still produce the same wetness and runoff. If lowering visual quality dries the hillside, the simulation is counting decorative particles as real rain.</p>"
+      },
+      {
+        "title": "Freeze a deterministic visual frame",
+        "html": "<p>For visual comparisons use a separate deterministic decoration seed/time. Generate candidate streak positions, rasterize short diagonal lines in art pixels and clip them against the view and shelter. The static frame in this experiment needs no animation loop to prove the clipping condition.</p><p>Keep decoration randomness separate from physics randomness. Adding one extra streak should not consume a random number that changes the next fire or growth decision. Use named independent streams or coordinate hashes with distinct purpose tags.</p>"
+      },
+      {
+        "title": "Choose layering without breaking pixel rules",
+        "html": "<p>The approved reference has far and near streak tones; near streaks are composited last. Opacity blending of hard art pixels is allowed by the rain recipe; spatial blur is not. Clouds, snow and fog treatments remain proposals until approved. Fog should affect visibility coherently without softening the actual geometry boundaries.</p><p>Rendered sea ripples also stay cosmetic in v1. They may colour occupied surface-water pixels but must not create water into air or carry sand unless a later mechanical erosion rule explicitly does so. Keep every weather visual’s read-only relationship to simulation state visible in the code.</p>"
+      },
+      {
+        "title": "Test the shelter edge and quality switch",
+        "html": "<p>A single streak can cross several columns, so clipping only its starting point is insufficient. Test every rasterized art pixel against the surface/shelter at that column. At the roof edge, exposed pixels outside the roof can continue while protected pixels beneath it are omitted.</p><p>The helper below reports which pixels from a diagonal candidate survive a small shelter mask. Integrate it with your integer line rasterizer, not an antialiased graphics stroke. Then replay the same rain simulation with two decorative densities and compare world hashes.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_084.rs, then run cargo run --example lesson_084 from game/.",
+      "language": "rust",
+      "code": "fn visible_rain(x:i32,y:i32,surface:&[i32])->bool {\n    x>=0 && (x as usize)<surface.len() && y>=0 && y<surface[x as usize]\n}\nfn main() {\n    // Columns 2 and 3 have a roof at row 4; others have ground at row 10.\n    let surface=[10,10,4,4,10,10];\n    assert!(visible_rain(2,3,&surface));\n    assert!(!visible_rain(2,4,&surface));\n    assert!(!visible_rain(2,8,&surface));\n    assert!(visible_rain(4,8,&surface));\n    assert!(!visible_rain(-1,0,&surface));\n    for (x,y) in [(4,2),(3,4),(2,6),(1,8)] {\n        println!(\"pixel ({x},{y}) visible={}\",visible_rain(x,y,&surface));\n    }\n}",
+      "explanation": [
+        "These rows increase downward in the art mask; derive them from world altitude with the approved conversion.",
+        "Each candidate pixel is checked, so a streak cannot pass through a roof just because its start was exposed.",
+        "The function returns visibility only. It never changes moisture or creates Material::Water."
+      ],
+      "expected": "The candidate pixel above open ground survives; pixels at or beneath the roof are rejected."
+    },
+    "exercises": [
+      {
+        "title": "Lower the graphics quality",
+        "prompt": "Replay a rain fixture with 100 and 1400 decorative streaks. Which state should match?",
+        "hint": "Compare the complete simulated state, not the rendered frame.",
+        "solution": "<p>World material/moisture/temperature/counters match for identical simulation inputs. Only the image changes. Independent decoration RNG prevents physics-stream consumption differences.</p>",
+        "proof": "The world hashes match while image hashes differ."
+      },
+      {
+        "title": "Fix the start-only clip",
+        "prompt": "A streak begins above a roof but ends beneath it.",
+        "hint": "A valid starting pixel does not validate the full segment.",
+        "solution": "<p>Rasterize its path and check visibility at each art pixel, stopping/omitting pixels when they enter shelter according to the approved mask.</p>",
+        "proof": "No rain pixels appear below the roof in the fixture."
+      },
+      {
+        "title": "Keep waves cosmetic",
+        "prompt": "A water ripple colours one air pixel above the true surface.",
+        "hint": "The art spec forbids decorative water from changing the apparent collision boundary.",
+        "solution": "<p>Confine the ripple colour to occupied surface-water pixels. Mechanical water movement remains in the simulation, and v2 shoreline erosion is a separate rule.</p>",
+        "proof": "The visible occupied boundary agrees with the cell fixture."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Rain appears in rooms",
+        "cause": "Streaks are composited without a world shelter mask.",
+        "fix": "Clip each rasterized pixel against exposed surfaces including roofs."
+      },
+      {
+        "symptom": "Quality presets change flood rate",
+        "cause": "Decorative drops mutate simulation or share a consumed RNG stream.",
+        "fix": "Make decoration read-only and use independent deterministic random inputs."
+      },
+      {
+        "symptom": "Rain edges look smeared",
+        "cause": "The renderer uses antialiased strokes or filtering.",
+        "fix": "Rasterize on the art grid and present with nearest filtering."
+      }
+    ],
+    "episode": {
+      "hook": "Turn rain graphics almost off while the soil keeps getting equally wet.",
+      "beats": [
+        "Draw a roof cross-section",
+        "Separate surface wetting from decoration",
+        "Clip a diagonal pixel by pixel",
+        "Change streak density",
+        "Compare simulation hashes"
+      ],
+      "demo": "Show open hillside rain next to a dry room while toggling visual density.",
+      "recap": "Weather decoration communicates physics; it must not become another physics engine."
+    },
+    "sources": [
+      {
+        "label": "Rain and weather art rules",
+        "url": "../docs/superpowers/specs/2026-11-06-art-style.md"
+      },
+      {
+        "label": "Surface precipitation rules",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "85": {
+    "outcome": "Route one click either to the material bar or to the world, and make the selected material visibly unambiguous.",
+    "why": "A beautiful material bar is broken if clicking Wood also paints a wood block behind the button. Input ownership is a behavior problem before it is a styling problem.",
+    "sections": [
+      {
+        "title": "Start with one click and two possible consumers",
+        "html": "<p>The application receives mouse position and button state. UI hit testing should decide whether that event belongs to a bar/control before any world paint command is emitted. Treat input as a command-routing step; drawing a panel over the world does not automatically stop the underlying code from reacting.</p><p>Choose coordinate units explicitly. The material bar is laid out in drawing/UI coordinates, while world picking also needs the physical viewport origin, DPI conversion and cell scale. Convert at named boundaries instead of mixing raw mouse numbers with chunk positions.</p>"
+      },
+      {
+        "title": "Make pages data-driven",
+        "html": "<p>There are more materials/tools than ten number slots. Represent pages as arrays of entries with label, swatch, key slot and action. Q/E changes page; number keys select within that page. A slot’s index is not automatically a Material ID because the Tools page holds commands instead.</p><p>Use an enum for an entry action such as SelectMaterial or SelectTool. Keep selected state in one place so a key press and a UI click use the same selection function. Greyed/unavailable tool feedback must explain the actual cooldown/state, not merely look disabled.</p>"
+      },
+      {
+        "title": "Keep selection and hints readable",
+        "html": "<p>A muted UI still needs a clear selection boundary and readable text. Use the approved panel/text/selection palette and independent UI scaling. At native four-pixel cells, excessively tiny HUD text can undermine an otherwise calm frame. Test the actual display sizes instead of reviewing only a zoomed screenshot.</p><p>Show day, season, clock speed and physics-limited/slowed state consistently. The player should be able to tell when seasons are accelerated beyond physical updates. Hints may fade after use, but key labels and current selection should not become ambiguous when time changes.</p>"
+      },
+      {
+        "title": "Separate the hit-test model from drawing",
+        "html": "<p>The worked terminal function checks a simple row of ten slots. It returns a slot or no slot using a half-open rectangle: left/top inclusive, right/bottom exclusive. That convention prevents a boundary pixel belonging to two adjacent controls.</p><p>In the real frame first compute ui_consumed. If true, dispatch the UI action and skip world painting for that event. Otherwise convert to a valid world position and paint. Test gaps, edges, clicks while dragging from the bar, and hidden-UI behavior deliberately; dragging capture policy should not be accidental.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment — save as examples/lesson_085.rs, then run cargo run --example lesson_085 from game/.",
+      "language": "rust",
+      "code": "fn material_slot(x:i32,y:i32,left:i32,top:i32)->Option<usize> {\n    const SLOT:i32=32;\n    const COUNT:i32=10;\n    if x<left || y<top || y>=top+SLOT || x>=left+COUNT*SLOT {return None;}\n    Some(((x-left)/SLOT) as usize)\n}\nfn main() {\n    assert_eq!(material_slot(100,200,100,200),Some(0));\n    assert_eq!(material_slot(132,200,100,200),Some(1));\n    assert_eq!(material_slot(420,200,100,200),None);\n    assert_eq!(material_slot(100,232,100,200),None);\n    let clicked_slot=material_slot(140,210,100,200);\n    let paint_world=clicked_slot.is_none();\n    assert!(!paint_world);\n    println!(\"UI click selects slot {:?}; world paint={paint_world}\",clicked_slot);\n}",
+      "explanation": [
+        "The rectangle is half-open so its far edge belongs to outside/gap handling.",
+        "The helper returns a slot index, not a material ID; page data maps that slot to an action.",
+        "Production layout may contain padding/gaps, which must be included in hit-testing instead of pretending the visual and hit rectangles match automatically."
+      ],
+      "expected": "UI click selects slot Some(1); world paint=false"
+    },
+    "exercises": [
+      {
+        "title": "Find the boundary",
+        "prompt": "For left=100 and slot width=32, which slot owns x=132?",
+        "hint": "Use a half-open first slot [100,132).",
+        "solution": "<p>Slot 1 owns x=132; slot 0 ends just before it. The boundary is not a double click target.</p>",
+        "proof": "Tests agree exactly at each adjacent-slot boundary."
+      },
+      {
+        "title": "Prevent paint-through",
+        "prompt": "The UI reports a valid slot but world input still paints. Where is the ordering wrong?",
+        "hint": "Drawing order does not control event consumption.",
+        "solution": "<p>Handle selection first and suppress the world command for that consumed event. Both mouse and keyboard selection should update one shared selected-action state.</p>",
+        "proof": "A click test changes selection and no world cells."
+      },
+      {
+        "title": "Test page semantics",
+        "prompt": "On Tools page slot 0 means Fire starter. Should pressing 1 paint Material ID 0?",
+        "hint": "The page defines the action, not the key digit.",
+        "solution": "<p>No. Resolve slot 0 through the active page’s entry action. A SelectTool action routes to tool use rather than painting an unrelated material.</p>",
+        "proof": "Number-key and click selection choose the same visible tool."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Selecting a material paints behind the bar",
+        "cause": "World command is emitted before UI consumption.",
+        "fix": "Route input through UI first and skip painting for consumed events."
+      },
+      {
+        "symptom": "Number keys disagree with selected page",
+        "cause": "Slot index is cast directly to Material ID.",
+        "fix": "Map the current page’s slot to a typed action."
+      },
+      {
+        "symptom": "Bar looks clickable where nothing happens",
+        "cause": "Hit boxes and scaled visual layout differ.",
+        "fix": "Derive both drawing and hit rectangles from the same layout data."
+      }
+    ],
+    "episode": {
+      "hook": "Click Wood without painting a single accidental block behind the toolbar.",
+      "beats": [
+        "Reproduce paint-through",
+        "Derive half-open hit boxes",
+        "Map pages to typed actions",
+        "Route keyboard and clicks together",
+        "Inspect native-size text and selection"
+      ],
+      "demo": "Show a before/after world-cell counter while selecting materials through the bar.",
+      "recap": "A UI owns input explicitly; being drawn on top is not enough."
+    },
+    "sources": [
+      {
+        "label": "macroquad input API",
+        "url": "https://docs.rs/macroquad/0.4.16/macroquad/input/index.html"
+      },
+      {
+        "label": "Game HUD and controls",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  }
+}

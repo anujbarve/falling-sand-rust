@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="release-artifacts-title release-artifacts-desc">
+  <title id="release-artifacts-title">A desktop release is more than a source archive</title>
+  <desc id="release-artifacts-desc">Optimized native executables, required assets and licence notices become platform-specific packages. Each package needs an actual launch and save/load smoke test.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">A desktop release is more than a source archive</text>
+  <rect x="35" y="115" width="245" height="85" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="157.5" y="154.5" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">source + lockfile</text>
+  <text x="157.5" y="183.5" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">repeatable build inputs</text>
+  <line x1="280" y1="157" x2="360" y2="157" stroke="#28755b" stroke-width="3" />
+  <polygon points="360,157 350.0950818741206,161.78462087522354 350.0950818741206,152.21537912477646" fill="#28755b" />
+  <rect x="360" y="115" width="245" height="85" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="482.5" y="154.5" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">native release build</text>
+  <text x="482.5" y="183.5" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">optimized executable</text>
+  <line x1="605" y1="157" x2="685" y2="157" stroke="#28755b" stroke-width="3" />
+  <polygon points="685,157 675.0950818741205,161.78462087522354 675.0950818741205,152.21537912477646" fill="#28755b" />
+  <rect x="685" y="115" width="240" height="85" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="805.0" y="154.5" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">game package</text>
+  <text x="805.0" y="183.5" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">binary + assets + licences</text>
+  <text x="490" y="280" fill="#28755b" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">Build and test on Mac, Windows and Linux.</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">cargo package creates a source crate archive; it does not create a desktop game installer.</text>
+</svg>

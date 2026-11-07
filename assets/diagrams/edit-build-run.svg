@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="edit-build-run-title edit-build-run-desc">
+  <title id="edit-build-run-title">Editing is not running</title>
+  <desc id="edit-build-run-desc">A saved source edit changes the text file. Building creates an executable, and launching that executable runs the changed instructions.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Editing is not running</text>
+  <rect x="35" y="135" width="260" height="100" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="165.0" y="182.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">Edit</text>
+  <text x="165.0" y="211.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">src/main.rs</text>
+  <rect x="350" y="135" width="260" height="100" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="480.0" y="182.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">Build</text>
+  <text x="480.0" y="211.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">cargo build</text>
+  <rect x="665" y="135" width="260" height="100" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="795.0" y="182.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">Run</text>
+  <text x="795.0" y="211.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">launch executable</text>
+  <line x1="295" y1="185" x2="350" y2="185" stroke="#28755b" stroke-width="3" />
+  <polygon points="350,185 340.0950818741206,189.78462087522354 340.0950818741206,180.21537912477646" fill="#28755b" />
+  <line x1="610" y1="185" x2="665" y2="185" stroke="#28755b" stroke-width="3" />
+  <polygon points="665,185 655.0950818741205,189.78462087522354 655.0950818741205,180.21537912477646" fill="#28755b" />
+  <text x="480" y="296" fill="#28755b" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">cargo run builds when needed, then launches</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">An already running executable does not change when you save the source file.</text>
+</svg>

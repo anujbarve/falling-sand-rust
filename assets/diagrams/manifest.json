@@ -1,0 +1,346 @@
+{
+  "toolchain": {
+    "file": "toolchain.png",
+    "svg": "toolchain.svg",
+    "png": "toolchain.png",
+    "title": "Three tools, three jobs",
+    "caption": "rustup chooses a Rust toolchain. Cargo coordinates a build; rustc compiles source into the executable Cargo launches.",
+    "lesson_ids": [
+      1,
+      2
+    ],
+    "stages": [
+      "Start"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "edit-build-run": {
+    "file": "edit-build-run.png",
+    "svg": "edit-build-run.svg",
+    "png": "edit-build-run.png",
+    "title": "Editing is not running",
+    "caption": "A saved source edit changes the text file. Building creates an executable, and launching that executable runs the changed instructions.",
+    "lesson_ids": [
+      2,
+      6
+    ],
+    "stages": [
+      "Start"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "variable-state": {
+    "file": "variable-state.png",
+    "svg": "variable-state.svg",
+    "png": "variable-state.png",
+    "title": "One binding, a new value",
+    "caption": "A mutable row starts at 5. The statement row += 1 replaces the stored value with 6; it does not create two grains.",
+    "lesson_ids": [
+      3,
+      4,
+      5
+    ],
+    "stages": [
+      "Start"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "cell-coordinates": {
+    "file": "cell-coordinates.png",
+    "svg": "cell-coordinates.svg",
+    "png": "cell-coordinates.png",
+    "title": "Coordinates and sizes use different units",
+    "caption": "A cell at column 3 and row 2 maps to drawing position x=12, y=8 when each cell is 4 drawing pixels wide in the low-DPI prototype.",
+    "lesson_ids": [
+      5,
+      10,
+      11
+    ],
+    "stages": [
+      "Start"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "ownership-borrows": {
+    "file": "ownership-borrows.png",
+    "svg": "ownership-borrows.svg",
+    "png": "ownership-borrows.png",
+    "title": "Move ownership, or lend access",
+    "caption": "A by-value move transfers a non-Copy value. Shared references lend read access; a mutable reference lends exclusive mutable access while used.",
+    "lesson_ids": [
+      12,
+      13
+    ],
+    "stages": [
+      "Start"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "frame-tick-timeline": {
+    "file": "frame-tick-timeline.png",
+    "svg": "frame-tick-timeline.svg",
+    "png": "frame-tick-timeline.png",
+    "title": "Drawing frames are not simulation ticks",
+    "caption": "At a steady 60 FPS, frames arrive roughly every 16.67 milliseconds. At 20 TPS, simulation updates are due every 50 milliseconds; scheduling uses elapsed time, not frame count.",
+    "lesson_ids": [
+      14,
+      56,
+      57
+    ],
+    "stages": [
+      "M3"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "row-major-index": {
+    "file": "row-major-index.png",
+    "svg": "row-major-index.svg",
+    "png": "row-major-index.png",
+    "title": "A two-dimensional grid in one vector",
+    "caption": "For a four-column grid, row-major indexing assigns index = row × 4 + column. The highlighted cell at column 2, row 1 therefore has index 6.",
+    "lesson_ids": [
+      17,
+      18,
+      19
+    ],
+    "stages": [
+      "M0"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "negative-chunks": {
+    "file": "negative-chunks.png",
+    "svg": "negative-chunks.svg",
+    "png": "negative-chunks.png",
+    "title": "Negative positions still belong to a chunk",
+    "caption": "With chunk width 64, world x=-1 belongs to chunk -1 at local x=63. Euclidean division gives local coordinates from 0 through 63.",
+    "lesson_ids": [
+      28,
+      68
+    ],
+    "stages": [
+      "M4"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "active-region": {
+    "file": "active-region.png",
+    "svg": "active-region.svg",
+    "png": "active-region.png",
+    "title": "Storage chunks do not define the simulation boundary",
+    "caption": "The active rectangle is the visible view plus a 16-cell margin on each side. Overlapping chunks can extend farther; update only their intersection with the active rectangle.",
+    "lesson_ids": [
+      29,
+      79
+    ],
+    "stages": [
+      "M0"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "heat-and-exposure": {
+    "file": "heat-and-exposure.png",
+    "svg": "heat-and-exposure.svg",
+    "png": "heat-and-exposure.png",
+    "title": "Sky exposure and air contact are different questions",
+    "caption": "A roof blocks direct rain into a room. A sheltered wall can still touch local air and exchange heat. Local air contact must not imply exposure to the sky.",
+    "lesson_ids": [
+      34,
+      35,
+      39
+    ],
+    "stages": [
+      "M1"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "four-phase-schedule": {
+    "file": "four-phase-schedule.png",
+    "svg": "four-phase-schedule.svg",
+    "png": "four-phase-schedule.png",
+    "title": "Four phases select separated chunk sets",
+    "caption": "Parity labels define four chunk sets. Only one label is dispatched in a phase. This illustrates scheduling; the actual rule footprint must still prove that reads and writes cannot conflict.",
+    "lesson_ids": [
+      40,
+      41,
+      43
+    ],
+    "stages": [
+      "M1"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "support-anchor": {
+    "file": "support-anchor.png",
+    "svg": "support-anchor.svg",
+    "png": "support-anchor.png",
+    "title": "A group needs support outside itself",
+    "caption": "Adjacent rigid cells form one connected group. Their internal contacts are not external support. A grounded column can anchor the group, while an identical floating row falls.",
+    "lesson_ids": [
+      49,
+      50
+    ],
+    "stages": [
+      "M2"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "random-ticks-calendar": {
+    "file": "random-ticks-calendar.png",
+    "svg": "random-ticks-calendar.svg",
+    "png": "random-ticks-calendar.png",
+    "title": "Calendar advance and sampled work stay explicit",
+    "caption": "An executed tick advances step_tick once. Its integer multiplier advances world_tick by M. Slow-process picks scale with M up to a cap; the fallback is approximate.",
+    "lesson_ids": [
+      56,
+      57,
+      58,
+      59,
+      60
+    ],
+    "stages": [
+      "M3"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "save-generation": {
+    "file": "save-generation.png",
+    "svg": "save-generation.svg",
+    "png": "save-generation.png",
+    "title": "Commit the pointer after the snapshot is complete",
+    "caption": "Write a coherent new generation of region files first. Only after its files are complete does the committed manifest select that generation. A crash before commitment leaves the old generation selected.",
+    "lesson_ids": [
+      76,
+      77
+    ],
+    "stages": [
+      "M4"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "pixel-units": {
+    "file": "pixel-units.png",
+    "svg": "pixel-units.svg",
+    "png": "pixel-units.png",
+    "title": "One cell occupies 2 × 2 art pixels",
+    "caption": "A simulation cell occupies two by two art pixels. Each art pixel expands to a two by two block of physical pixels, producing a four by four physical-pixel cell.",
+    "lesson_ids": [
+      10,
+      81,
+      88
+    ],
+    "stages": [
+      "M5"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "release-artifacts": {
+    "file": "release-artifacts.png",
+    "svg": "release-artifacts.svg",
+    "png": "release-artifacts.png",
+    "title": "A desktop release is more than a source archive",
+    "caption": "Optimized native executables, required assets and licence notices become platform-specific packages. Each package needs an actual launch and save/load smoke test.",
+    "lesson_ids": [
+      96,
+      97,
+      98,
+      100
+    ],
+    "stages": [
+      "M7"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "shoreline-mass": {
+    "file": "shoreline-mass.png",
+    "svg": "shoreline-mass.svg",
+    "png": "shoreline-mass.png",
+    "title": "A drawn ripple cannot move shoreline material",
+    "caption": "Rendered waves change colour only. Mechanical erosion needs a separate simulation rule that moves sand and respects the approved water-volume policy.",
+    "lesson_ids": [
+      92
+    ],
+    "stages": [
+      "M6"
+    ],
+    "verified": true,
+    "verification": "Rendered locally from the restricted SVG shapes/text using installed Pillow; PNG visually inspected. Display this PNG to preserve the inspected pixels."
+  },
+  "lake-bowl": {
+    "file": "lake-bowl.png",
+    "svg": "lake-bowl.svg",
+    "png": "lake-bowl.png",
+    "title": "A lake is held by occupied cells, not a painted shore",
+    "caption": "For centre64, half-width12 and level10, the teaching bowl floor is level minus (half-width minus distance). The rim at x52 and76 is stone at altitude10; the centre floor is altitude−2.",
+    "lesson_ids": [
+      71
+    ],
+    "stages": [
+      "M4"
+    ],
+    "verified": true,
+    "verification": "PNG rendered locally from restricted SVG shapes/text with installed Pillow and visually inspected; display this PNG."
+  },
+  "save-header-bytes": {
+    "file": "save-header-bytes.png",
+    "svg": "save-header-bytes.svg",
+    "png": "save-header-bytes.png",
+    "title": "Fourteen bytes with an explicit layout",
+    "caption": "The worked header begins with ASCII RSTY, then a two-byte little-endian version1, then an eight-byte little-endian seed42. Offsets0..4,4..6 and6..14 are distinct fields.",
+    "lesson_ids": [
+      74
+    ],
+    "stages": [
+      "M4"
+    ],
+    "verified": true,
+    "verification": "PNG rendered locally from restricted SVG shapes/text with installed Pillow and visually inspected; display this PNG."
+  },
+  "worker-epoch": {
+    "file": "worker-epoch.png",
+    "svg": "worker-epoch.svg",
+    "png": "worker-epoch.png",
+    "title": "A result must still belong to the current world",
+    "caption": "A worker owns its requested cell buffer. Its reply carries a world epoch and chunk identity. The main thread compares the epoch before installing the result; stale replies are discarded.",
+    "lesson_ids": [
+      72,
+      79
+    ],
+    "stages": [
+      "M4"
+    ],
+    "verified": true,
+    "verification": "PNG rendered locally from restricted SVG shapes/text with installed Pillow and visually inspected; display this PNG."
+  },
+  "undo-state-match": {
+    "file": "undo-state-match.png",
+    "svg": "undo-state-match.svg",
+    "png": "undo-state-match.png",
+    "title": "Undo restores only cells still matching the painted state",
+    "caption": "The action records before and after. If the live cell still matches the painted after state, restore before. If wetness changed, full-state matching skips it instead of erasing that later change.",
+    "lesson_ids": [
+      86
+    ],
+    "stages": [
+      "M5"
+    ],
+    "verified": true,
+    "verification": "PNG rendered locally from restricted SVG shapes/text with installed Pillow and visually inspected; display this PNG."
+  }
+}

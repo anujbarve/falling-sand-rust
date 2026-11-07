@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="toolchain-title toolchain-desc">
+  <title id="toolchain-title">Three tools, three jobs</title>
+  <desc id="toolchain-desc">rustup chooses a Rust toolchain. Cargo coordinates a build; rustc compiles source into the executable Cargo launches.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Three tools, three jobs</text>
+  <rect x="40" y="92" width="220" height="76" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="150.0" y="127.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">rustup</text>
+  <text x="150.0" y="156.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">installs / selects toolchain</text>
+  <line x1="260" y1="130" x2="330" y2="130" stroke="#28755b" stroke-width="3" />
+  <polygon points="330,130 320.0950818741206,134.78462087522354 320.0950818741206,125.21537912477646" fill="#28755b" />
+  <rect x="330" y="92" width="255" height="76" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="457.5" y="127.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">Rust toolchain</text>
+  <text x="457.5" y="156.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">contains rustc and Cargo</text>
+  <rect x="40" y="236" width="220" height="76" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="150.0" y="271.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">cargo run</text>
+  <text x="150.0" y="300.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">coordinates the work</text>
+  <line x1="260" y1="274" x2="340" y2="274" stroke="#28755b" stroke-width="3" />
+  <polygon points="340,274 330.0950818741206,278.78462087522354 330.0950818741206,269.21537912477646" fill="#28755b" />
+  <rect x="340" y="236" width="220" height="76" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="450.0" y="271.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">rustc</text>
+  <text x="450.0" y="300.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">compiles Rust source</text>
+  <line x1="560" y1="274" x2="640" y2="274" stroke="#28755b" stroke-width="3" />
+  <polygon points="640,274 630.0950818741205,278.78462087522354 630.0950818741205,269.21537912477646" fill="#28755b" />
+  <rect x="640" y="236" width="260" height="76" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="770.0" y="271.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">your executable</text>
+  <text x="770.0" y="300.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">runs your instructions</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">The terminal sends commands; it is not the compiler.</text>
+</svg>

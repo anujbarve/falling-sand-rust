@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="variable-state-title variable-state-desc">
+  <title id="variable-state-title">One binding, a new value</title>
+  <desc id="variable-state-desc">A mutable row starts at 5. The statement row += 1 replaces the stored value with 6; it does not create two grains.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">One binding, a new value</text>
+  <rect x="70" y="124" width="250" height="120" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="195.0" y="181.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">row = 5</text>
+  <text x="195.0" y="210.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">before the update</text>
+  <rect x="385" y="151" width="190" height="67" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="480.0" y="191.5" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">row += 1</text>
+  <rect x="640" y="124" width="250" height="120" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="765.0" y="181.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">row = 6</text>
+  <text x="765.0" y="210.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">after the update</text>
+  <line x1="320" y1="185" x2="385" y2="185" stroke="#28755b" stroke-width="3" />
+  <polygon points="385,185 375.0950818741206,189.78462087522354 375.0950818741206,180.21537912477646" fill="#28755b" />
+  <line x1="575" y1="185" x2="640" y2="185" stroke="#28755b" stroke-width="3" />
+  <polygon points="640,185 630.0950818741205,189.78462087522354 630.0950818741205,180.21537912477646" fill="#28755b" />
+  <text x="480" y="307" fill="#28755b" font-family="Arial, sans-serif" font-size="22" text-anchor="middle">The binding still names one position.</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">let mut row = 5 allows reassignment. A plain let binding rejects this reassignment.</text>
+</svg>

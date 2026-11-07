@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="random-ticks-calendar-title random-ticks-calendar-desc">
+  <title id="random-ticks-calendar-title">Calendar advance and sampled work stay explicit</title>
+  <desc id="random-ticks-calendar-desc">An executed tick advances step_tick once. Its integer multiplier advances world_tick by M. Slow-process picks scale with M up to a cap; the fallback is approximate.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Calendar advance and sampled work stay explicit</text>
+  <rect x="30" y="130" width="230" height="105" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="145.0" y="179.5" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">one executed tick</text>
+  <text x="145.0" y="208.5" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">step_tick += 1</text>
+  <line x1="260" y1="180" x2="335" y2="180" stroke="#28755b" stroke-width="3" />
+  <polygon points="335,180 325.0950818741206,184.78462087522354 325.0950818741206,175.21537912477646" fill="#28755b" />
+  <rect x="335" y="90" width="270" height="80" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="470.0" y="127.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">calendar</text>
+  <text x="470.0" y="156.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">world_tick += M</text>
+  <rect x="335" y="230" width="270" height="80" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="470.0" y="267.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">sampled slow work</text>
+  <text x="470.0" y="296.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">P = min(16 × M, 256)</text>
+  <line x1="300" y1="180" x2="300" y2="270" stroke="#28755b" stroke-width="3" />
+  <line x1="300" y1="270" x2="335" y2="270" stroke="#28755b" stroke-width="3" />
+  <polygon points="335,270 325.0950818741206,274.78462087522354 325.0950818741206,265.21537912477646" fill="#28755b" />
+  <text x="650" y="137" fill="#28755b" font-family="Arial, sans-serif" font-size="21" text-anchor="start">M = 4 → P = 64</text>
+  <text x="650" y="277" fill="#61736c" font-family="Arial, sans-serif" font-size="19" text-anchor="start">M &gt; 16 → capped fallback</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">Extra samples do not make fast-forward identical: climate, physics and spatial chains still need tests.</text>
+</svg>

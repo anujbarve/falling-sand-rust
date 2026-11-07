@@ -1,0 +1,1451 @@
+{
+  "86": {
+    "outcome": "Undo an unchanged paint stroke without erasing the material transformations that happened after it.",
+    "why": "The world keeps moving while you paint. A universal restore would resurrect burned wood or put moving water back in two places. Undo needs a conditional local contract and a memory budget, not a rewind button.",
+    "sections": [
+      {
+        "title": "Find the moment undo stops being simple",
+        "html": "<p>Pause the game and paint one stone cell over air. Restoring air is straightforward: there have been no intervening changes. Now paint wood and let it burn. The cell no longer holds the painted wood; restoring its old air would erase the ash and pretend the fire never happened. The player requested reversal of a paint action, not arbitrary reversal of every later simulation effect. That distinction motivates a conditional restore.</p><p>Record a before state and a painted-after state for each changed coordinate. At undo time compare the live cell against the recorded after state. Restore the before state only when that comparison succeeds. Report restored and skipped counts during development so the behavior is observable.</p>"
+      },
+      {
+        "title": "Define matching before writing the equality test",
+        "html": "<p>Full-state equality is conservative: material, temperature, moisture, progress, variant and relevant flags must match. Comparing only material permits undoing a newly wet piece of wood as though nothing happened. Conversely, including a transient moved marker can reject a logically unchanged cell. Decide which fields represent meaningful persistent state and normalize transient scheduling markers before comparison. The small experiment below uses a material and moisture field so you can see this distinction without a full World.</p><p>Equality is a design contract, not proof of cell identity. Water may flow away and a different identical water cell may arrive. If the desired rule requires identity rather than state equality, an additional generation/revision mechanism must be designed. Do not silently promise stronger identity guarantees than this local-revert model provides.</p>"
+      },
+      {
+        "title": "One stroke, one record per coordinate",
+        "html": "<p>A held brush can revisit a coordinate thousands of times. A stroke should retain the state before its first modification and the final painted result, not thousands of identical intermediate edits. Use a coordinate-to-record index while collecting the action: first visit stores before; later visits update after. At mouse release freeze that action and append it to the undo deque.</p><p>Enforce both limits from the spec: at most 20 actions and 200,000 recorded cells. When appending, discard oldest complete actions until both limits hold. Define whether an oversized single action is rejected from history or trimmed; do not silently exceed the budget. This temporary collector also needs a bound during a very long drag, before mouse release.</p>"
+      },
+      {
+        "title": "Integrate through the normal edit path",
+        "html": "<p>Restoring a cell must invalidate the same dirty rectangles, support checks, surface-height entries and render state as painting. Directly replacing a Vec element inside undo while bypassing those hooks produces a world whose storage and derived data disagree. Route successful restores through one shared world-edit operation, then batch derived updates as appropriate.</p><p>The example is a pure decision kernel. Save it as an example, run it and inspect the one skipped cell. In your game, look up the recorded coordinate safely, compare normalized state, and call the edit operation for eligible restores. A missing or unloaded coordinate needs a bounded load/skip policy; it is not permission to block the frame indefinitely.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete focused experiment: save as examples/lesson_086.rs; run cargo run --example lesson_086 from game/.",
+      "language": "rust",
+      "code": "#[derive(Clone, Copy, Debug, PartialEq, Eq)]\nstruct Cell { material: u8, moisture: u8 }\n#[derive(Clone, Copy)]\nstruct Edit { index: usize, before: Cell, after: Cell }\nfn undo(world: &mut [Cell], edits: &[Edit]) -> (usize, usize) {\n    let mut restored = 0;\n    let mut skipped = 0;\n    for edit in edits.iter().rev() {\n        match world.get_mut(edit.index) {\n            Some(live) if *live == edit.after => {\n                *live = edit.before;\n                restored += 1;\n            }\n            _ => skipped += 1,\n        }\n    }\n    (restored, skipped)\n}\nfn main() {\n    let air = Cell { material: 0, moisture: 0 };\n    let wood = Cell { material: 1, moisture: 0 };\n    let wet_wood = Cell { material: 1, moisture: 50 };\n    let mut world = [wood, wet_wood];\n    let edits = [Edit { index: 0, before: air, after: wood },\n                 Edit { index: 1, before: air, after: wood }];\n    assert_eq!(undo(&mut world, &edits), (1, 1));\n    assert_eq!(world, [air, wet_wood]);\n    println!(\"restored 1; skipped 1 changed cell\");\n}",
+      "explanation": [
+        "get_mut makes missing coordinates a handled case rather than a panic.",
+        "Reverse action order matters when later actions overlap earlier ones; the stroke collector should still deduplicate individual coordinates.",
+        "This example intentionally does not own chunk loading or dirty-state notifications; integrate those through the existing World edit interface."
+      ],
+      "expected": "restored 1; skipped 1 changed cell"
+    },
+    "exercises": [
+      {
+        "title": "Paused exact undo",
+        "prompt": "Paint three distinct cells while paused and undo once. What should be restored?",
+        "hint": "No simulation changes intervene.",
+        "solution": "<p>All three recorded after states still match, so three originals are restored and none skipped. Use three air-to-stone edits and assert the returned pair is (3,0).</p>",
+        "proof": "The full fixture equals its pre-stroke state."
+      },
+      {
+        "title": "Catch a material-only bug",
+        "prompt": "Change a painted cell’s moisture but keep its material. Compare full equality with material-only matching.",
+        "hint": "The recorded painted state was dry.",
+        "solution": "<p>Full equality skips the changed cell. A material-only guard restores it, erasing wetness. Keep the strict state result unless the approved undo policy explicitly treats that change as irrelevant.</p>",
+        "proof": "An assertion demonstrates the difference, rather than relying on a screenshot."
+      },
+      {
+        "title": "Bound a very long stroke",
+        "prompt": "A stroke visits 250,000 unique cells. Can waiting until release enforce a 200,000-cell peak memory limit?",
+        "hint": "The collector is already allocated while dragging.",
+        "solution": "<p>No. Define a live collector bound. A simple initial policy marks the action non-undoable once it exceeds capacity and releases collected history; an alternative splits strokes into bounded actions. Record the chosen user-facing semantics.</p>",
+        "proof": "Measure collector memory during the drag and verify the cap."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Undo revives a burned wall",
+        "cause": "The code restored before states unconditionally.",
+        "fix": "Compare current normalized state against the action’s after state before editing."
+      },
+      {
+        "symptom": "Restored roofs do not regain support",
+        "cause": "Undo bypassed derived-data invalidation.",
+        "fix": "Use the same world-edit gateway as normal painting."
+      },
+      {
+        "symptom": "One stroke consumes enormous memory",
+        "cause": "Repeated coordinates or an unbounded live collector were recorded.",
+        "fix": "Deduplicate per coordinate and enforce capacity before mouse release."
+      }
+    ],
+    "episode": {
+      "hook": "Paint, burn and undo: which part should come back?",
+      "beats": [
+        "Demonstrate paused undo",
+        "Break it with a fire",
+        "Derive before/after matching",
+        "Test wet wood",
+        "Bound stroke and history memory"
+      ],
+      "demo": "Show two neighboring cells: only the unchanged one reverts.",
+      "recap": "Undo reverses eligible edits; it does not rewind the simulation."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "VecDeque for bounded history",
+        "url": "https://doc.rust-lang.org/std/collections/struct.VecDeque.html"
+      }
+    ]
+  },
+  "87": {
+    "outcome": "Drive a small, bounded set of audio loops from rain, wind and fire activity, with immediate mute and a recoverable missing-audio path.",
+    "why": "A thousand burning cells do not require a thousand crackle voices. The simulation already contains activity signals; a mixer compresses those signals into a few intentional sound sources.",
+    "sections": [
+      {
+        "title": "Separate the world, mixer and playback",
+        "html": "<p>Start with three layers. Simulation reports counts or rates, such as burning cells and rainfall intensity. A pure mixer maps those numbers into target gains. The audio backend loads clips and applies the gains. This makes the useful part testable without speakers and avoids putting audio calls into every cell update.</p><p>Choose bounded normalizers rather than raw counts. For instance, map zero through 200 burning cells to fire gain zero through a chosen maximum, clamping above 200. The number 200 is a tuning choice, not physics. A soft ramp avoids a one-cell fire sounding as loud as an entire forest.</p>"
+      },
+      {
+        "title": "Enable the real audio backend explicitly",
+        "html": "<p>macroquad0.4.16 does not enable audio in its default feature set. Replace the existing dependency entry with <code>macroquad = { version = \"=0.4.16\", features = [\"audio\"] }</code>. Keep one dependency entry, not a second duplicate. Without that feature, the audio module can expose dummy operations that compile without producing sound, so compilation alone is not the test.</p><p>After selecting the dependency feature in your actual game milestone, perform the native build and a single known-clip playback test. Native backend prerequisites vary by platform; use the actual error and pinned crate documentation to choose any needed setup. This course-generation task does not install or change your machine’s packages.</p>"
+      },
+      {
+        "title": "A loop is started once, then controlled",
+        "html": "<p>With macroquad, load_sound is asynchronous and returns a Result. play_sound accepts a borrowed Sound and PlaySoundParams, including looped and volume. Start a persistent loop once after successful loading. Update it with set_sound_volume as activity changes. Calling play_sound every rendered frame restarts or overlaps playback rather than smoothly adjusting the existing source.</p><p>When mute changes, apply zero output immediately. Keep the simulation and mixer state running, so unmuting can restore the current scene instead of replaying stale events. Do not pause fire, rain or the world clock because audio is muted. These are independent user preferences.</p>"
+      },
+      {
+        "title": "Smooth noisy signals and duck around events",
+        "html": "<p>Counts may jump when the camera crosses chunks. A simple first-order smoothing step moves current gain toward target over elapsed real time: current += alpha * (target-current), with alpha clamped to the range zero through one. Derive alpha from a chosen smoothing speed and frame delta; clamp large deltas so window dragging cannot create an overshoot. The pure target function below remains separate from that temporal smoothing.</p><p>An explosion may temporarily reduce the ambient bed while its one-shot plays. Store an event-duck timer and compute the bed multiplier from it. Cap concurrent event voices and choose whether excess events merge, replace a quieter voice or are skipped. This cap makes a chain reaction bounded rather than a sound-card stress test.</p>"
+      },
+      {
+        "title": "Handle assets and failure deliberately",
+        "html": "<p>Keep clip paths and licence metadata in one asset table. If a loop fails to load, store None for that source and continue silently with a small settings message. Do not unwrap normal audio I/O. A successful load on your laptop does not prove a target machine has a working audio device, so include a mute/no-device playtest.</p><p>The worked example contains the headless mixing contract. After it passes, connect each returned gain to the already loaded macroquad sound. A typical loading branch is match load_sound(path).await { Ok(sound) => Some(sound), Err(error) => { report(error); None } }. Keep reporting out of the cell loop and remember that an error message is not a reason to corrupt or abandon a save.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete mixer experiment: examples/lesson_087.rs, then cargo run --example lesson_087.",
+      "language": "rust",
+      "code": "#[derive(Debug, PartialEq)]\nstruct Gains { wind: f32, rain: f32, fire: f32 }\nfn gains(wind: f32, rain: f32, burning: usize,\n         muted: bool, event_duck: f32) -> Gains {\n    let master = if muted { 0.0 } else { 1.0 };\n    let bed = master * event_duck.clamp(0.0, 1.0);\n    Gains {\n        wind: wind.clamp(0.0, 1.0) * 0.15 * bed,\n        rain: rain.clamp(0.0, 1.0) * 0.35 * bed,\n        fire: (burning as f32 / 200.0).clamp(0.0, 1.0) * 0.30 * bed,\n    }\n}\nfn main() {\n    let quiet = gains(0.4, 0.0, 0, false, 1.0);\n    let fire = gains(0.4, 0.0, 5000, false, 1.0);\n    assert!(quiet.fire == 0.0 && fire.fire <= 0.30);\n    assert_eq!(gains(1.0, 1.0, 200, true, 1.0),\n               Gains { wind: 0.0, rain: 0.0, fire: 0.0 });\n    println!(\"bounded fire; immediate mute; independent world state\");\n}",
+      "explanation": [
+        "clamp protects the backend from unbounded activity-derived gains. Reject or normalize non-finite inputs at the simulation/audio boundary.",
+        "The example uses linear gain targets; perceptual tuning and smoothing are later adjustments, not hidden simulation rules.",
+        "No Sound type is needed in the pure mixer test. The playback layer owns those backend resources."
+      ],
+      "expected": "bounded fire; immediate mute; independent world state"
+    },
+    "exercises": [
+      {
+        "title": "Make saturation visible",
+        "prompt": "Compare the target gain for 200 and 20,000 burning cells.",
+        "hint": "Both reach the chosen saturation count.",
+        "solution": "<p>Both return fire gain 0.30 before ducking/master changes. The loop count remains one; increased fire activity cannot allocate another 19,800 voices.</p>",
+        "proof": "Assert equal gains for both cases."
+      },
+      {
+        "title": "Duck without muting forever",
+        "prompt": "Use event_duck=0.25 during an explosion, then return it to 1.0.",
+        "hint": "The bed is scaled, not destroyed.",
+        "solution": "<p>Every bed gain is temporarily one quarter of its normal value. Restoring the multiplier recovers current activity. Do not restore an obsolete gain captured before the event.</p>",
+        "proof": "The mixer output returns to the current, not historical, target."
+      },
+      {
+        "title": "Remove the rain asset",
+        "prompt": "Temporarily point the rain path at a nonexistent file.",
+        "hint": "Loading is fallible.",
+        "solution": "<p>The load branch produces None and records one useful diagnostic. Fire and wind continue; the game can save and quit. Restore the correct path after testing.</p>",
+        "proof": "The missing clip never causes a panic or a repeated per-frame error flood."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Crackle stutters or multiplies",
+        "cause": "play_sound is called every frame.",
+        "fix": "Start the loop once; change its gain afterward."
+      },
+      {
+        "symptom": "A forest clips or becomes deafening",
+        "cause": "Raw counts drive gain or create voices.",
+        "fix": "Normalize/clamp gains and cap one-shot concurrency."
+      },
+      {
+        "symptom": "Missing sound quits the whole game",
+        "cause": "An expected load error was unwrapped.",
+        "fix": "Keep an optional source and a recoverable diagnostic."
+      }
+    ],
+    "episode": {
+      "hook": "Listen to one spark become a forest without adding a single loop voice.",
+      "beats": [
+        "Extract activity counts",
+        "Test pure target gains",
+        "Connect loaded loops",
+        "Add smoothing and event ducking",
+        "Break an asset and recover"
+      ],
+      "demo": "Mute mid-fire, keep simulation moving, then unmute into the current scene.",
+      "recap": "Audio follows the world through a bounded mixer, not one sound per cell."
+    },
+    "sources": [
+      {
+        "label": "macroquad audio API",
+        "url": "https://docs.rs/macroquad/0.4.16/macroquad/audio/index.html"
+      },
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "88": {
+    "outcome": "Calculate a centred, whole-cell view that fits the active-cell budget and map input into it at different physical display sizes.",
+    "why": "A fixed four-pixel cell cannot fit arbitrarily many cells on slow hardware. The view must shrink inside a panel instead of stretching the pixels or freezing a strip of world.",
+    "sections": [
+      {
+        "title": "Name the three sizes before doing arithmetic",
+        "html": "<p>Window drawing dimensions, physical framebuffer dimensions and simulation-cell dimensions are not interchangeable. macroquad screen_width and screen_height are DPI-adjusted drawing values. The art buffer must be sized from the intended physical rectangle, with a consistent conversion back to drawing coordinates for presentation and pointer input. In a low-DPI prototype the numbers may coincide, which hides this distinction.</p><p>For a physical 1280 by 720 view, integer division by four gives 320 by 180 visible cells. Add 16 cells on each side before applying the simulation budget: (320+32)*(180+32)=74,624 active cells. A budget check using only visible cells is too optimistic.</p>"
+      },
+      {
+        "title": "Choose a fitting rectangle without stretching cells",
+        "html": "<p>Find the largest rectangle approximately matching the window aspect ratio whose active count fits the machine cap. Whole-cell rounding means an exact aspect match may be impossible; leave odd edge pixels in the surrounding panel. The example scans candidate widths, derives a height from the target ratio, and checks the active count. This is a startup/resize operation, not a loop to run per simulated cell.</p><p>It uses floating-point ratio calculation only for layout. Cell counts and budgets remain integers. For production, document the tie-break for near-equal candidates and test extremely narrow windows. A rectangle with zero visible cells is not a meaningful game view; show a minimum-size message rather than attempting to index it.</p>"
+      },
+      {
+        "title": "Centre first, then convert input",
+        "html": "<p>If the fitted physical view is width V inside a physical window width W, its left origin is (W-V)/2, rounded to a physical pixel. Mouse positions must first enter the same coordinate space. Subtract that origin and divide by four to locate a visible cell. Reject a pointer outside the view before adding camera coordinates.</p><p>A click on a capped side panel must not paint a hidden cell. Likewise UI scaling may enlarge text independently without changing the world rectangle or four-physical-pixel cell footprint. Treat the panel, UI hit boxes and world mapping as three explicit rectangles rather than a single screen-wide coordinate assumption.</p>"
+      },
+      {
+        "title": "Persist preferences, not stale geometry",
+        "html": "<p>Save the requested graphics preset, UI scale and camera world position. Recompute the actual fitting rectangle on startup because a different monitor, DPI or machine budget can change it. Storing a previously computed pixel rectangle and reusing it blindly produces off-screen UI and wrong input conversion.</p><p>The example proves a budget-fitting kernel with no window. Integrate its result into the art-buffer allocation, presentation viewport and input conversion together. Inspect 720p, Retina/native fullscreen, a tall window and an odd-width window. A successful integer calculation cannot establish that the graphics backend used the same physical dimensions, so include an actual pixel-footprint check in the manual capture.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete fitting experiment: examples/lesson_088.rs, then cargo run --example lesson_088.",
+      "language": "rust",
+      "code": "fn fit(window_w: u32, window_h: u32, budget: u64) -> (u32, u32) {\n    if window_w < 4 || window_h < 4 { return (0, 0); }\n    let max_w = window_w / 4;\n    let max_h = window_h / 4;\n    let ratio = window_h as f64 / window_w as f64;\n    let mut best = (0, 0);\n    for w in 1..=max_w {\n        let h = ((w as f64 * ratio).round() as u32).clamp(1, max_h);\n        let active = u64::from(w + 32) * u64::from(h + 32);\n        if active <= budget && u64::from(w)*u64::from(h) >\n            u64::from(best.0)*u64::from(best.1) { best = (w, h); }\n    }\n    best\n}\nfn main() {\n    assert_eq!(fit(1280, 720, 74_624), (320, 180));\n    let (w,h) = fit(1920,1080,74_624);\n    assert_eq!((w,h),(320,180));\n    assert!(u64::from(w+32)*u64::from(h+32) <= 74_624);\n    println!(\"1920x1080 window: {}x{} physical world pixels\",w*4,h*4);\n}",
+      "explanation": [
+        "The 32 added cells represent two 16-cell margins, not a 32-cell margin on every side.",
+        "The sample chooses the nearest integer height for each candidate width; it is a documented layout policy, not a universal optimizer for every aspect tolerance.",
+        "The example rejects tiny windows but production also needs a chosen minimum readable viewport."
+      ],
+      "expected": "1920x1080 window: 1280x720 physical world pixels"
+    },
+    "exercises": [
+      {
+        "title": "Budget the reference view",
+        "prompt": "Calculate active cells for a 1920 by 1080 world rectangle.",
+        "hint": "Convert physical pixels to cells before adding margins.",
+        "solution": "<p>Visible cells are 480 by 270. Active cells are 512 by 302, totaling 154,624. A 74,624 cap therefore requires a smaller rectangle.</p>",
+        "proof": "The calculation matches the benchmark reference in the spec."
+      },
+      {
+        "title": "Pick inside a capped view",
+        "prompt": "A 1280-pixel world rectangle is centred in a 1920-pixel window. Convert physical pointer x=360 into a cell column relative to the view.",
+        "hint": "The left panel is 320 pixels wide.",
+        "solution": "<p>Subtract 320 to get x=40 within the view. Divide by four to get local column 10. Pointer x=300 lies outside and must be rejected.</p>",
+        "proof": "Assertions distinguish inside column10 from the outside click."
+      },
+      {
+        "title": "Restore on another display",
+        "prompt": "Load settings saved on Retina into a 1280 by 720 low-DPI window. Which values should be recalculated?",
+        "hint": "User intent and derived geometry are different.",
+        "solution": "<p>Retain valid camera/preset preferences, recompute physical dimensions, view bounds, art-buffer size and input transforms. Clamp unsupported preferences explicitly rather than stretching cells.</p>",
+        "proof": "A cell under the pointer remains the same cell the renderer shows."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Cells double in physical size on Retina",
+        "cause": "Logical drawing units were treated as framebuffer pixels.",
+        "fix": "Make the DPI conversion explicit at presentation and input boundaries."
+      },
+      {
+        "symptom": "Paint is offset by a side panel",
+        "cause": "Pointer conversion used screen origin instead of world-view origin.",
+        "fix": "Subtract the fitted rectangle origin before cell conversion."
+      },
+      {
+        "symptom": "Budget passes but frame time fails",
+        "cause": "Active-cell count is a proxy, not a timing guarantee.",
+        "fix": "Measure real tick/frame costs and retain the watchdog policy."
+      }
+    ],
+    "episode": {
+      "hook": "The same world on two screens, with exactly the same grain size.",
+      "beats": [
+        "Name units",
+        "Compute active budget",
+        "Fit a whole-cell rectangle",
+        "Map pointer through panels",
+        "Restore settings on a different display"
+      ],
+      "demo": "Resize through a narrow window and show a four-physical-pixel cell and correct pick.",
+      "recap": "Resolution reveals world; it does not magnify the simulation cells."
+    },
+    "sources": [
+      {
+        "label": "macroquad window implementation",
+        "url": "https://docs.rs/macroquad/0.4.16/src/macroquad/window.rs.html"
+      },
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "89": {
+    "outcome": "Record and evaluate a reproducible 60-second house-on-a-hillside scene with visible reactions and honest frame-time evidence.",
+    "why": "The first YouTube opener should demonstrate a game that actually exists. A still screenshot can hide slow reactions, lost support, missing sound and frame spikes. This lesson assembles one short scene and a repeatable inspection procedure.",
+    "sections": [
+      {
+        "title": "Choose a scene that carries the project",
+        "html": "<p>Use one fixed hill, house, grass patch and contained water feature. Include a flammable beam, a sheltered patch under the roof and a neighbouring exposed patch. That small arrangement can demonstrate placement, exposure, wetness, fire and structural loss without rapidly panning through unrelated systems. Record the seed, generator version, camera coordinate, physical view dimensions, world/step ticks, weather and graphics preset.</p><p>Write the viewer’s expected observations in order: rain wets the open slope; the roof shelters its interior; a dry exposed patch can burn; renewed rain suppresses flame; seasonal change alters the visible environment. If two observations fight each other, adjust the starting fixture or timing rather than cutting around a broken reaction.</p>"
+      },
+      {
+        "title": "Use a fixture schedule, not manual luck",
+        "html": "<p>A schedule states when a known input is injected. It is not a replacement simulation and should call the same event interface as player tools. In the example, a pure function lists events whose timestamps have just been crossed. This avoids missing an event because a rendered frame jumped from 7.9 to 8.1 seconds. A per-event consumed flag or a monotonically advancing event cursor prevents repeated dispatch.</p><p>Seasonal change takes longer than ordinary physical reactions. Prepare a documented near-boundary calendar state or use the displayed fast-forward control; do not imply that a full season naturally takes seconds at 1x. The evidence file records this setup so the opener remains a truthful demonstration.</p>"
+      },
+      {
+        "title": "Capture without changing the workload",
+        "html": "<p>On macOS, the built-in Screenshot toolbar opens with Shift-Command-5 and can record a selected region. Choose the world and UI region intentionally and record at the actual tested physical view. Recording adds CPU/GPU work, so measure a baseline without capture and compare a captured run; report the difference instead of claiming the encoder is free. No new recording package is necessary for this exercise.</p><p>Capture the same schedule at the reference settings and target hardware. Keep a raw recording before editing for YouTube. Edit the presentation later, but preserve a link between the claim and the raw run that proves it. A beautiful exported clip is not evidence that the target machine rendered those frames interactively.</p>"
+      },
+      {
+        "title": "Score the scene against separate promises",
+        "html": "<p>Use four columns in the review: visual identity, reaction timing, performance and usability. Check the art bans explicitly: no filtered edges, reflections, bloom or added middle terrain. Check visible deadlines from the reaction table and inspect whether shelters and support remain readable at real cell size. Use average and worst-case frame times, not an FPS number sampled during a quiet moment.</p><p>Approved reference images and tolerances must exist before claiming visual sign-off. If they are missing, label the comparison a proposal review. Store the fixture, event script, raw clip and results together. A failed criterion becomes a concrete issue such as rain enters the sheltered cell, not a vague request to add polish.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete schedule experiment: examples/lesson_089.rs; run cargo run --example lesson_089.",
+      "language": "rust",
+      "code": "#[derive(Clone, Copy, Debug, PartialEq)]\nstruct Event { at_ms: u64, action: &'static str }\nfn crossed(events: &[Event], before: u64, now: u64) -> Vec<Event> {\n    events.iter().copied().filter(|e| before < e.at_ms && e.at_ms <= now).collect()\n}\nfn main() {\n    let events = [Event { at_ms: 8_000, action: \"rain fixture begins\" },\n        Event { at_ms: 18_000, action: \"clear fixture resumes\" },\n        Event { at_ms: 28_000, action: \"ignite dry exposed grass\" },\n        Event { at_ms: 36_000, action: \"rain suppresses the fire\" }];\n    assert_eq!(crossed(&events, 7_900, 8_100).len(), 1);\n    assert!(crossed(&events, 8_100, 8_200).is_empty());\n    for event in crossed(&events, 0, 60_000) {\n        println!(\"{:>2}s  {}\", event.at_ms / 1000, event.action);\n    }\n}",
+      "explanation": [
+        "Crossing a timestamp is different from comparing for exact equality with a frame time.",
+        "The schedule returns inputs; it does not assert that their required consequences occurred. Measure those consequences separately.",
+        "Events at time zero need explicit initialization; this helper dispatches events strictly after the previous timestamp."
+      ],
+      "expected": "Four schedule lines at 8,18,28,36 seconds; both crossing assertions pass."
+    },
+    "exercises": [
+      {
+        "title": "Skip across two events",
+        "prompt": "Ask crossed for the interval from 7,000ms to 19,000ms.",
+        "hint": "Both interval boundaries matter.",
+        "solution": "<p>It returns the 8,000ms and 18,000ms events in list order. Assert two entries. Call the next interval beginning at 19,000ms and verify neither reappears.</p>",
+        "proof": "Long frames do not skip or repeat either fixture event."
+      },
+      {
+        "title": "Make one falsifiable claim",
+        "prompt": "Write one exact rain/shelter acceptance statement before recording.",
+        "hint": "Name the cause, target and allowed observation.",
+        "solution": "<p>For example: while rain runs for ten seconds, the exposed soil moisture rises and the roof-protected comparison cell receives no direct precipitation. Record both moisture values and the matching frame.</p>",
+        "proof": "The statement can fail and identify a specific system."
+      },
+      {
+        "title": "Separate encoder overhead",
+        "prompt": "Compare one identical run with and without native screen recording.",
+        "hint": "Keep scene, seed and preset fixed.",
+        "solution": "<p>Report both frame-time distributions and the capture settings. If recording exceeds budget, choose a documented capture platform rather than quietly calling the raw uncaptured performance proof a captured result.</p>",
+        "proof": "The report does not confuse game performance with export smoothness."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "One event sometimes never fires",
+        "cause": "It requires exact equality with a floating-point frame time.",
+        "fix": "Detect interval crossing or consume an integer event queue."
+      },
+      {
+        "symptom": "Season change looks staged without explanation",
+        "cause": "The starting calendar or speed was omitted.",
+        "fix": "Include initial time and displayed fast-forward state in the capture notes."
+      },
+      {
+        "symptom": "Screenshot matches but clip feels broken",
+        "cause": "Motion/timing and audio were never reviewed.",
+        "fix": "Score the full raw scene against separate behavior and experience checks."
+      }
+    ],
+    "episode": {
+      "hook": "Open the episode with the real 60-second goal scene, then show the fixture that makes it repeatable.",
+      "beats": [
+        "Fix the house fixture",
+        "Schedule inputs",
+        "Capture the raw run",
+        "Measure outcomes",
+        "Review the art and performance gates"
+      ],
+      "demo": "Play one raw clip, pause at rain protection and beam loss, and show the corresponding recorded state.",
+      "recap": "The vertical slice proves an experience over time, not only a still image."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "macOS screen recording",
+        "url": "https://support.apple.com/en-us/102618"
+      }
+    ]
+  },
+  "90": {
+    "outcome": "Generate a stable desert fixture and move only eligible surface sand with a bounded, count-preserving wind rule.",
+    "why": "A desert is useful when it changes the same system’s conditions, not when it introduces an unrelated second sand engine. Climate, terrain and surface eligibility should explain the new behavior.",
+    "sections": [
+      {
+        "title": "Separate biome context from material identity",
+        "html": "<p>A sand cell remains sand in every biome. Its material properties still govern density and wet cohesion. The desert supplies a warmer, drier ambient context, sparse vegetation and a weather policy that suppresses ordinary rain. Keep these as biome/environment inputs rather than a special movement implementation hidden behind the name DesertSand.</p><p>Start with a handcrafted dune at its resting slope. Run a no-wind control for 600 ticks. If the dune slides everywhere, the generator or repose rule is wrong before wind enters the experiment. A calm baseline is necessary to attribute later movement to the wind.</p>"
+      },
+      {
+        "title": "Define what the wind may entrain",
+        "html": "<p>The design says wind moves sand, but that phrase alone does not choose which grains or how far. Propose an initial bounded rule: only dry surface grains with air above and sufficient wind are eligible; attempt one adjacent downwind destination using the normal movement/edit path. Whether grains lift into particles, skim the surface or first require a slope is an explicit v2 decision.</p><p>Restricting eligibility keeps buried sand from teleporting through an entire dune. Store no independent desert velocity field until it answers an actual requirement. If the chosen rule uses random probability, seed the decision from the existing tick/coordinate scheme, and test both a calm control and reversed wind using identical terrain.</p>"
+      },
+      {
+        "title": "Preserve matter and the once-per-tick rule",
+        "html": "<p>A grain crossing into air transfers occupancy and clears its source. Scanning with the wind can otherwise encounter the same grain again and carry it across the whole row in one tick. The sample uses a moved marker attached to the destination to demonstrate the once-per-tick contract. It is a one-row eligibility experiment, not the complete 2D sand physics.</p><p>In the real world combine gravity, diagonal movement and wind in one documented priority order. A grain must not receive a full gravity move and a second independent wind update if that exceeds the accepted displacement bound. The phase safety proof must cover the combined read/write reach, including any destination check.</p>"
+      },
+      {
+        "title": "Test climate and appearance together",
+        "html": "<p>At a desert/plain border, interpolate the weather baseline as specified, then apply the chosen no-rain desert policy explicitly. Decide whether the border has a short transition or a hard biome override; do not call an abrupt jump smooth. Water poured by the player still follows water rules even where natural rain is absent.</p><p>Use the approved midday gradient and flat/ramped sand palette. Moving grains are visible because occupied cells change, not because random sand-colour speckle is added. Review the dune silhouette over many cycles: a readable breeze should not flatten every dune in one minute. Measure mean displacement and count conservation separately from beauty.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete surface-transport experiment: examples/lesson_090.rs; run cargo run --example lesson_090.",
+      "language": "rust",
+      "code": "#[derive(Clone, Copy, Debug, PartialEq, Eq)]\nenum Kind { Air, Sand, Stone }\nfn wind_right(row: &mut [Kind]) {\n    let mut moved = vec![false; row.len()];\n    for x in 0..row.len().saturating_sub(1) {\n        if !moved[x] && row[x] == Kind::Sand && row[x+1] == Kind::Air {\n            row.swap(x, x+1);\n            moved[x+1] = true;\n        }\n    }\n}\nfn main() {\n    let mut row = [Kind::Sand, Kind::Air, Kind::Air, Kind::Stone];\n    wind_right(&mut row);\n    assert_eq!(row, [Kind::Air, Kind::Sand, Kind::Air, Kind::Stone]);\n    assert_eq!(row.iter().filter(|k| **k == Kind::Sand).count(), 1);\n    println!(\"one tick: one eligible grain, one bounded move\");\n}",
+      "explanation": [
+        "The input row represents already eligible exposed cells; production must calculate dryness/exposure in 2D.",
+        "The local moved array illustrates the invariant. Reuse the world’s per-tick marking scheme instead of allocating a fresh full-world array in every rule.",
+        "Stone remains an obstruction even though the wind wants the grain farther right."
+      ],
+      "expected": "one tick: one eligible grain, one bounded move"
+    },
+    "exercises": [
+      {
+        "title": "Expose the scan-order bug",
+        "prompt": "Remove the moved guard and run a row beginning Sand,Air,Air,Air.",
+        "hint": "The loop visits increasing positions.",
+        "solution": "<p>The same grain keeps becoming the next source and may reach the far end in one tick. Restore the marker or a correctly designed staged update; assert a maximum one-cell horizontal move for this fixture.</p>",
+        "proof": "The broken version fails a displacement assertion even though count remains one."
+      },
+      {
+        "title": "Keep wet sand still",
+        "prompt": "Extend eligibility with a moisture argument and choose a dry threshold.",
+        "hint": "Document the threshold as tuning.",
+        "solution": "<p>Before the swap, require moisture below the approved threshold. Test two identical rows differing only in moisture; only the dry case moves. Do not replace a wet grain with a separate hidden material.</p>",
+        "proof": "The wet control remains unchanged."
+      },
+      {
+        "title": "Pour water in the desert",
+        "prompt": "Test whether the biome override should delete player-painted water.",
+        "hint": "Natural precipitation is not all water.",
+        "solution": "<p>It should not. Suppressing natural rainfall does not license deleting pools or changing density rules. Evaporation may act according to ambient conditions at its documented rate.</p>",
+        "proof": "Water is conserved by movement and only leaves through an explicit sink."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Whole dunes drift instantly",
+        "cause": "Buried grains are eligible or one grain moves repeatedly.",
+        "fix": "Check exposure and per-tick moved state."
+      },
+      {
+        "symptom": "Water vanishes on entering desert",
+        "cause": "A biome override rewrites material instead of climate.",
+        "fix": "Apply climate to conditions, not blanket occupancy replacement."
+      },
+      {
+        "symptom": "Wind moves sand through stone",
+        "cause": "Destination selection ignores occupancy or path.",
+        "fix": "Use the existing checked movement contract."
+      }
+    ],
+    "episode": {
+      "hook": "Watch one grain reveal why wind cannot simply add x every time the loop sees sand.",
+      "beats": [
+        "Establish a resting dune",
+        "Define entrainment eligibility",
+        "Break the scan order",
+        "Restore bounded transfer",
+        "Review long-run shape and palette"
+      ],
+      "demo": "Show the same dune under calm, rightward and reversed wind with constant sand count.",
+      "recap": "Biome differences are conditions applied to shared material rules."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Mutable vector operations",
+        "url": "https://doc.rust-lang.org/std/vec/struct.Vec.html"
+      }
+    ]
+  },
+  "91": {
+    "outcome": "Schedule a reproducible eruption without replaying a season of missed activity when an off-screen volcano returns.",
+    "why": "A global calendar advances while off-screen material is frozen. Eruption timing must say what that combination means. Otherwise returning to a quiet volcano can release an accidental backlog of lava and particles.",
+    "sections": [
+      {
+        "title": "Define an event from identity and calendar time",
+        "html": "<p>Give each generated volcano a stable feature ID derived from its world-coordinate placement. Combine that ID with the world seed to choose an offset inside a fixed seasonal period. The next eruption is then a function of seed, feature ID and calendar time. Loading the right-hand chunk first must not choose a different eruption than loading the left-hand chunk first.</p><p>For the teaching schedule, one period is 72,000 world ticks. Each volcano receives one deterministic offset inside the period. This spreads events without maintaining an off-screen timer for every feature. The chosen mixing function only needs reproducibility for this purpose; do not present it as cryptographic randomness or as a replacement for the approved terrain hash.</p>"
+      },
+      {
+        "title": "Resolve the off-screen policy explicitly",
+        "html": "<p>The spec freezes off-screen material. A natural extension is to skip eruption events whose active time was never simulated, then schedule the next future event when the feature becomes active. This is a proposed policy to confirm at the milestone, not a hidden interpretation. An alternative may produce a visibly active volcano on entry, but it still needs a bounded rule rather than replaying hundreds of historical events.</p><p>Keep event selection separate from material output. Finding that an event is due does not immediately allocate particles. The eruption command requests bounded lava/ash emission through the existing event and particle budgets. If capacity is full, the policy must say whether excess output is skipped, delayed within a strict bound, or represented another way.</p>"
+      },
+      {
+        "title": "Handle large calendar steps without repeated blasts",
+        "html": "<p>At high fast-forward, one executed tick can cross an eruption timestamp. Detect crossing of the scheduled timestamp rather than exact equality with world_tick. Consume the event once, then compute the first future event after the new calendar time. If one multiplier spans multiple periods, a maximum-one-event-per-executed-tick policy bounds work but skips historical events; document that approximation.</p><p>Use the production event ID to prevent a saved/reloaded volcano from consuming the same event twice. This may be an explicit next-event/cycle record or a deterministic schedule combined with a saved consumed-cycle index. Do not rely on a UI message disappearing to mark the event handled.</p>"
+      },
+      {
+        "title": "Build the cone and prove its output",
+        "html": "<p>Generate the cone as normal supported terrain, with a documented vent position and a lava source policy. Decide whether eruption lava is an intentional material source or drawn from a reservoir; otherwise conservation tests will disagree with the visual goal. Ash still has its material kind and wind behavior, even when emitted dramatically.</p><p>Run a tiny eruption fixture at the particle cap before a large volcano. Count emitted, retained, destroyed and deferred material under the chosen policy. Then test the off-screen interval: advance the calendar, reactivate the same feature and assert no unbounded catch-up queue. The viewer should see an event produced by the world, not a memory spike disguised as spectacle.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete event-time experiment: examples/lesson_091.rs; run cargo run --example lesson_091.",
+      "language": "rust",
+      "code": "fn next_eruption(seed: u64, feature: u64, now: u64) -> Option<u64> {\n    const PERIOD: u64 = 72_000;\n    let offset = (seed ^ feature.wrapping_mul(0x9E3779B97F4A7C15)) % PERIOD;\n    let start = (now / PERIOD).checked_mul(PERIOD)?;\n    let candidate = start.checked_add(offset)?;\n    if candidate > now { Some(candidate) }\n    else { candidate.checked_add(PERIOD) }\n}\nfn main() {\n    let seed = 17;\n    let id = 42;\n    let first = next_eruption(seed,id,0).unwrap();\n    let after_absence = next_eruption(seed,id,72_000 * 10).unwrap();\n    assert!(after_absence > 72_000 * 10);\n    assert_eq!(next_eruption(seed,id,0),Some(first));\n    assert_eq!(next_eruption(seed,id,first),first.checked_add(72_000));\n    println!(\"one stable schedule; no historical eruption queue\");\n}",
+      "explanation": [
+        "checked arithmetic makes extreme calendar overflow a handled absence rather than an unchecked wrap.",
+        "The function selects a strictly future timestamp; crossing and consumed-event state belong to the caller.",
+        "The seed/feature mixer is a small deterministic teaching function. Keep the production hash and event identity versioned with the world policy."
+      ],
+      "expected": "one stable schedule; no historical eruption queue"
+    },
+    "exercises": [
+      {
+        "title": "Return after ten seasons",
+        "prompt": "Evaluate the feature at ten periods after the start. How many old eruptions are queued?",
+        "hint": "The function computes a future event, not an event history.",
+        "solution": "<p>Zero old events are queued under the proposed skip policy. Only the next future timestamp is selected. Assert it exceeds now and is at most one period away.</p>",
+        "proof": "Reactivation work does not grow with absence length."
+      },
+      {
+        "title": "Cross instead of equal",
+        "prompt": "Advance from one tick before an eruption to three ticks after it.",
+        "hint": "Calendar multipliers may skip exact timestamps.",
+        "solution": "<p>Dispatch once when before &lt; due and due &lt;= now, then replace due with next_eruption(seed,id,now). Calling again at the same now must not repeat the consumed event.</p>",
+        "proof": "A crossing test sees exactly one event."
+      },
+      {
+        "title": "Account for new lava",
+        "prompt": "Choose reservoir or explicit source behavior and write a count assertion.",
+        "hint": "An eruption may intentionally introduce matter, but only explicitly.",
+        "solution": "<p>A reservoir policy subtracts emitted cells from storage. A source policy records emitted mass as a source term. In either case total change equals the documented source minus destruction; it is not an unexplained failed conservation test.</p>",
+        "proof": "Every emitted cell belongs to one accounted outcome."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Volcano fires every frame at one date",
+        "cause": "The due event was not consumed.",
+        "fix": "Advance the scheduled event or save its consumed cycle."
+      },
+      {
+        "symptom": "Returning causes hundreds of bursts",
+        "cause": "Missed off-screen events were replayed without a bound.",
+        "fix": "Use the approved skip/coalescing policy at activation."
+      },
+      {
+        "symptom": "Same seed produces different timing",
+        "cause": "Event offset consumes a mutable exploration RNG.",
+        "fix": "Derive it from stable feature identity and calendar period."
+      }
+    ],
+    "episode": {
+      "hook": "Leave a volcano for ten seasons, return, and prove it does not replay ten seasons of explosions.",
+      "beats": [
+        "Define feature identity",
+        "Derive a calendar offset",
+        "Choose off-screen semantics",
+        "Consume one event",
+        "Account for emitted material"
+      ],
+      "demo": "Compare event times before and after reload, then show one budgeted eruption.",
+      "recap": "A deterministic event schedule still needs an explicit activity and consumption policy."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Checked integer operations",
+        "url": "https://doc.rust-lang.org/std/primitive.u64.html"
+      }
+    ]
+  },
+  "92": {
+    "outcome": "Move a shoreline sand cell through a defined erosion rule while keeping rendered ripples and water volume separate.",
+    "why": "V1 water ripples are colour changes on occupied water. They cannot physically erode a coast. V2 needs a new mechanical input that reuses checked material movement without secretly creating tide water.",
+    "sections": [
+      {
+        "title": "Start with a mechanical question",
+        "html": "<p>A sandy edge touches water. What changes one tick later? A useful first proposal is occasional relocation of a wet, exposed sand cell into an adjacent lower empty cell when the shoreline process selects it. This represents erosion with existing matter, not accurate wave dynamics. State the eligibility, destination choices, rate and exclusions before coding.</p><p>Build a nine-cell cross-section rather than an entire island. Include sand, water, air and stone so the fixture can show both allowed movement and blocked movement. If you cannot explain exactly which source/destination changed in nine cells, a beautiful animated ocean will only hide the ambiguity.</p>"
+      },
+      {
+        "title": "Keep the visual ripple out of the rule",
+        "html": "<p>The renderer may evaluate a sine function for a surface colour line. Its phase can change every frame while simulation is paused. If terrain motion depends on that drawing phase, rendering rate and camera presentation can change physics. Instead let a deterministic tick-based shoreline selector decide when a contact is eligible. Rendering may illustrate the same field but does not own mutation.</p><p>Tides remain removed unless separately designed. Raising the entire water level by drawing more blue pixels is not conservative water movement. A mechanical tide would require a reservoir/boundary pressure model and explicit mass policy. The present exercise performs one local transfer and claims nothing about a full tidal simulation.</p>"
+      },
+      {
+        "title": "Check the full movement contract",
+        "html": "<p>The sample requires sand at the source, air at the destination, a one-row downward move with at most one-column horizontal difference, and a water neighbour at the source. It uses swap, preserving both source and destination occupancy. This is a focused proposal kernel: exposure and sampling priority remain caller responsibilities.</p><p>In production, mark moved cells once per executed tick, invalidate surface/dirty/support state, and do not run the same grain through a second independent powder step afterward. Record water volume before and after a closed-scene erosion run. Sand displacement may change water motion, but the erosion rule itself must not paint or delete water.</p>"
+      },
+      {
+        "title": "Tune rates at two horizons",
+        "html": "<p>A shoreline needs visible change in an intentional clip, but an island should not vanish after a few ordinary seasons. Inspect the rate with a short exposed-beach fixture and a much longer island fixture. Tune eligibility and probability rather than exaggerating the random colour texture, which the art style forbids.</p><p>Compare wind-only, rain-only and shoreline-only runs before combining them. This isolates whether a coast changes because of the new rule or existing runoff. Record the approved v2 policy with its fixtures. If realistic wave erosion would require too much complexity, retain a simple disclosed approximation or defer the feature rather than adding an unbounded solver.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete local-transfer experiment: examples/lesson_092.rs; run cargo run --example lesson_092.",
+      "language": "rust",
+      "code": "#[derive(Clone, Copy, Debug, PartialEq, Eq)]\nenum Kind { Air, Water, Sand, Stone }\nfn erode(cells: &mut [Kind], width: usize, from: usize, to: usize) -> bool {\n    if width == 0 || from >= cells.len() || to >= cells.len() { return false; }\n    let (x,y)=(from%width,from/width);\n    let (tx,ty)=(to%width,to/width);\n    if cells[from]!=Kind::Sand || cells[to]!=Kind::Air || ty!=y+1 || x.abs_diff(tx)>1 {\n        return false;\n    }\n    let wet = (x>0 && cells[from-1]==Kind::Water)\n        || (x+1<width && from+1<cells.len() && cells[from+1]==Kind::Water);\n    if !wet { return false; }\n    cells.swap(from,to);\n    true\n}\nfn main() {\n    let mut cells=[Kind::Air,Kind::Air,Kind::Air,\n        Kind::Stone,Kind::Sand,Kind::Water,\n        Kind::Stone,Kind::Air,Kind::Stone];\n    let before=cells.iter().filter(|k|**k==Kind::Water).count();\n    assert!(erode(&mut cells,3,4,7));\n    assert_eq!(cells[4],Kind::Air);\n    assert_eq!(cells[7],Kind::Sand);\n    assert_eq!(cells.iter().filter(|k|**k==Kind::Water).count(),before);\n    println!(\"sand moved downhill; water count unchanged\");\n}",
+      "explanation": [
+        "The single-row-lower restriction makes the destination reach explicit; arbitrary-distance relocation is rejected.",
+        "This kernel checks side water contact only. Full production exposure and contact geometry must be specified and tested separately.",
+        "No sine-wave or renderer value appears in this function."
+      ],
+      "expected": "sand moved downhill; water count unchanged"
+    },
+    "exercises": [
+      {
+        "title": "Block the destination",
+        "prompt": "Replace index7 with Stone and attempt erosion again.",
+        "hint": "A proposed movement still needs a free destination.",
+        "solution": "<p>erode returns false and the entire array stays unchanged. Assert equality with a saved copy of the input, not just the returned boolean.</p>",
+        "proof": "Stone is not overwritten."
+      },
+      {
+        "title": "Remove water contact",
+        "prompt": "Replace index5 with Air.",
+        "hint": "The contact prerequisite must be observable.",
+        "solution": "<p>The side-water test fails, so the source sand remains at index4. Existing gravity may later move it under a different rule, but this isolated erosion function does not.</p>",
+        "proof": "The isolated function leaves dry terrain unchanged."
+      },
+      {
+        "title": "Pause the simulation",
+        "prompt": "Let the decorative ripple continue while the world is paused. Should the sand move?",
+        "hint": "Drawing phase is not world state.",
+        "solution": "<p>No. The erosion selector is a simulation operation and receives no ticks while paused. A changing surface colour is permitted only as a visual treatment if approved.</p>",
+        "proof": "The world hash remains fixed while rendering changes."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Coast changes when FPS changes",
+        "cause": "Erosion is driven by the render loop.",
+        "fix": "Move selection and mutation into deterministic ticks."
+      },
+      {
+        "symptom": "Water count rises with each wave",
+        "cause": "The ripple paints blue material rather than colour.",
+        "fix": "Keep occupancy and decoration separate."
+      },
+      {
+        "symptom": "Island disappears quickly",
+        "cause": "Only the short-term visual rate was tuned.",
+        "fix": "Add long-horizon silhouette and mass checks before approving rates."
+      }
+    ],
+    "episode": {
+      "hook": "Freeze the physics and keep the ripple moving: the sand should stay put.",
+      "beats": [
+        "Separate colour and occupancy",
+        "Propose one local erosion step",
+        "Test conservation",
+        "Break contact and destination conditions",
+        "Compare a day with a year"
+      ],
+      "demo": "Show the nine-cell fixture alongside the island shoreline and identify the same transfer.",
+      "recap": "Rendered water can suggest motion; erosion needs its own bounded simulation contract."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Slice swapping",
+        "url": "https://doc.rust-lang.org/std/primitive.slice.html#method.swap"
+      }
+    ]
+  },
+  "93": {
+    "outcome": "Grow a dense forest using existing plant rules while measuring and bounding its burst workloads.",
+    "why": "Sparse plains may pass the frame budget while one forest fire queues thousands of support and growth updates. Reusing the same materials does not preserve the same worst-case workload.",
+    "sections": [
+      {
+        "title": "Density changes interactions, not only appearance",
+        "html": "<p>A tree template adds wood and attached leaves. Doubling tree count can increase contact, fire propagation, falling leaves, wetness traffic, shadow/exposure invalidations and support searches together. That is why a new forest biome needs a stress fixture even when no new material is introduced.</p><p>Generate a small approved-density forest with deterministic positions. Keep its seed and placement configuration fixed while testing. First run a calm wet forest to establish a resting baseline, then ignite one edge during a dry wind and observe both the visible front and the number of secondary jobs requested per tick.</p>"
+      },
+      {
+        "title": "Measure work where it is generated",
+        "html": "<p>Counters should distinguish cell updates, changed columns, support requests, particle emissions, growth edits and draw submissions. A single total tick duration tells you that a frame was slow but not why. Place counters at request sites and report a per-tick maximum alongside the time measurement.</p><p>Repeated changes to one structure can request the same support group many times before the support pass runs. Coalescing identical pending keys removes redundant work without pretending the group is already supported. The worked queue holds unique pending IDs and takes only a chosen batch. Its limit is work dispatch capacity, not permission to silently delete the unprocessed requests.</p>"
+      },
+      {
+        "title": "Bound queue memory and service latency",
+        "html": "<p>A per-frame service budget alone does not bound a queue if incoming work exceeds it indefinitely. Decide how requests are merged spatially, how many unique requests can exist, and what overload behavior is visible. For example, represent one dirty region once and enlarge its bounds instead of appending the same cell thousands of times.</p><p>Do not defer an unsupported roof forever merely to keep a green FPS number. The accepted design may lower vegetation density, reduce the active view, simplify the support workload or slow the entire simulation uniformly. Record maximum service latency as well as queue length. Forest density is a tunable content cap, not a reason to violate visible behavior.</p>"
+      },
+      {
+        "title": "Test the complete forest cycle",
+        "html": "<p>Use three runs: wet season, dry fire and spring recovery. Wet leaves should resist burning under the approved moisture rule. Dry fire should spread with the same rules used on plains. Regrowth should not overwrite existing structures and should remain blocked where occupancy requires. Inspect canopy drips and leaf litter as well as the silhouette.</p><p>Repeat the v1 plains benchmark after the new template variants and material settings are added. Shared tables can regress old scenes. Finally capture the forest at actual cell size; filling every ground pixel with needles or per-cell variation would violate the sparse silhouette style even if the engine can render it.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete coalescing-queue experiment: examples/lesson_093.rs; run cargo run --example lesson_093.",
+      "language": "rust",
+      "code": "use std::collections::{BTreeSet, VecDeque};\n#[derive(Default)]\nstruct Pending { order: VecDeque<u32>, keys: BTreeSet<u32> }\nimpl Pending {\n    fn request(&mut self, id: u32) {\n        if self.keys.insert(id) { self.order.push_back(id); }\n    }\n    fn batch(&mut self, limit: usize) -> Vec<u32> {\n        let mut out=Vec::new();\n        while out.len()<limit {\n            let Some(id)=self.order.pop_front() else { break; };\n            self.keys.remove(&id);\n            out.push(id);\n        }\n        out\n    }\n}\nfn main() {\n    let mut q=Pending::default();\n    for _ in 0..1000 { q.request(7); }\n    q.request(8); q.request(9);\n    assert_eq!(q.order.len(),3);\n    assert_eq!(q.batch(2),vec![7,8]);\n    assert_eq!(q.batch(2),vec![9]);\n    println!(\"1002 requests became 3 unique pending jobs\");\n}",
+      "explanation": [
+        "The BTreeSet tracks membership; VecDeque preserves first-request order.",
+        "This example deduplicates IDs, not arbitrary overlapping world rectangles. The production key must match the work being coalesced.",
+        "A request may be submitted again after service; per-tick group markers and changed-state checks prevent redundant rechecks as needed."
+      ],
+      "expected": "1002 requests became 3 unique pending jobs"
+    },
+    "exercises": [
+      {
+        "title": "Service only one job",
+        "prompt": "Change batch capacity to1 and drain the queue.",
+        "hint": "Unprocessed jobs remain owned by the queue.",
+        "solution": "<p>The batches are [7], [8], [9], then empty. No unique request is silently discarded to enforce the per-batch bound.</p>",
+        "proof": "The union of drained IDs equals the requested unique set."
+      },
+      {
+        "title": "Create a sustained overload",
+        "prompt": "Submit100 unique new IDs per tick and service10.",
+        "hint": "Deduplication cannot merge genuinely different IDs.",
+        "solution": "<p>The queue grows by90 per tick. Add an explicit capacity/overload policy or reduce content/work. Calling the queue bounded merely because batch is bounded would be false.</p>",
+        "proof": "A counterexample demonstrates growth and motivates the chosen policy."
+      },
+      {
+        "title": "Review the silhouette",
+        "prompt": "Double tree placement density while keeping the material palette fixed.",
+        "hint": "Performance and approved appearance are separate gates.",
+        "solution": "<p>Measure cost and compare the frame to the sparse silhouette reference. Even a performant dense arrangement may require a lower approved density. Keep the final content value in biome configuration.</p>",
+        "proof": "Both the visual review and benchmark report the selected density."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "A forest fire creates frame spikes",
+        "cause": "Many cells request the same expensive derived work.",
+        "fix": "Instrument requests and coalesce genuine duplicates before adding threads."
+      },
+      {
+        "symptom": "Queue never catches up",
+        "cause": "Unique arrivals exceed service capacity.",
+        "fix": "Bound content or revise overload behavior; do not hide infinite debt."
+      },
+      {
+        "symptom": "Forest looks noisy despite flat colours",
+        "cause": "Template density or internal detail overwhelms silhouettes.",
+        "fix": "Review actual-size frames and simplify shape/density."
+      }
+    ],
+    "episode": {
+      "hook": "One spark, one thousand support requests—and only three unique jobs.",
+      "beats": [
+        "Establish a resting forest",
+        "Count burst work",
+        "Coalesce duplicates",
+        "Expose sustained overload",
+        "Run wet/fire/regrowth fixtures"
+      ],
+      "demo": "Display queue length and service latency beside the raw forest-fire capture.",
+      "recap": "A content expansion needs new workload evidence, even when its rules are reused."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "VecDeque operations",
+        "url": "https://doc.rust-lang.org/std/collections/struct.VecDeque.html"
+      }
+    ]
+  },
+  "94": {
+    "outcome": "Route optional tools and natural events through one bounded command interface, then prove expansion has not broken the v1 world.",
+    "why": "Two ways of starting rain should not produce two incompatible rain systems. An event command is a shared boundary between input, schedules, tests and simulation effects.",
+    "sections": [
+      {
+        "title": "Name intent before applying effects",
+        "html": "<p>An input event says what the player requested: ignite this coordinate, start rain in this weather column, or trigger this volcano. A command value captures that intent. The simulation validates it against current world state and applies one defined rule. Natural event schedules can submit the same command shape without pretending to be mouse input.</p><p>Use an enum with explicit coordinates/IDs instead of a string such as \"eruption\" interpreted independently by several modules. The command carries enough data to identify its target, while the world owns validation and consequences. Invalid targets return a normal rejection; a tool click over a panel should have been filtered earlier by input ownership.</p>"
+      },
+      {
+        "title": "Put cooldowns at the correct boundary",
+        "html": "<p>Cooldown state belongs to the command source policy, not to the physical lava or rain cells. The player may have a one-day tool cooldown while a natural volcano uses a seasonal schedule. Share the effect executor, but do not accidentally force natural weather through the player’s toolbar cooldown.</p><p>The sample demonstrates that distinction with a Player/Nature source. It uses saturating addition for an extreme calendar value and stores the next player-ready tick. Whether pause permits editing tools is a separate approved control rule; tests should name it rather than inherit whatever event-loop order happened first.</p>"
+      },
+      {
+        "title": "Bound execution, not only command creation",
+        "html": "<p>A single command can produce a large amount of work. Eruption must still obey particle capacity; rain edits weather humidity instead of touching every column in an infinite region; lightning uses bounded connected-metal handling. Queue capacity and per-frame dispatch are therefore only one layer of the budget.</p><p>Assign commands stable identifiers when recording replays or saving pending state. Decide which commands are already consumed at a snapshot boundary. A command applied immediately before a save must not be accidentally replayed from the pending queue after load and produce a second explosion.</p>"
+      },
+      {
+        "title": "Close M6 with a regression matrix",
+        "html": "<p>Build rows for plains, mountain, sea/beach, desert, volcano, island and forest. For each, record rest behavior, intended disturbance, material accounting, active-boundary behavior, memory and frame-time results. The v1 rows remain required even if the new volcano clip looks excellent. A shared material property changed for ash or wood can alter an old beach or house fixture.</p><p>Keep optional event controls clearly labelled and verify their page/number-key mapping. Update the asset ledger for new biome sounds and images, and document any revised density cap. The M6 result is a set of passed contracts and known accepted exceptions, not an assertion that every conceivable world is stable.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete command/cooldown experiment: examples/lesson_094.rs; run cargo run --example lesson_094.",
+      "language": "rust",
+      "code": "#[derive(Clone, Copy)]\nenum Source { Player, Nature }\n#[derive(Clone, Copy)]\nenum Command { Rain { column: i32 } }\nfn accept(command: Command, source: Source, now: u64,\n          ready: &mut u64, applied: &mut Vec<i32>) -> bool {\n    if matches!(source,Source::Player) && now<*ready { return false; }\n    match command { Command::Rain { column } => applied.push(column) }\n    if matches!(source,Source::Player) { *ready=now.saturating_add(24_000); }\n    true\n}\nfn main() {\n    let (mut ready,mut applied)=(0,Vec::new());\n    assert!(accept(Command::Rain{column:2},Source::Player,0,&mut ready,&mut applied));\n    assert!(!accept(Command::Rain{column:2},Source::Player,1,&mut ready,&mut applied));\n    assert!(accept(Command::Rain{column:3},Source::Nature,1,&mut ready,&mut applied));\n    assert_eq!(applied,vec![2,3]);\n    println!(\"shared effect path; distinct scheduling policies\");\n}",
+      "explanation": [
+        "The example records accepted effects as column IDs so the source policy can be tested without weather simulation.",
+        "The natural scheduler still has its own rate and capacity constraints; bypassing player cooldown does not mean unlimited work.",
+        "Production validates the target before consuming cooldown or changing state, using the chosen invalid-request semantics."
+      ],
+      "expected": "shared effect path; distinct scheduling policies"
+    },
+    "exercises": [
+      {
+        "title": "Reach the cooldown boundary",
+        "prompt": "Try the second player request exactly at24,000 ticks.",
+        "hint": "The rejection condition is strictly before ready.",
+        "solution": "<p>The request is accepted when now equals ready. Test ready−1, ready and ready+1 explicitly; a boundary error otherwise adds or removes a whole tick.</p>",
+        "proof": "Only the before-boundary case rejects."
+      },
+      {
+        "title": "Reject an invalid target",
+        "prompt": "Add validation that disallows a target outside your bounded test world. Should it spend cooldown?",
+        "hint": "Choose semantics before changing state.",
+        "solution": "<p>A reasonable proposal rejects without spending cooldown. Validate first, then apply and update readiness. If the game chooses another policy, document and test it visibly.</p>",
+        "proof": "The failed request leaves effect state and readiness unchanged under that policy."
+      },
+      {
+        "title": "Regression after a new eruption",
+        "prompt": "A volcano passes its scene test. Which earlier fixtures run before M6 closes?",
+        "hint": "Shared rules remain shared.",
+        "solution": "<p>Run the v1 foundation, reaction, save and performance fixtures as well as expansion rows. At minimum retain plains fire/rain, water density, terrain rest, save round-trip and the target-load benchmark.</p>",
+        "proof": "The result report contains both old and new content evidence."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Tool rain behaves differently from natural rain",
+        "cause": "Two code paths mutate weather independently.",
+        "fix": "Submit shared effect commands and keep only source scheduling distinct."
+      },
+      {
+        "symptom": "Saving doubles the next explosion",
+        "cause": "Consumed and pending command state overlaps.",
+        "fix": "Define a snapshot boundary for command ownership."
+      },
+      {
+        "symptom": "New biome raises baseline cost",
+        "cause": "Expansion changed shared defaults globally.",
+        "fix": "Separate biome configuration and rerun v1 performance gates."
+      }
+    ],
+    "episode": {
+      "hook": "One rain command, two sources: a player click and the weather schedule.",
+      "beats": [
+        "Capture intent in an enum",
+        "Separate source cooldowns",
+        "Bound command consequences",
+        "Save consumed state coherently",
+        "Run the old-and-new biome matrix"
+      ],
+      "demo": "Show identical rainfall effects from two sources while only the toolbar observes its cooldown.",
+      "recap": "Share effects, specify source policies, and keep old acceptance tests alive."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Enums and matching",
+        "url": "https://doc.rust-lang.org/book/ch06-00-enums.html"
+      }
+    ]
+  },
+  "95": {
+    "outcome": "Report useful load/config failures without panicking or destroying the live world, and keep the original error available for diagnosis.",
+    "why": "A user can run out of disk space, choose a corrupt file or launch without one sound asset. These are ordinary operating conditions. Recoverable errors need an ownership and recovery path just as material movement does.",
+    "sections": [
+      {
+        "title": "Place errors at boundaries, not inside every cell",
+        "html": "<p>The simulation should not ask the filesystem whether every cell update succeeded. External boundaries—configuration, asset loading, saves, window initialization—are where fallible operations belong. Return a Result containing either the requested value or enough information to explain why it was unavailable. The caller decides whether to show a message, try a backup, use a safe default or return to a menu.</p><p>Keep a valid world in memory while loading a replacement. Decode into separate validated storage and install it only after the whole load succeeds. Clearing the current world first and then discovering a corrupt region turns a recoverable input error into avoidable data loss.</p>"
+      },
+      {
+        "title": "Keep operation, path and underlying cause",
+        "html": "<p>An error saying file failed tells the player little. A useful message names what was attempted and which path, then includes the operating-system or decoding cause. A typed error can retain std::io::Error as a source instead of flattening everything into an opaque string. That helps logs distinguish not-found from permission failures without parsing English messages.</p><p>For malformed content, report the expected domain and the observed invalid field. Avoid dumping entire private file contents into the interface or logs. The example parses one numeric budget: it proves the mechanism without pretending that a full settings format has been introduced.</p>"
+      },
+      {
+        "title": "Use question-mark propagation intentionally",
+        "html": "<p>Inside a Result-returning helper, ? returns early on Err. It does not show a popup, choose a backup or retry. map_err converts the low-level error into the application context at the point where that context is known. At the top, match determines the recovery behavior.</p><p>Do not replace every unwrap mechanically with a silent default. Falling back from a missing optional audio clip may be fine; falling back from a corrupt save to an empty world without telling the player is not. Classify errors by the consequence of recovery. Impossible internal states may still indicate bugs, but external files must be validated before becoming trusted state.</p>"
+      },
+      {
+        "title": "Make failure fixtures ordinary tests",
+        "html": "<p>Use a missing path, truncated header, invalid material ID, oversized length and unwritable destination as separate fixtures. Each should assert both the reported error and unchanged prior state. Test failures after one region write as well as before the first; the transactional save policy exists for those partial-operation cases.</p><p>For a YouTube episode, show a deliberate corrupt file, the clear recovery message, and the still-running world. Then open the error type and trace the path from the original operation to the caller. This makes Result a practical tool for protecting the player’s work, rather than an abstract enum lesson repeated late in the course.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete error-context experiment: examples/lesson_095.rs; run cargo run --example lesson_095.",
+      "language": "rust",
+      "code": "use std::{fmt, fs, io, path::{Path, PathBuf}};\n#[derive(Debug)]\nenum ConfigError {\n    Read { path: PathBuf, source: io::Error },\n    Invalid { path: PathBuf, message: String },\n}\nimpl fmt::Display for ConfigError {\n    fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result {\n        match self {\n            Self::Read{path,source}=>write!(f,\"read {}: {}\",path.display(),source),\n            Self::Invalid{path,message}=>write!(f,\"decode {}: {}\",path.display(),message),\n        }\n    }\n}\nimpl std::error::Error for ConfigError {\n    fn source(&self)->Option<&(dyn std::error::Error+'static)> {\n        match self { Self::Read{source,..}=>Some(source), _=>None }\n    }\n}\nfn parse_budget(text:&str,path:&Path)->Result<u32,ConfigError> {\n    text.trim().parse::<u32>().ok().filter(|n|*n>0)\n        .ok_or_else(||ConfigError::Invalid{path:path.to_owned(),\n            message:\"expected a positive active-cell budget\".to_owned()})\n}\nfn load_budget(path:&Path)->Result<u32,ConfigError> {\n    let text=fs::read_to_string(path)\n        .map_err(|source|ConfigError::Read{path:path.to_owned(),source})?;\n    parse_budget(&text,path)\n}\nfn main() {\n    let path=Path::new(\"settings.txt\");\n    assert_eq!(parse_budget(\"74624\",path).unwrap(),74_624);\n    let error=parse_budget(\"zero\",path).unwrap_err();\n    println!(\"{error}\");\n    let _loader:fn(&Path)->Result<u32,ConfigError>=load_budget;\n}",
+      "explanation": [
+        "The main experiment is deterministic and does not write or require a settings file.",
+        "Display is the user-facing description; Error::source retains an underlying I/O cause when present.",
+        "load_budget is a focused example for a small trusted-size test file; production must also bound config input sizes before allocation."
+      ],
+      "expected": "decode settings.txt: expected a positive active-cell budget"
+    },
+    "exercises": [
+      {
+        "title": "Reject zero",
+        "prompt": "Pass the text0 to parse_budget.",
+        "hint": "Parsing a u32 is not the complete domain check.",
+        "solution": "<p>The parse succeeds numerically but filter rejects zero, returning Invalid. Assert both zero and negative input reject while74624 succeeds.</p>",
+        "proof": "No zero active budget reaches the renderer."
+      },
+      {
+        "title": "Preserve the current world",
+        "prompt": "Try loading a malformed snapshot into a running fixture.",
+        "hint": "Install new state only after successful validation.",
+        "solution": "<p>Decode into a temporary value; match the Result. On Err keep the original World and expose recovery choices. Compare the original world hash before/after the failed load.</p>",
+        "proof": "The hash stays unchanged and the message names the failure."
+      },
+      {
+        "title": "Classify a missing sound",
+        "prompt": "Should a missing optional rain clip use the same recovery as a missing world-region file?",
+        "hint": "The consequences differ.",
+        "solution": "<p>No. Optional audio can disable that source with feedback. Missing required world data invalidates the snapshot and should select a complete backup or stop loading; it must not silently paint air into missing chunks.</p>",
+        "proof": "Each boundary test asserts its documented recovery policy."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "The message loses the filename",
+        "cause": "The low-level error was propagated without boundary context.",
+        "fix": "Wrap it where the path and operation are known."
+      },
+      {
+        "symptom": "Bad settings become mysterious defaults",
+        "cause": "The code turns every error into fallback values.",
+        "fix": "Separate missing optional configuration from malformed required data and report the choice."
+      },
+      {
+        "symptom": "Failed loading wipes edits",
+        "cause": "The existing world was replaced before decode completed.",
+        "fix": "Validate a separate candidate state, then commit the replacement."
+      }
+    ],
+    "episode": {
+      "hook": "Break a save on purpose and keep the player’s world alive.",
+      "beats": [
+        "Locate fallible boundaries",
+        "Build a contextual error type",
+        "Trace question-mark propagation",
+        "Choose recovery at the caller",
+        "Assert unchanged live state"
+      ],
+      "demo": "Demonstrate invalid config, an optional missing clip and a rejected corrupt world with different recoveries.",
+      "recap": "An error value preserves the option to recover; the caller still chooses how."
+    },
+    "sources": [
+      {
+        "label": "Recoverable errors",
+        "url": "https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html"
+      },
+      {
+        "label": "Error source chains",
+        "url": "https://doc.rust-lang.org/std/error/trait.Error.html"
+      },
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "96": {
+    "outcome": "Load a supported old world with its original generator and reject unsupported versions without modifying the save.",
+    "why": "Being able to decode yesterday’s bytes does not guarantee that tomorrow’s unexplored terrain matches them. Format compatibility and world-generation compatibility are separate promises.",
+    "sections": [
+      {
+        "title": "Two version numbers answer different questions",
+        "html": "<p>The format version says how to decode a snapshot’s bytes and metadata. The generator version says which deterministic rules create chunks that were not saved because they were unchanged. If you update the generator but continue decoding the same format, old saved hills can meet newly generated incompatible hills at a seam.</p><p>Store both values in the world index and include them in fixtures. Keep released generator implementations available under stable identifiers or provide an explicit migration policy. Before the first release, breaking a draft world can be acceptable, but the game must report incompatibility instead of pretending every version is supported.</p>"
+      },
+      {
+        "title": "Dispatch supported versions explicitly",
+        "html": "<p>A small match over known generator versions makes supported behavior visible. The worked example uses two deliberately simple height functions so you can see that generator1 remains callable after generator2 exists. The real functions contain the released biome/feature rules and their selected dependencies.</p><p>Returning a function pointer is one simple implementation; a versioned enum with methods is another. The important contract is that loading generator1 does not quietly call generator2. If a historical dependency algorithm changes, a retained wrapper around the latest crate may not preserve historical results; retain the actual configuration and behavior with regression samples.</p>"
+      },
+      {
+        "title": "Migrations must be reversible operations",
+        "html": "<p>A migration reads and validates the old world into separate state, transforms it, writes a new generation, and verifies it before committing a new pointer. Preserve the original files until the replacement is proven. Never rewrite the only copy in place and hope a later chunk decode succeeds.</p><p>Some migrations change representation without changing world meaning, such as a field encoding expansion. Others alter game rules or terrain expectations. State which type you are performing and what equality the verification can claim. A changed simulation model may require a compatibility mode rather than a false promise of identical future behavior.</p>"
+      },
+      {
+        "title": "Keep fixtures and recovery instructions together",
+        "html": "<p>Commit tiny old-version worlds as test fixtures once their format is released. Tests should cover decode, re-save, expansion into an unsaved neighboring chunk and recovery from an interrupted write. Include a corrupt-new-save/valid-old-save pair to prove backup selection still follows complete-generation validation.</p><p>Write a recovery note that tells a player to copy the world folder before manual repair, how the game selects a backup and how unsupported-version messages differ from corruption. Do not ask them to delete unknown files until a diagnostic establishes what happened. Versioned evidence is also useful for your series: an episode should start from a known revision whose saved sample world still behaves as shown.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete version-dispatch experiment: examples/lesson_096.rs; run cargo run --example lesson_096.",
+      "language": "rust",
+      "code": "type HeightFn=fn(i32)->i32;\nfn height_v1(x:i32)->i32 { 20+x.rem_euclid(4) }\nfn height_v2(x:i32)->i32 { 30+x.rem_euclid(7) }\nfn generator(version:u16)->Result<HeightFn,String> {\n    match version {\n        1=>Ok(height_v1),\n        2=>Ok(height_v2),\n        _=>Err(format!(\"unsupported generator version {version}\")),\n    }\n}\nfn validate_format(version:u16)->Result<(),String> {\n    if version==1 { Ok(()) }\n    else { Err(format!(\"unsupported save format {version}\")) }\n}\nfn main() {\n    validate_format(1).unwrap();\n    let old=generator(1).unwrap();\n    let latest=generator(2).unwrap();\n    assert_eq!(old(5),21);\n    assert_eq!(latest(5),35);\n    assert!(generator(99).is_err());\n    println!(\"format 1 remains readable; generator 1 still returns 21\");\n}",
+      "explanation": [
+        "Function dispatch is based on stored generator identity, not whichever implementation was most recently written.",
+        "Format validation happens independently; the same format can describe worlds using different retained generators.",
+        "The example has no file writes, demonstrating that rejecting an unknown version does not require modifying input."
+      ],
+      "expected": "format 1 remains readable; generator 1 still returns 21"
+    },
+    "exercises": [
+      {
+        "title": "Preserve an old border",
+        "prompt": "Sample coordinates63 and64 with generator1 before and after adding generator2.",
+        "hint": "The old world must explicitly select generator1.",
+        "solution": "<p>Both samples retain their generator1 results. Mixing generator1 at63 with generator2 at64 demonstrates the seam hazard even though the file format did not change.</p>",
+        "proof": "An old-version regression array remains byte-for-byte equal."
+      },
+      {
+        "title": "Reject without rewriting",
+        "prompt": "Feed generator99 to a load fixture and watch filesystem operations.",
+        "hint": "Validation precedes a new save generation.",
+        "solution": "<p>Return an unsupported-version error before committing or rewriting anything. Hash the input files before/after and assert equality.</p>",
+        "proof": "Unknown input stays intact and recoverable."
+      },
+      {
+        "title": "Interrupt a migration",
+        "prompt": "Simulate a write failure after one new region is written.",
+        "hint": "The old manifest must still identify a complete world.",
+        "solution": "<p>Keep the original manifest/files. Incomplete new-generation files are ignored or cleaned under the agreed recovery policy. Loading chooses the intact old generation.</p>",
+        "proof": "No mixed migrated/unmigrated snapshot is selected."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "New terrain seams appear in old saves",
+        "cause": "Only the file format was versioned.",
+        "fix": "Dispatch the stored generator version for absent chunks too."
+      },
+      {
+        "symptom": "A migrated save is unrecoverable",
+        "cause": "The only original was rewritten in place.",
+        "fix": "Write a separate generation and preserve the input until verification."
+      },
+      {
+        "symptom": "Old generator changes after dependency update",
+        "cause": "The wrapper relies on evolving upstream behavior.",
+        "fix": "Pin and test historical generation behavior with known coordinate fixtures."
+      }
+    ],
+    "episode": {
+      "hook": "The save loads, but the next hill has a seam—why?",
+      "beats": [
+        "Separate two version promises",
+        "Dispatch old generation",
+        "Test unsaved borders",
+        "Design reversible migration",
+        "Write recovery instructions"
+      ],
+      "demo": "Show generator1 and2 side by side, then extend an old saved world without switching algorithms.",
+      "recap": "Readable bytes and compatible world generation are different contracts."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Cargo lockfiles",
+        "url": "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+      }
+    ]
+  },
+  "97": {
+    "outcome": "Run formatting, linting and headless regression suites on native Mac, Windows and Linux CI jobs without confusing them with hardware certification.",
+    "why": "A local green test run can miss path, compiler and platform differences. CI repeats automated checks on clean machines, but it cannot stand in for playing the game on the actual minimum GPU and CPU.",
+    "sections": [
+      {
+        "title": "Choose what can genuinely run unattended",
+        "html": "<p>Start with deterministic headless simulation tests, save fixtures, formatting and linting. These do not need a game window. Keep real graphics/audio checks as separate jobs or manual reports with explicit requirements rather than launching a window on a runner that has no display server and calling the resulting failure a physics bug.</p><p>Use cargo test --lib when the production simulation is in a library and graphical startup is in the binary. Do not hide all tests behind an ignored annotation just to get a green pipeline. The purpose of the architecture lessons was to make the core state/rules independently executable.</p>"
+      },
+      {
+        "title": "A matrix repeats one contract on several operating systems",
+        "html": "<p>A GitHub Actions matrix creates a job for each listed OS. The YAML below checks out source, selects the stable toolchain with required components, then invokes the same commands in game/. A local developer can run those commands too. Add a separate minimum-supported-Rust-version job only after choosing and recording that supported version.</p><p>Pin action revisions according to the project’s dependency policy when preparing the real workflow. The example uses a documented major action reference as readable teaching syntax, not a claim that major tags are immutable. Maintain permissions narrowly and never print secrets as a debugging shortcut.</p>"
+      },
+      {
+        "title": "Keep random reliability deterministic enough to diagnose",
+        "html": "<p>The fixed-seed regression suite should always report its seed and multiplier configuration. The32-seed reliability suite uses a stored seed list so a failure can be repeated locally. Avoid replacing the seed list with a new wall-clock random value on every CI run: that creates a moving target before you have characterized the failure.</p><p>Long-running soak tests may run in a separate scheduled or manually triggered job, but their results still belong to release evidence. Do not remove a slow required gate silently because it lengthens pull-request checks. State which tests run on each change and which must pass before a release candidate is accepted.</p>"
+      },
+      {
+        "title": "Read the first failure and reproduce it",
+        "html": "<p>A pipeline log is another compiler/test transcript. Read the earliest relevant error, identify OS/toolchain/test/seed, and run the same command locally where possible. If a Windows path test fails while Linux passes, check path assumptions before altering physics. If a clippy warning appears only on a newer toolchain, decide whether to fix it or pin the toolchain intentionally.</p><p>The workflow does not prove60FPS on an i3 or visual alignment with approved references. Store those raw target-hardware reports and capture conditions alongside the candidate revision. Automated and manual evidence can complement each other without pretending they are interchangeable. No workflow is uploaded or run by this lesson until you commit and explicitly use the repository’s CI process.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Create .github/workflows/check.yml at the repository root after agreeing the CI plan. This example is a complete workflow, not a command to run inside Rust.",
+      "language": "yaml",
+      "code": "name: Rust checks\non:\n  pull_request:\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n  headless:\n    strategy:\n      fail-fast: false\n      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n    runs-on: ${{ matrix.os }}\n    defaults:\n      run:\n        working-directory: game\n    steps:\n      - uses: actions/checkout@v4\n      - name: Select Rust tools\n        run: |\n          rustup toolchain install stable --profile minimal --component rustfmt --component clippy\n          rustup default stable\n      - name: Formatting\n        run: cargo fmt --all -- --check\n      - name: Compile\n        run: cargo check --locked --all-targets\n      - name: Lints\n        run: cargo clippy --locked --all-targets -- -D warnings\n      - name: Headless tests\n        run: cargo test --locked --lib",
+      "explanation": [
+        "The working-directory is game because Cargo.toml belongs to the learner-created package, not the course root.",
+        "--locked rejects unintended lockfile changes in CI rather than silently resolving a different dependency graph.",
+        "The runner may need platform-native system libraries for the chosen backend; verify those requirements on actual runner failures instead of guessing a universal install command."
+      ],
+      "expected": "Three native headless jobs run the listed checks; graphics/performance reports remain separate evidence."
+    },
+    "exercises": [
+      {
+        "title": "Prove the red path",
+        "prompt": "Introduce a harmless formatting deviation on a temporary local edit.",
+        "hint": "A useful gate must fail when its contract is broken.",
+        "solution": "<p>cargo fmt --all -- --check exits nonzero. Run cargo fmt to repair the source and rerun the check. Do not commit the deliberate error.</p>",
+        "proof": "You observe both failure and repair using the same command as CI."
+      },
+      {
+        "title": "Reproduce a random failure",
+        "prompt": "A log reports seed17 and multiplier32. What must your local command reproduce?",
+        "hint": "Both the fixture and schedule matter.",
+        "solution": "<p>Run the same fixture with seed17, multiplier32, initial state and relevant input sequence. Matching only the terrain seed is insufficient if the tick sequence differs.</p>",
+        "proof": "The local failure is the same counterexample."
+      },
+      {
+        "title": "Separate platform evidence",
+        "prompt": "All cloud jobs pass. Can the release claim minimum i3 support now?",
+        "hint": "The runner is not the floor machine.",
+        "solution": "<p>No. Record an actual floor-machine run at the specified active count/resolution, graphics startup and frame-time conditions. CI proves the contracts it executed, not unexecuted hardware behavior.</p>",
+        "proof": "The release report names each claim and its evidence source."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "CI cannot find Cargo.toml",
+        "cause": "Commands run from repository root instead of game/.",
+        "fix": "Set the working directory or use the manifest path consistently."
+      },
+      {
+        "symptom": "Tests try to open a window",
+        "cause": "Graphical startup leaked into the headless test target.",
+        "fix": "Keep simulation in a library and explicitly test that target."
+      },
+      {
+        "symptom": "A green job hides skipped reliability tests",
+        "cause": "The job runs a smaller suite than release acceptance.",
+        "fix": "List and verify actual test selection in logs and release gates."
+      }
+    ],
+    "episode": {
+      "hook": "The game passes on your Mac. Now ask three clean machines the same questions.",
+      "beats": [
+        "Separate headless and graphical evidence",
+        "Build the OS matrix",
+        "Run exact local commands",
+        "Reproduce a seeded failure",
+        "Connect CI to release gates"
+      ],
+      "demo": "Show one deliberate failed gate and the repaired three-platform run.",
+      "recap": "CI repeats explicit checks; it does not certify claims it never exercised."
+    },
+    "sources": [
+      {
+        "label": "GitHub matrix jobs",
+        "url": "https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/run-job-variations"
+      },
+      {
+        "label": "cargo test",
+        "url": "https://doc.rust-lang.org/cargo/commands/cargo-test.html"
+      },
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "98": {
+    "outcome": "Prepare native game packages containing the executable, assets and licences, and prove they launch outside the source checkout.",
+    "why": "cargo run is a development convenience. A player should not need Cargo, your repository layout or your current working directory to find a sound file and start a world.",
+    "sections": [
+      {
+        "title": "Distinguish building from distributing",
+        "html": "<p>From game/, cargo build --locked --release --bin game creates the optimized native executable for the host target, assuming the package binary is named game. On macOS/Linux it normally appears at target/release/game; on Windows it is game.exe. If the package has another binary name or a configured target directory, use that actual output rather than copying a nonexistent assumed path.</p><p>cargo package is different: it creates a source crate archive for Cargo distribution. It does not assemble an end-user desktop application. A native desktop package also needs the runtime resources, notices and any non-system dynamic dependencies selected by your backend. Test on a machine without the source tree to discover assumptions that a developer’s environment hides.</p>"
+      },
+      {
+        "title": "Choose an explicit package layout",
+        "html": "<p>For a first Linux or Windows portable build, use a folder containing game or game.exe, assets/, LICENSE and THIRD-PARTY-NOTICES.txt. On macOS, a conventional app bundle places the binary under Rusty.app/Contents/MacOS/game and resources under Contents/Resources/assets, with Contents/Info.plist identifying the executable and bundle. Use your chosen actual application identifier and version before signing; the product name is still a proposal.</p><p>On macOS the folder creation/copy sequence can begin with mkdir -p dist/Rusty.app/Contents/MacOS dist/Rusty.app/Contents/Resources, cp target/release/game dist/Rusty.app/Contents/MacOS/game, and cp -R assets dist/Rusty.app/Contents/Resources/assets. These commands assume game/assets already contains the licensed runtime assets, not the HTML course assets at repository root. Add the property list and notices before calling the bundle complete.</p>"
+      },
+      {
+        "title": "Resolve resources relative to a known installation root",
+        "html": "<p>A relative path such as assets/rain.wav is interpreted relative to the process working directory. Launching from Finder or a shortcut may choose a different directory than cargo run. Use an explicit runtime resource root appropriate to the selected package layout, and pass the resulting paths into loaders. The worked function derives a root from an executable path for the two layouts above.</p><p>current_exe can fail and has platform-specific behavior, so propagate its Result. A macOS signed/distributed bundle may need platform bundle-resource lookup or a documented robust equivalent for its deployment environment; verify that during the native packaging check. Saves and preferences belong in a writable user-data location, not inside a potentially read-only app bundle.</p>"
+      },
+      {
+        "title": "Validate on the intended platform and channel",
+        "html": "<p>Build and test each native artifact on its OS first. Cross-compiling Rust code does not by itself supply every linker, SDK and runtime dependency. Record CPU architecture, OS version and binary target; an Apple-silicon artifact is not automatically an Intel Mac artifact. Recheck signing/notarization/store requirements against the actual distribution channel before release.</p><p>For each package, copy it to a clean test directory, launch without the repository as the working directory, paint, hear or gracefully disable sound, save, quit and reload. Inspect linked-library dependencies with available native tools and verify licence files. Keep a checksummed artifact manifest so the package reviewed is the package eventually distributed. This lesson prepares local artifacts; it does not upload or publish them.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete path-layout experiment: examples/lesson_098.rs; run cargo run --example lesson_098. Integrate the helper into the chosen native layout, not the Cargo examples directory.",
+      "language": "rust",
+      "code": "use std::path::{Path,PathBuf};\nfn asset_root(executable:&Path,mac_bundle:bool)->Result<PathBuf,String> {\n    let parent=executable.parent().ok_or(\"executable has no parent\")?;\n    if mac_bundle {\n        let contents=parent.parent().ok_or(\"missing Contents directory\")?;\n        Ok(contents.join(\"Resources\").join(\"assets\"))\n    } else { Ok(parent.join(\"assets\")) }\n}\nfn main() {\n    let flat=asset_root(Path::new(\"dist/rusty-linux/game\"),false).unwrap();\n    let app=asset_root(Path::new(\"dist/Rusty.app/Contents/MacOS/game\"),true).unwrap();\n    assert_eq!(flat,PathBuf::from(\"dist/rusty-linux/assets\"));\n    assert_eq!(app,PathBuf::from(\"dist/Rusty.app/Contents/Resources/assets\"));\n    println!(\"flat: {}\",flat.display());\n    println!(\"app: {}\",app.display());\n}",
+      "explanation": [
+        "PathBuf preserves path components without manually concatenating slash strings.",
+        "The function is a layout contract, not a filesystem existence check. Validate required resources and recover from missing ones separately.",
+        "The sample executable paths are fixtures. Production obtains and validates its actual runtime location."
+      ],
+      "expected": "Two asset paths print, matching the flat portable folder and macOS bundle resource layout."
+    },
+    "exercises": [
+      {
+        "title": "Break the working directory assumption",
+        "prompt": "Launch a packaged build from a different directory.",
+        "hint": "Do not copy the source checkout into the test folder.",
+        "solution": "<p>A loader based only on assets/rain.wav may fail. The resource-root implementation should still resolve the bundled clip. Verify both launch and actual playback, since the audio feature and asset presence are separate requirements.</p>",
+        "proof": "No resource path depends on the developer’s current directory."
+      },
+      {
+        "title": "Inspect the package inventory",
+        "prompt": "List files in the native package and compare with runtime lookups.",
+        "hint": "An unused source directory is not a required runtime resource.",
+        "solution": "<p>Include the executable, referenced assets, licence/notice files and required non-system libraries. Exclude build caches and personal saves. Every loader path should resolve inside the selected resource root or an intentional user-data root.</p>",
+        "proof": "The inventory contains all used assets and no accidental private world data."
+      },
+      {
+        "title": "Test a fresh save location",
+        "prompt": "Run the package from a read-only installation folder.",
+        "hint": "Writable user data is not application resources.",
+        "solution": "<p>The game should create and recover saves in its documented writable user location. If it tries writing inside Contents/Resources or next to the executable, change the data-root policy before release.</p>",
+        "proof": "Saving works without modifying the installed package."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Works with cargo run but not double-click",
+        "cause": "Resources are relative to the checkout working directory.",
+        "fix": "Use and test an explicit package resource root."
+      },
+      {
+        "symptom": "Package runs only on the build Mac",
+        "cause": "Architecture/OS/runtime dependencies were not recorded.",
+        "fix": "Build and smoke-test native artifacts for each claimed target."
+      },
+      {
+        "symptom": "Users cannot save after installation",
+        "cause": "Save paths point inside a read-only app location.",
+        "fix": "Separate writable user data from bundled read-only resources."
+      }
+    ],
+    "episode": {
+      "hook": "Close your source folder. Can another person launch the game you actually shipped?",
+      "beats": [
+        "Build the native release binary",
+        "Assemble an explicit layout",
+        "Resolve resource paths",
+        "Test outside the checkout",
+        "Inspect platform/channel requirements"
+      ],
+      "demo": "Launch a copied package from a clean folder and create, save and reload one tiny world.",
+      "recap": "A distributable includes its runtime assumptions and proves them on a clean launch."
+    },
+    "sources": [
+      {
+        "label": "Cargo build options",
+        "url": "https://doc.rust-lang.org/cargo/commands/cargo-build.html"
+      },
+      {
+        "label": "Native macOS bundle structure",
+        "url": "https://developer.apple.com/library/archive/documentation/CoreFoundation/Conceptual/CFBundles/BundleTypes/BundleTypes.html"
+      },
+      {
+        "label": "Executable path lookup",
+        "url": "https://doc.rust-lang.org/std/env/fn.current_exe.html"
+      },
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      }
+    ]
+  },
+  "99": {
+    "outcome": "Write a concise player-facing quick start and observe whether a new player can perform the core loop without coaching.",
+    "why": "The project promises a world whose cause and effect can be seen without a manual. A manual can support recovery and controls, but it cannot compensate for an unreadable brush selection or invisible save failure.",
+    "sections": [
+      {
+        "title": "Write for actions the player wants to take",
+        "html": "<p>Begin the quick start with one observable loop: choose a material, paint it, stop interacting and watch it respond. Then name the controls for erase, brush size, pan, pause, speed and material/tool pages. Use the actual final bindings from the approved settings rather than copying early proposals that have since changed.</p><p>Keep recovery and limitations easy to find. Explain where worlds are saved, how autosave/manual saves behave, how to select a backup and what an unsupported-version message means. State the frozen off-screen rule and the fast-forward approximation plainly; hiding them produces confusing expectations about a house left alone for a season.</p>"
+      },
+      {
+        "title": "Test discoverability before showing the manual",
+        "html": "<p>Give a fresh consenting tester the packaged build and a small task sheet. Ask them to place sand, make a water pool, pause, change a material page, save and reload. Do not explain the controls first: that would measure how well they follow your coaching rather than what the interface communicates. Ask them to think aloud only if comfortable.</p><p>Record task success, wrong turns and the exact feedback missing at each point. Avoid collecting personal data or publishing a recording without permission. The useful artifact is an actionable observation such as tester painted behind the material bar or could not tell that speed was physics-limited, not a judgement about the tester’s ability.</p>"
+      },
+      {
+        "title": "Separate interface repair from documentation repair",
+        "html": "<p>If selecting a swatch does not visibly change selection, improve the selection indicator. If saving fails silently, add a clear recoverable message. A paragraph in README explaining these hidden states is not a substitute. Documentation is appropriate for less discoverable but important facts such as backup layout or supported hardware.</p><p>Check text at actual physical size and multiple UI scales. Verify that UI scaling does not alter the world-cell footprint. Test mute and rebind/conflict handling if adopted. A no-flash option needs an implementation/approval decision; if offered, it must alter lightning/explosion presentation without removing the simulation event or its audible/other feedback unexpectedly.</p>"
+      },
+      {
+        "title": "Create a reusable observation record",
+        "html": "<p>A compact record includes task, expected observable outcome, actual behavior, time or attempts, and a reproducible issue. Distinguish completion from understanding: a tester may accidentally discover a shortcut without knowing the selected material, so ask them to repeat the action deliberately.</p><p>For the YouTube series, demonstrate one concrete usability fix before and after. Show the original confusion, the interface change and the repeated task result, with the tester’s permission where relevant. This teaches why software feedback matters while keeping the game’s release documentation small and useful rather than turning it into a textbook the player must read.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Create QUICKSTART.md in the future game package. This is a complete starting manual to adapt to the approved final controls, not a command to execute.",
+      "language": "markdown",
+      "code": "# Rusty quick start\n\nChoose a material in the bottom bar, paint, then watch the world respond.\n\n| Action | Default control |\n| --- | --- |\n| Paint / use selected tool | Left mouse button |\n| Erase | Right mouse button |\n| Paint only empty cells | Alt + left mouse button |\n| Brush size | Mouse wheel or [ and ] |\n| Select slot | 1–9, then 0 |\n| Change bar page | Q / E |\n| Pan | Middle drag or WASD |\n| Pause / resume | Space |\n| Slower / faster | , and . |\n| Undo eligible paint edits | Ctrl+Z or Cmd+Z |\n| Save / load | F5 / F9 |\n| Hide material bar | Tab |\n| Mute | M |\n| Settings | Escape |\n\nOnly the active view and its margin are simulated; off-screen material freezes.\nFast-forward may advance seasons faster than physical motion when limited.\nUndo is a local revert: cells changed by the simulation may be skipped.\n\nFind the current world's save location and backup/recovery actions in Settings.\nKeep a copy of the world folder before manual recovery or migration.\nIf loading reports an unsupported version, preserve the files and use a\ncompatible build; do not delete the world to make the error disappear.\n\nIf a save fails, keep the game open and use the shown recovery choices before\nquitting. Report the game version, OS and the visible error when asking for help.",
+      "explanation": [
+        "The control table comes from the current design and must be reconciled with the final implemented/rebound controls.",
+        "The proposed Settings save-location/recovery entry must exist before this text can claim it; otherwise document the actual implemented path clearly.",
+        "The manual names important approximations without dumping engine internals into normal play."
+      ],
+      "expected": "A player can locate every core action and the real recovery path; the fresh-tester exercise establishes discoverability separately."
+    },
+    "exercises": [
+      {
+        "title": "Observe one uncoached task",
+        "prompt": "Ask a tester to select wood, paint a small shelter and pause.",
+        "hint": "Do not announce the shortcut before they try.",
+        "solution": "<p>Record whether selection is visible, whether painting hits the intended cells and whether pause state is obvious. Turn each failure into one reproducible issue with an observed outcome and desired feedback.</p>",
+        "proof": "The report describes interface behavior, not the tester’s intelligence."
+      },
+      {
+        "title": "Remove an implementation detail",
+        "prompt": "Find one manual sentence that only explains internal storage rather than a player decision.",
+        "hint": "Ask whether the player can act differently because of it.",
+        "solution": "<p>A sentence about chunk hash-map layout can be removed. A sentence explaining that off-screen houses stop aging should stay, because it changes what a player expects after panning away.</p>",
+        "proof": "The manual is shorter without hiding a meaningful limitation."
+      },
+      {
+        "title": "Test reduced-flash presentation",
+        "prompt": "If a no-flash setting is adopted, trigger lightning with it on.",
+        "hint": "Physics and decoration must stay separable.",
+        "solution": "<p>The target cell still receives the approved heat/ignition effect. The visual flash follows the reduced-flash policy, and other feedback keeps the event understandable. Compare the world result between modes.</p>",
+        "proof": "The preference does not secretly disable gameplay reactions."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Tester needs repeated coaching",
+        "cause": "Core controls or feedback are not discoverable.",
+        "fix": "Fix the interface and repeat the same task before adding manual paragraphs."
+      },
+      {
+        "symptom": "Manual controls disagree with the build",
+        "cause": "The table was copied from an older proposal.",
+        "fix": "Generate or review bindings against the actual final configuration."
+      },
+      {
+        "symptom": "Accessibility setting changes physics",
+        "cause": "Presentation and simulation events share one boolean path.",
+        "fix": "Route the same world event through separate presentation preferences."
+      }
+    ],
+    "episode": {
+      "hook": "Can someone who has never seen your code build a shelter and recover a save?",
+      "beats": [
+        "Write the one-minute quick start",
+        "Observe a task without coaching",
+        "Separate UI fixes from manual fixes",
+        "Check scaling/mute/flash decisions",
+        "Repeat the task after repair"
+      ],
+      "demo": "Show one confusing interface state, its fix and a successful uncoached retry.",
+      "recap": "Documentation supports the game; readable feedback makes the core loop self-explanatory."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Art and UI decisions",
+        "url": "../docs/superpowers/specs/2026-11-06-art-style.md"
+      }
+    ]
+  },
+  "100": {
+    "outcome": "Assemble a release candidate with explicit evidence, reproducible artifacts and a clean starting point for the next episode.",
+    "why": "Finishing the course should leave a game you can explain, rebuild and recover—not merely a development binary that happened to launch once. Release readiness is the intersection of several independently proven promises.",
+    "sections": [
+      {
+        "title": "Freeze a candidate before collecting evidence",
+        "html": "<p>Choose a candidate revision and build all reviewed artifacts from that revision and its lockfile. Record the Rust toolchain, native targets, generator/save versions and approved asset set. If a bug fix changes source afterward, identify which checks it invalidates and rebuild the affected artifacts rather than attaching old evidence to a new executable.</p><p>Keep the working tree status visible in the release report. A clean revision makes the YouTube series reproducible: viewers need to know which commit starts an episode and which commit contains its result. Do not silently rely on ignored local assets, hand-edited saves or personal settings that a fresh checkout cannot recreate.</p>"
+      },
+      {
+        "title": "Use gates as claims with evidence",
+        "html": "<p>List the M0–M7 outcomes and link their reports: target-load timing, water/heat deadlines, shelter/fire/support behavior, ecological year and32-seed results, generated-terrain rest, memory panning, save recovery, approved visuals, native packages and usability. A checkbox without a linked observation is a reminder, not proof.</p><p>The sample gate evaluator below deliberately fails when any required row is false. Real automation should also distinguish failed from not-run; an absent report is not a pass. Accepted limitations belong beside the affected gate, such as a scoped support-cap rule, not in a hidden footnote that contradicts the headline feature.</p>"
+      },
+      {
+        "title": "Identify the exact package being reviewed",
+        "html": "<p>Compute checksums for candidate archives and retain a small manifest containing filename, target, version, size and digest. On macOS shasum -a256 followed by the actual archive path prints a SHA-256 digest. Windows can use Get-FileHash -Algorithm SHA256 with the actual path. Hashes identify bytes; they do not establish safety or correctness by themselves.</p><p>A signing/notarization step may modify the artifact, so compute the final distribution checksum after the final approved packaging/signing operation. Do not reuse a checksum from an unsigned earlier zip. Test the same final package through fresh installation, save creation, quit, restart and backup recovery.</p>"
+      },
+      {
+        "title": "Prepare publication without performing it automatically",
+        "html": "<p>Write a changelog that says what the player can now do and names known limitations. Prepare the release tag name, artifacts and notes for review. Publishing, pushing a tag, uploading to a store or contacting communities is a separate explicit action; this course prepares the reviewable result rather than assuming that distribution is authorized.</p><p>End the series episode by showing the raw game, the evidence behind its important claims and the next clean starting revision. Ask yourself to implement one small change from memory and explain the ownership/update path it touches. That is the learning outcome that distinguishes building this game from merely collecting generated source files.</p>"
+      }
+    ],
+    "worked": {
+      "label": "Complete release-gate experiment: examples/lesson_100.rs; run cargo run --example lesson_100. Replace sample booleans with actual report results in your release tooling.",
+      "language": "rust",
+      "code": "struct Gate { name: &'static str, passed: bool }\nfn ready(gates:&[Gate])->Result<(),Vec<&'static str>> {\n    let failures:Vec<_>=gates.iter().filter(|g|!g.passed).map(|g|g.name).collect();\n    if failures.is_empty() { Ok(()) } else { Err(failures) }\n}\nfn main() {\n    let gates=[Gate{name:\"headless regression\",passed:true},\n        Gate{name:\"floor-machine frame times\",passed:false},\n        Gate{name:\"native package smoke tests\",passed:true},\n        Gate{name:\"complete-save recovery\",passed:true}];\n    match ready(&gates) {\n        Ok(())=>println!(\"candidate ready for explicit publication review\"),\n        Err(missing)=>println!(\"release blocked: {}\",missing.join(\", \")),\n    }\n}",
+      "explanation": [
+        "This experiment does not publish, tag, upload or run external checks. It demonstrates how a readiness claim follows its required evidence.",
+        "A production report should represent not-run distinctly from false, retain report paths and bind results to the candidate revision.",
+        "Required gates cannot be made optional just to turn the final message green; any scope change needs an explicit updated requirement."
+      ],
+      "expected": "release blocked: floor-machine frame times"
+    },
+    "exercises": [
+      {
+        "title": "Make a missing report visible",
+        "prompt": "Add a visual-approval gate that has never run.",
+        "hint": "Not-run is not the same as passed.",
+        "solution": "<p>Represent it as Pending in a richer enum, or false with an explicit not-run reason in this small model. It must appear among release blockers until the comparison assets, conditions and approval actually exist.</p>",
+        "proof": "A candidate cannot claim approval from an absent report."
+      },
+      {
+        "title": "Change source after checking",
+        "prompt": "Fix one release bug after generating package hashes. What must be repeated?",
+        "hint": "Evidence refers to a revision and bytes.",
+        "solution": "<p>Rebuild the affected artifacts, rerun relevant gates, run final smoke tests and recompute hashes after final packaging/signing. Preserve the earlier report as history rather than relabelling it as the new result.</p>",
+        "proof": "The manifest and reports identify the same final candidate."
+      },
+      {
+        "title": "Explain one feature unaided",
+        "prompt": "Choose a falling, fire, save or undo fixture and change one rule from memory.",
+        "hint": "Trace the state owner, mutation boundary and proving test.",
+        "solution": "<p>For example, change the teaching fall limit from three to two cells, update the displacement assertion and explain why the moved marker still prevents a second update. If you cannot derive the consequence, revisit that lesson before claiming mastery.</p>",
+        "proof": "You predict, implement and verify a change without copying a complete solution."
+      }
+    ],
+    "troubleshooting": [
+      {
+        "symptom": "Release notes claim a failed feature",
+        "cause": "The readiness list is detached from acceptance evidence.",
+        "fix": "Link each claim to its actual passing report or state the limitation."
+      },
+      {
+        "symptom": "Users report a different package than tested",
+        "cause": "Artifacts were rebuilt or modified after checksums/smoke tests.",
+        "fix": "Bind revision, final bytes and final test results in one manifest."
+      },
+      {
+        "symptom": "The next episode cannot reproduce the world",
+        "cause": "Uncommitted source/assets or hidden local state were required.",
+        "fix": "Document the starting revision and deterministic fixture inputs before recording."
+      }
+    ],
+    "episode": {
+      "hook": "The final button is not Publish. First show why this exact build is ready.",
+      "beats": [
+        "Freeze the candidate",
+        "Collect M0–M7 evidence",
+        "Hash final artifacts",
+        "Perform fresh-install and recovery checks",
+        "Prepare publication review and the next revision"
+      ],
+      "demo": "Show one intentionally failing gate blocking readiness, then the actual evidence needed to clear it.",
+      "recap": "A finished game has reproducible behavior, recoverable state and honest release claims."
+    },
+    "sources": [
+      {
+        "label": "Game design: local contracts",
+        "url": "../docs/superpowers/specs/2026-11-06-game-design.md"
+      },
+      {
+        "label": "Cargo lockfile role",
+        "url": "https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html"
+      },
+      {
+        "label": "Cargo release profiles",
+        "url": "https://doc.rust-lang.org/cargo/reference/profiles.html"
+      }
+    ]
+  }
+}

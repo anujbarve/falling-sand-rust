@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="negative-chunks-title negative-chunks-desc">
+  <title id="negative-chunks-title">Negative positions still belong to a chunk</title>
+  <desc id="negative-chunks-desc">With chunk width 64, world x=-1 belongs to chunk -1 at local x=63. Euclidean division gives local coordinates from 0 through 63.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Negative positions still belong to a chunk</text>
+  <rect x="55" y="132" width="400" height="110" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="255.0" y="184.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">chunk −1</text>
+  <text x="255.0" y="213.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">world x: −64 through −1</text>
+  <rect x="455" y="132" width="400" height="110" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="655.0" y="184.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">chunk 0</text>
+  <text x="655.0" y="213.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">world x: 0 through 63</text>
+  <line x1="455" y1="105" x2="455" y2="280" stroke="#28755b" stroke-width="3" />
+  <rect x="435" y="132" width="20" height="110" fill="#28755b" stroke="none" stroke-width="1" rx="0" />
+  <text x="445" y="101" fill="#28755b" font-family="Arial, sans-serif" font-size="18" text-anchor="middle">x = −1</text>
+  <text x="255" y="293" fill="#28755b" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">−1 = (−1 × 64) + 63</text>
+  <text x="655" y="293" fill="#61736c" font-family="Arial, sans-serif" font-size="20" text-anchor="middle">local x remains nonnegative</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">Use div_euclid(64) for the chunk and rem_euclid(64) for the local position.</text>
+</svg>

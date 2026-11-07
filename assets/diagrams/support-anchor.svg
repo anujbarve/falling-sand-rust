@@ -1,0 +1,29 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="support-anchor-title support-anchor-desc">
+  <title id="support-anchor-title">A group needs support outside itself</title>
+  <desc id="support-anchor-desc">Adjacent rigid cells form one connected group. Their internal contacts are not external support. A grounded column can anchor the group, while an identical floating row falls.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">A group needs support outside itself</text>
+  <text x="240" y="100" fill="#28755b" font-family="Arial, sans-serif" font-size="19" text-anchor="middle">SUPPORTED</text>
+  <text x="710" y="100" fill="#61736c" font-family="Arial, sans-serif" font-size="19" text-anchor="middle">FLOATING</text>
+  <rect x="100" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="150" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="200" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="250" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="300" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="100" y="190" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="100" y="235" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="100" y="280" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="65" y="325" width="335" height="15" fill="#243b35" stroke="none" stroke-width="1" rx="0" />
+  <line x1="125" y1="312" x2="125" y2="333" stroke="#28755b" stroke-width="3" />
+  <polygon points="125,333 120.21537912477646,323.0950818741206 129.78462087522354,323.0950818741206" fill="#28755b" />
+  <rect x="570" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="620" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="670" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="720" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <rect x="770" y="145" width="50" height="45" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <line x1="695" y1="208" x2="695" y2="285" stroke="#28755b" stroke-width="3" />
+  <polygon points="695,285 690.2153791247765,275.0950818741206 699.7846208752235,275.0950818741206" fill="#28755b" />
+  <text x="695" y="321" fill="#61736c" font-family="Arial, sans-serif" font-size="20" text-anchor="middle">No outside anchor</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">Internal neighbours cannot support one another in a circle. Search-cap exceptions are explicit approximations.</text>
+</svg>

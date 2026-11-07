@@ -1,0 +1,37 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="row-major-index-title row-major-index-desc">
+  <title id="row-major-index-title">A two-dimensional grid in one vector</title>
+  <desc id="row-major-index-desc">For a four-column grid, row-major indexing assigns index = row × 4 + column. The highlighted cell at column 2, row 1 therefore has index 6.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">A two-dimensional grid in one vector</text>
+  <rect x="60" y="100" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="92.5" y="139" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">0</text>
+  <rect x="125" y="100" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="157.5" y="139" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">1</text>
+  <rect x="190" y="100" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="222.5" y="139" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">2</text>
+  <rect x="255" y="100" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="287.5" y="139" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">3</text>
+  <rect x="60" y="165" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="92.5" y="204" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">4</text>
+  <rect x="125" y="165" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="157.5" y="204" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">5</text>
+  <rect x="190" y="165" width="65" height="65" fill="#28755b" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="222.5" y="204" fill="#ffffff" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">6</text>
+  <rect x="255" y="165" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="287.5" y="204" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">7</text>
+  <rect x="60" y="230" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="92.5" y="269" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">8</text>
+  <rect x="125" y="230" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="157.5" y="269" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">9</text>
+  <rect x="190" y="230" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="222.5" y="269" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">10</text>
+  <rect x="255" y="230" width="65" height="65" fill="#ffffff" stroke="#aabbb0" stroke-width="1" rx="0" />
+  <text x="287.5" y="269" fill="#243b35" font-family="Arial, sans-serif" font-size="23" text-anchor="middle">11</text>
+  <line x1="360" y1="195" x2="470" y2="195" stroke="#28755b" stroke-width="3" />
+  <polygon points="470,195 460.0950818741206,199.78462087522354 460.0950818741206,190.21537912477646" fill="#28755b" />
+  <rect x="495" y="130" width="400" height="125" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="695.0" y="189.5" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">index = 1 × 4 + 2</text>
+  <text x="695.0" y="218.5" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">index = 6</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">Check row and column bounds before calculating the index or converting signed coordinates.</text>
+</svg>

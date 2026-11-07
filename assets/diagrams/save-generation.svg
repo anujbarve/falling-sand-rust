@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="400" viewBox="0 0 960 400" role="img" aria-labelledby="save-generation-title save-generation-desc">
+  <title id="save-generation-title">Commit the pointer after the snapshot is complete</title>
+  <desc id="save-generation-desc">Write a coherent new generation of region files first. Only after its files are complete does the committed manifest select that generation. A crash before commitment leaves the old generation selected.</desc>
+  <rect x="0" y="0" width="960" height="400" fill="#f5f3eb" stroke="none" stroke-width="1" rx="0" />
+  <text x="32" y="38" fill="#243b35" font-family="Arial, sans-serif" font-size="25" text-anchor="start">Commit the pointer after the snapshot is complete</text>
+  <rect x="35" y="95" width="240" height="82" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="155.0" y="133.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">generation A</text>
+  <text x="155.0" y="162.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">current complete save</text>
+  <rect x="35" y="235" width="240" height="82" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="155.0" y="273.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">generation B</text>
+  <text x="155.0" y="302.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">write complete region files</text>
+  <rect x="400" y="160" width="220" height="86" fill="#e1eae1" stroke="#aabbb0" stroke-width="1" rx="5" />
+  <text x="510.0" y="200.0" fill="#243b35" font-family="Arial, sans-serif" font-size="21" text-anchor="middle">manifest</text>
+  <text x="510.0" y="229.0" fill="#61736c" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">selected generation</text>
+  <line x1="400" y1="184" x2="275" y2="136" stroke="#28755b" stroke-width="3" />
+  <polygon points="275,136 285.9618010728653,135.08407574607415 282.5314329323737,144.01732611193762" fill="#28755b" />
+  <text x="296" y="145" fill="#61736c" font-family="Arial, sans-serif" font-size="15" text-anchor="start">before</text>
+  <line x1="400" y1="221" x2="275" y2="276" stroke="#aabbb0" stroke-width="2" stroke-dasharray="4 4" />
+  <text x="316" y="276" fill="#28755b" font-family="Arial, sans-serif" font-size="15" text-anchor="start">after commit</text>
+  <text x="670" y="151" fill="#243b35" font-family="Arial, sans-serif" font-size="20" text-anchor="start">1. Finish B’s files.</text>
+  <text x="670" y="212" fill="#243b35" font-family="Arial, sans-serif" font-size="20" text-anchor="start">2. Commit manifest → B.</text>
+  <text x="670" y="273" fill="#243b35" font-family="Arial, sans-serif" font-size="20" text-anchor="start">3. Retain recoverable A.</text>
+  <text x="32" y="370" fill="#61736c" font-family="Arial, sans-serif" font-size="17" text-anchor="start">One writer prevents concurrent writes; a committed generation prevents mixed-tick or mixed-file saves.</text>
+</svg>
